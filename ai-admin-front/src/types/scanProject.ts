@@ -129,6 +129,30 @@ export interface ScanProjectBlockers {
   agents: { id: string; name: string }[]
 }
 
+/** GET tools 返回的敏感扫描摘要（来自 scan_project_tool.sensitive_data_json） */
+export interface ScanToolSensitiveData {
+  types: string[]
+  summary?: string | null
+  scannedAt?: string | null
+  modelName?: string | null
+}
+
+export type SensitiveScanTaskStage = 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'
+
+export interface SensitiveScanTask {
+  taskId: string
+  projectId: number
+  stage: SensitiveScanTaskStage
+  totalSteps: number
+  completedSteps: number
+  failedCount: number
+  currentStep: string | null
+  errorMessage: string | null
+  totalTokens: number
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 export interface ProjectToolInfo extends ToolInfo {
   /** 扫描表 scan_project_tool.id，编辑/测试/语义生成/添加为 Tool 均依赖此字段 */
   scanToolId: number
@@ -143,6 +167,7 @@ export interface ProjectToolInfo extends ToolInfo {
   globalToolName?: string | null
   /** 扫描行与全局 Tool 在可同步字段上是否不一致（需「更新到Tool」） */
   globalToolOutOfSync?: boolean
+  sensitiveData?: ScanToolSensitiveData | null
 }
 
 /** POST .../promote-to-tool 响应 */

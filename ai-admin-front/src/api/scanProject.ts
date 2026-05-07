@@ -9,8 +9,10 @@ import type {
   ScanProjectScanResult,
   ScanProjectUpsertRequest,
   ScanSettings,
+  SensitiveScanTask,
 } from '@/types/scanProject'
 import type { ToolTestResult, ToolUpsertRequest } from '@/types/tool'
+import type { SemanticLlmParams } from '@/api/semanticDoc'
 
 export interface ScanDiffSummary {
   projectId: number
@@ -122,4 +124,31 @@ export function promoteScanModuleToolsToGlobal(projectId: number, moduleId: numb
   return agentRequest.post<BatchPromoteToToolsResult>(`/api/scan-projects/${projectId}/scan-tools/promote-by-module`, {
     moduleId,
   })
+}
+
+/** 与 AI 理解生成使用相同的 provider/model 查询参数 */
+function sensitiveScanLlmQuery(llm?: SemanticLlmParams): Record<string, string> {
+  const q: Record<string, string> = {}
+  const p = llm?.provider?.trim()
+  const m = llm?.model?.trim()
+  if (p) q.provider = p
+  if (m) q.model = m
+  return q
+}
+
+/** 异步批量敏感数据扫描（HTTP 202） */
+export function startSensitiveDataScan(projectId: number, llm?: SemanticLlmParams) {
+  return agentRequest.post<{ taskId: string }>(
+    `/api/scan-projects/${projectId}/sensitive-data/scan`,
+    null,
+    { params: sensitiveScanLlmQuery(llm) },
+  )
+}
+
+/** 无进行中任务时响应体为 null */
+export function getSensitiveDataScanStatus(projectId: number, taskId?: string) {
+  return agentRequest.get<SensitiveScanTask | null>(
+    `/api/scan-projects/${projectId}/sensitive-data/status`,
+    { params: taskId ? { taskId } : {} },
+  )
 }

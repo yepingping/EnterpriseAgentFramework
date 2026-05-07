@@ -472,6 +472,12 @@ public class ScanProjectToolService {
         mapper.updateById(e);
     }
 
+    public void updateSensitiveDataJson(long scanToolId, String sensitiveDataJson) {
+        mapper.update(null, Wrappers.<ScanProjectToolEntity>lambdaUpdate()
+                .set(ScanProjectToolEntity::getSensitiveDataJson, sensitiveDataJson)
+                .eq(ScanProjectToolEntity::getId, scanToolId));
+    }
+
     private String allocateUniqueGlobalName(String base) {
         String candidate = base == null ? "tool" : base.trim();
         if (!StringUtils.hasText(candidate)) {

@@ -20,6 +20,10 @@ public class SemanticLlmClient {
 
     private static final String SYSTEM_PROMPT = "你是一名企业 AI Agent 架构文档助手，严格按照用户指定的 Markdown 结构输出。";
 
+    private static final String SENSITIVE_SYSTEM_PROMPT = """
+            你是一名企业 API 数据安全分析助手。你必须只输出一个合法的 JSON 对象，键仅包含 types 与 summary。
+            不要输出 Markdown、不要代码围栏、不要 JSON 以外的任何字符。""";
+
     private final ModelServiceClient modelServiceClient;
 
     @Value("${agentscope.model.name:qwen-max}")
@@ -51,6 +55,38 @@ public class SemanticLlmClient {
             result = modelServiceClient.chat(request);
         } catch (Exception ex) {
             log.error("[SemanticLlmClient] 调用 model-service 失败", ex);
+            throw new IllegalStateException("LLM 调用失败: " + ex.getMessage(), ex);
+        }
+        if (result == null || result.getData() == null || result.getData().getContent() == null) {
+            throw new IllegalStateException("LLM 返回内容为空: code=" + (result == null ? "null" : result.getCode()));
+        }
+        ModelChatData data = result.getData();
+        ModelUsage usage = data.getUsage();
+        int total = usage == null ? 0 : usage.getTotalTokens();
+        String modelName = data.getModel() == null ? modelToUse : data.getModel();
+        return new SemanticGenerationResult(data.getContent().trim(), modelName, total);
+    }
+
+    /**
+     * 敏感数据扫描：要求模型只输出 JSON（与 AI 理解使用相同的 provider/model 语义）。
+     */
+    public SemanticGenerationResult generateSensitiveScan(String userPrompt, String provider, String model) {
+        String modelToUse = (model == null || model.isBlank()) ? defaultModel : model.trim();
+        ModelChatRequest.ModelChatRequestBuilder b = ModelChatRequest.builder()
+                .model(modelToUse)
+                .messages(List.of(
+                        ModelChatRequest.ChatMessage.builder().role("system").content(SENSITIVE_SYSTEM_PROMPT).build(),
+                        ModelChatRequest.ChatMessage.builder().role("user").content(userPrompt).build()
+                ));
+        if (provider != null && !provider.isBlank()) {
+            b.provider(provider.trim());
+        }
+        ModelChatRequest request = b.build();
+        ModelChatResult result;
+        try {
+            result = modelServiceClient.chat(request);
+        } catch (Exception ex) {
+            log.error("[SemanticLlmClient] 敏感扫描调用 model-service 失败", ex);
             throw new IllegalStateException("LLM 调用失败: " + ex.getMessage(), ex);
         }
         if (result == null || result.getData() == null || result.getData().getContent() == null) {

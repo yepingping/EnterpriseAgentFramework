@@ -46,6 +46,9 @@ public class ScanProjectToolEntity {
 
     private String aiDescription;
 
+    /** LLM 敏感数据扫描结果 JSON，见 {@link com.enterprise.ai.agent.scan.sensitive.SensitiveDataStored} */
+    private String sensitiveDataJson;
+
     private Boolean enabled;
 
     private Boolean agentVisible;
