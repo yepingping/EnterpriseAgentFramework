@@ -25,6 +25,7 @@ public final class ScanProjectToolAdapter {
         e.setRequestBodyType(s.getRequestBodyType());
         e.setResponseType(s.getResponseType());
         e.setAiDescription(s.getAiDescription());
+        e.setCapabilityMetadataJson(s.getCapabilityMetadataJson());
         e.setProjectId(s.getProjectId());
         e.setModuleId(s.getModuleId());
         e.setEnabled(s.getEnabled());

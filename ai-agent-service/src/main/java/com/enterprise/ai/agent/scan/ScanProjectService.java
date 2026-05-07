@@ -284,9 +284,9 @@ public class ScanProjectService {
                 matched.getResponseType(),
                 null,
                 Boolean.TRUE.equals(st.getEnabled()),
-                Boolean.TRUE.equals(st.getAgentVisible()),
+                agentVisibleFromMetadata(matched.getCapabilityMetadata(), Boolean.TRUE.equals(st.getAgentVisible())),
                 Boolean.TRUE.equals(st.getLightweightEnabled())
-        );
+        ).withCapabilityMetadata(matched.getCapabilityMetadata());
         ScanProjectToolEntity updated = scanProjectToolService.update(projectId, scanToolId, upsert);
         scanModuleService.bootstrapFromTools(project.getId());
         return updated;
@@ -483,7 +483,8 @@ public class ScanProjectService {
                 parameter.getDescription(),
                 parameter.isRequired(),
                 parameter.getLocation(),
-                children
+                children,
+                parameter.getMetadata()
         );
     }
 
@@ -527,9 +528,9 @@ public class ScanProjectService {
                     tool.getResponseType(),
                     null,
                     df.isEnabled(),
-                    df.isAgentVisible(),
+                    agentVisibleFromMetadata(tool.getCapabilityMetadata(), df.isAgentVisible()),
                     df.isLightweightEnabled()
-            );
+            ).withCapabilityMetadata(tool.getCapabilityMetadata());
             if (merge) {
                 scanProjectToolService.upsertScanned(project.getId(), upsert);
             } else {
@@ -593,6 +594,22 @@ public class ScanProjectService {
             }
         }
         return true;
+    }
+
+    private boolean agentVisibleFromMetadata(Object metadata, boolean fallback) {
+        if (metadata instanceof java.util.Map<?, ?> map) {
+            Object raw = map.get("agentVisible");
+            if (raw instanceof Boolean bool) {
+                return bool;
+            }
+            if (raw != null) {
+                String text = String.valueOf(raw).trim();
+                if ("true".equalsIgnoreCase(text) || "false".equalsIgnoreCase(text)) {
+                    return Boolean.parseBoolean(text);
+                }
+            }
+        }
+        return fallback;
     }
 
     private String buildUniqueToolName(Long projectId, String projectName, String rawToolName, boolean useProjectPrefix) {

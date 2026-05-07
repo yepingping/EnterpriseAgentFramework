@@ -153,7 +153,8 @@ public class ToolController {
                 Boolean.TRUE.equals(entity.getAgentVisible()),
                 Boolean.TRUE.equals(entity.getLightweightEnabled()),
                 entity.getSideEffect(),
-                entity.getAiDescription()
+                entity.getAiDescription(),
+                entity.getCapabilityMetadataJson()
         );
     }
 
@@ -175,7 +176,8 @@ public class ToolController {
                        boolean agentVisible,
                        boolean lightweightEnabled,
                        String sideEffect,
-                       String aiDescription) {
+                       String aiDescription,
+                       String capabilityMetadataJson) {
     }
 
     record ToolParameterDTO(String name,
@@ -184,7 +186,8 @@ public class ToolController {
                             boolean required,
                             String location,
                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
-                            List<ToolParameterDTO> children) {
+                            List<ToolParameterDTO> children,
+                            Object metadata) {
         static ToolParameterDTO from(ToolDefinitionParameter parameter) {
             List<ToolDefinitionParameter> rawChildren = parameter.children();
             List<ToolParameterDTO> mappedChildren = rawChildren == null || rawChildren.isEmpty()
@@ -196,7 +199,8 @@ public class ToolController {
                     parameter.description(),
                     parameter.required(),
                     parameter.location(),
-                    mappedChildren
+                    mappedChildren,
+                    parameter.metadata()
             );
         }
     }

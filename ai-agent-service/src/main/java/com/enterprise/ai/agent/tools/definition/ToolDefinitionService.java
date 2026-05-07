@@ -452,6 +452,7 @@ public class ToolDefinitionService {
             desc = "（草稿）";
         }
         entity.setDescription(desc);
+        entity.setCapabilityMetadataJson(serializeCapabilityMetadata(request.capabilityMetadata()));
         entity.setParametersJson(serializeParameters(request.parameters()));
         entity.setSource(normalizeSource(request.source()));
         entity.setSourceLocation(request.sourceLocation());
@@ -672,6 +673,17 @@ public class ToolDefinitionService {
             return objectMapper.writeValueAsString(parameters == null ? List.of() : parameters);
         } catch (Exception ex) {
             throw new IllegalStateException("无法序列化工具参数", ex);
+        }
+    }
+
+    private String serializeCapabilityMetadata(Object metadata) {
+        if (metadata == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (Exception ex) {
+            throw new IllegalStateException("无法序列化能力声明元数据", ex);
         }
     }
 

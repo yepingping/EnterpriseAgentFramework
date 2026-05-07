@@ -46,6 +46,9 @@ public class ScanProjectToolEntity {
 
     private String aiDescription;
 
+    /** Java 侧 @AiCapability 声明的原始结构化元数据 JSON。 */
+    private String capabilityMetadataJson;
+
     private Boolean enabled;
 
     private Boolean agentVisible;

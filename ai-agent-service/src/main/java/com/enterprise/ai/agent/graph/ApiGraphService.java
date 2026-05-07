@@ -731,7 +731,9 @@ public class ApiGraphService {
         edge.setConfirmedAt(LocalDateTime.now());
         edge.setRejectReason(null);
         edge.setEnabled(Boolean.TRUE);
-        return repository.upsertEdge(edge);
+        ApiGraphEdgeEntity saved = repository.upsertEdge(edge);
+        syncParamHintsToToolDescription(projectId, saved);
+        return saved;
     }
 
     @Transactional
@@ -1053,6 +1055,54 @@ public class ApiGraphService {
                 sourceApi == null ? "" : sourceApi.getLabel(),
                 edge.getConfidence()
         );
+    }
+
+    private void syncParamHintsToToolDescription(Long projectId, ApiGraphEdgeEntity edge) {
+        try {
+            List<ApiGraphNodeEntity> nodes = repository.listNodesByProject(projectId);
+            Map<Long, ApiGraphNodeEntity> nodeById = nodes.stream()
+                    .collect(LinkedHashMap::new, (map, node) -> map.put(node.getId(), node), LinkedHashMap::putAll);
+            ApiGraphNodeEntity target = nodeById.get(edge.getTargetNodeId());
+            if (target == null || !ApiGraphNodeKind.FIELD_IN.equals(target.getKind())) {
+                return;
+            }
+            ApiGraphNodeEntity targetApi = nodeById.get(target.getRefId());
+            if (targetApi == null) {
+                return;
+            }
+            Object globalToolId = readJsonMap(targetApi.getPropsJson()).get("globalToolDefinitionId");
+            if (globalToolId == null) {
+                return;
+            }
+            Long id = Long.valueOf(String.valueOf(globalToolId));
+            Optional<ToolDefinitionEntity> tool = toolDefinitionService.findById(id);
+            if (tool.isEmpty()) {
+                return;
+            }
+            List<ParamSourceHint> hints = buildParamSourceHints(projectId, tool.get().getName());
+            if (hints.isEmpty()) {
+                return;
+            }
+            String base = stripParamHintSection(safeNonBlank(tool.get().getAiDescription(), tool.get().getDescription()));
+            String hintText = hints.stream()
+                    .limit(5)
+                    .map(hint -> "- " + hint.targetPath() + " 通常来自 " + hint.sourceApi() + " 的 " + hint.sourcePath() + "。")
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            toolDefinitionService.setAiDescriptionAndReindex(id, base + "\n\n参数来源提示：\n" + hintText);
+        } catch (Exception ex) {
+            log.debug("[ApiGraphService] sync param hints to tool description skipped: {}", ex.toString());
+        }
+    }
+
+    private String stripParamHintSection(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        int idx = text.indexOf("\n\n参数来源提示：");
+        if (idx < 0) {
+            idx = text.indexOf("\n参数来源提示：");
+        }
+        return (idx < 0 ? text : text.substring(0, idx)).trim();
     }
 
     private static String safeNonNull(String s) {

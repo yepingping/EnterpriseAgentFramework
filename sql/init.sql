@@ -19,6 +19,7 @@
 --   ai-agent-service/sql/scan_project_auth.sql  scan_project HTTP 鉴权列（旧库可单独打补丁，幂等）
 --   ai-agent-service/sql/skill_draft_tool_definition.sql Skill 草稿：tool_definition.draft（kind=SKILL 时暂存）
 --   ai-agent-service/sql/skill_interaction_phase2_x.sql Phase 2.x InteractiveFormSkill 挂起/恢复表 skill_interaction
+--   ai-agent-service/sql/ai_capability_metadata.sql @AiCapability 能力声明元数据
 --
 -- 幂等设计：
 --   - 建库 / 建表统一 IF NOT EXISTS；
@@ -278,6 +279,7 @@ CREATE TABLE IF NOT EXISTS `scan_project_tool` (
     `request_body_type`   VARCHAR(256) DEFAULT NULL            COMMENT '请求体类型',
     `response_type`       VARCHAR(256) DEFAULT NULL            COMMENT '响应类型',
     `ai_description`      VARCHAR(1024) DEFAULT NULL           COMMENT 'AI 摘要（冗余）',
+    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL         COMMENT '@AiCapability 能力声明元数据 JSON',
     `enabled`             TINYINT      NOT NULL DEFAULT 0      COMMENT '是否启用',
     `agent_visible`       TINYINT      NOT NULL DEFAULT 0      COMMENT '是否对 Agent 可见',
     `lightweight_enabled` TINYINT      NOT NULL DEFAULT 0      COMMENT '是否轻量可见',
@@ -289,6 +291,8 @@ CREATE TABLE IF NOT EXISTS `scan_project_tool` (
     KEY `idx_project_id` (`project_id`),
     KEY `idx_module_id`  (`module_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='扫描项目接口（未注册为全局 Tool 前）';
+
+CALL add_col_if_absent('scan_project_tool', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@AiCapability 能力声明元数据 JSON'' AFTER `ai_description`');
 
 CREATE TABLE IF NOT EXISTS `semantic_doc` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -323,6 +327,7 @@ CREATE TABLE IF NOT EXISTS `tool_definition` (
     `kind`                VARCHAR(16)   NOT NULL DEFAULT 'TOOL' COMMENT '能力形态: TOOL / SKILL',
     `description`         TEXT          NOT NULL                COMMENT '能力描述',
     `ai_description`      MEDIUMTEXT    DEFAULT NULL            COMMENT 'LLM 生成的业务语义描述（Agent 运行时优先使用）',
+    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL          COMMENT '@AiCapability 能力声明元数据 JSON',
     `parameters_json`     TEXT          DEFAULT NULL            COMMENT '参数定义 JSON',
     `spec_json`           MEDIUMTEXT    DEFAULT NULL            COMMENT 'Skill 专属 spec JSON（SubAgent: systemPrompt/toolWhitelist/llmProvider/llmModel/maxSteps）',
     `source`              VARCHAR(32)   NOT NULL DEFAULT 'manual' COMMENT '来源: code/scanner/manual',
@@ -353,6 +358,7 @@ CREATE TABLE IF NOT EXISTS `tool_definition` (
 -- 兼容老库：如果 tool_definition 已存在但缺少 Phase 2 新列，这里补齐（CREATE TABLE IF NOT EXISTS 不会重建）
 CALL add_col_if_absent('tool_definition', 'kind',             'VARCHAR(16) NOT NULL DEFAULT ''TOOL'' COMMENT ''能力形态: TOOL / SKILL'' AFTER `name`');
 CALL add_col_if_absent('tool_definition', 'ai_description',   'MEDIUMTEXT DEFAULT NULL COMMENT ''LLM 生成的业务语义描述'' AFTER `description`');
+CALL add_col_if_absent('tool_definition', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@AiCapability 能力声明元数据 JSON'' AFTER `ai_description`');
 CALL add_col_if_absent('tool_definition', 'spec_json',        'MEDIUMTEXT DEFAULT NULL COMMENT ''Skill 专属 spec JSON'' AFTER `parameters_json`');
 CALL add_col_if_absent('tool_definition', 'project_id',       'BIGINT DEFAULT NULL COMMENT ''关联的扫描项目 ID'' AFTER `response_type`');
 CALL add_col_if_absent('tool_definition', 'module_id',        'BIGINT DEFAULT NULL COMMENT ''所属模块'' AFTER `project_id`');

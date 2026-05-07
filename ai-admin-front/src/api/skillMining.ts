@@ -55,6 +55,10 @@ export function extractDraftFromTrace(data: { traceId: string; toolNames?: strin
   return agentRequest.post<SkillDraft>('/api/skill-mining/drafts/from-trace', data)
 }
 
+export function extractDraftFromCanvas(data: { agentName?: string; toolNames: string[]; canvasJson?: string }) {
+  return agentRequest.post<SkillDraft>('/api/skill-mining/drafts/from-canvas', data)
+}
+
 export function generateDemoTraces(data: {
   scenario?: string
   traceCount?: number

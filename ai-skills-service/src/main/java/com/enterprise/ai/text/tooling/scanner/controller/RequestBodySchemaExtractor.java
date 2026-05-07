@@ -1,6 +1,7 @@
 package com.enterprise.ai.text.tooling.scanner.controller;
 
 import com.enterprise.ai.text.tooling.scanner.manifest.ParameterLocation;
+import com.enterprise.ai.text.tooling.scanner.manifest.ParameterMetadata;
 import com.enterprise.ai.text.tooling.scanner.manifest.ToolParameterDefinition;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -132,6 +133,7 @@ class RequestBodySchemaExtractor {
         String displayName = jsonPropertyName(component.getAnnotations(), component.getNameAsString());
         String description = describeByOrder(component.getAnnotations(), null, component.getNameAsString());
         boolean required = isRequired(component.getAnnotations());
+        ParameterMetadata metadata = extractParameterMetadata(component.getAnnotations(), fieldLocation);
         List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1, fieldLocation);
         return new ToolParameterDefinition(
                 displayName,
@@ -139,7 +141,8 @@ class RequestBodySchemaExtractor {
                 description,
                 required,
                 fieldLocation,
-                children
+                children,
+                metadata
         );
     }
 
@@ -157,6 +160,7 @@ class RequestBodySchemaExtractor {
                 .orElse(null);
         String description = describeByOrder(field.getAnnotations(), javadoc, variable.getNameAsString());
         boolean required = isRequired(field.getAnnotations());
+        ParameterMetadata metadata = extractParameterMetadata(field.getAnnotations(), fieldLocation);
         List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1, fieldLocation);
         return new ToolParameterDefinition(
                 displayName,
@@ -164,7 +168,8 @@ class RequestBodySchemaExtractor {
                 description,
                 required,
                 fieldLocation,
-                children
+                children,
+                metadata
         );
     }
 
@@ -337,6 +342,10 @@ class RequestBodySchemaExtractor {
         }
         String u = key.trim();
         if (ScanOptions.PS_JD.equals(u) || "JAVADOC_PARAM".equals(u)) {
+            Optional<String> ai = aiFieldDescription(annotations);
+            if (ai.isPresent()) {
+                return ai;
+            }
             if (javadoc != null && !javadoc.isBlank()) {
                 return Optional.of(javadoc);
             }
@@ -356,6 +365,10 @@ class RequestBodySchemaExtractor {
     }
 
     private String resolveDescription(NodeList<AnnotationExpr> annotations, String javadoc, String fallback) {
+        Optional<String> ai = aiFieldDescription(annotations);
+        if (ai.isPresent()) {
+            return ai.get();
+        }
         if (javadoc != null && !javadoc.isBlank()) {
             return javadoc;
         }
@@ -369,6 +382,9 @@ class RequestBodySchemaExtractor {
     }
 
     private boolean isRequired(NodeList<AnnotationExpr> annotations) {
+        if (annotationBooleanAttr(annotations, "AiParam", "required").orElse(false)) {
+            return true;
+        }
         if (hasAnnotation(annotations, "NotNull")
                 || hasAnnotation(annotations, "NotBlank")
                 || hasAnnotation(annotations, "NotEmpty")) {
@@ -381,6 +397,37 @@ class RequestBodySchemaExtractor {
             return true;
         }
         return annotationBooleanAttr(annotations, "JsonProperty", "required").orElse(false);
+    }
+
+    private Optional<String> aiFieldDescription(NodeList<AnnotationExpr> annotations) {
+        Optional<String> aiParam = annotationStringAttr(annotations, "AiParam", "description");
+        if (aiParam.isPresent()) {
+            return aiParam;
+        }
+        return annotationStringAttr(annotations, "AiOutput", "description");
+    }
+
+    private ParameterMetadata extractParameterMetadata(NodeList<AnnotationExpr> annotations, ParameterLocation location) {
+        Optional<AnnotationExpr> aiParam = annotations.stream()
+                .filter(annotation -> "AiParam".equals(annotation.getNameAsString()))
+                .findFirst();
+        Optional<AnnotationExpr> aiOutput = annotations.stream()
+                .filter(annotation -> "AiOutput".equals(annotation.getNameAsString()))
+                .findFirst();
+        if (aiParam.isEmpty() && aiOutput.isEmpty()) {
+            return null;
+        }
+        String source = aiOutput.isPresent() && location == ParameterLocation.RESPONSE ? "AiOutput" : "AiParam";
+        AnnotationExpr selected = "AiOutput".equals(source) ? aiOutput.get() : aiParam.orElseGet(aiOutput::get);
+        return new ParameterMetadata(
+                annotationStringAttr(annotations, "AiParam", "example").orElse(null),
+                annotationStringAttr(annotations, "AiParam", "sourceHint").orElse(null),
+                annotationStringAttr(annotations, "AiParam", "dictType").orElse(null),
+                annotationBooleanAttr(annotations, source, "sensitive").orElse(null),
+                annotationStringAttr(annotations, "AiOutput", "businessKey").orElse(null),
+                extractStringArray(selected, "canBeSourceFor"),
+                source
+        );
     }
 
     private boolean hasAnnotation(NodeList<AnnotationExpr> annotations, String simpleName) {
@@ -409,6 +456,22 @@ class RequestBodySchemaExtractor {
                 .map(raw -> raw.replace("\"", "").trim().toLowerCase(Locale.ROOT))
                 .filter(raw -> "true".equals(raw) || "false".equals(raw))
                 .map(Boolean::parseBoolean);
+    }
+
+    private List<String> extractStringArray(AnnotationExpr annotation, String attribute) {
+        return extractNamedMember(annotation, attribute)
+                .map(expr -> {
+                    if (expr.isArrayInitializerExpr()) {
+                        return expr.asArrayInitializerExpr().getValues().stream()
+                                .map(this::extractStringValue)
+                                .map(String::trim)
+                                .filter(s -> !s.isBlank())
+                                .toList();
+                    }
+                    String single = extractStringValue(expr).trim();
+                    return single.isBlank() ? List.<String>of() : List.of(single);
+                })
+                .orElse(List.of());
     }
 
     private Optional<Expression> extractNamedMember(AnnotationExpr annotation, String name) {

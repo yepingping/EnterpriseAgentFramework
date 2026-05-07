@@ -10,6 +10,9 @@
       <div class="header-right">
         <el-button @click="handleSwitchToForm" :icon="DocumentCopy">表单视图</el-button>
         <el-button @click="handleDebug" :icon="VideoPlay">调试</el-button>
+        <el-button @click="handleExtractCanvasSkill" :icon="Collection" :loading="canvasExtracting">
+          画布转 Skill 草稿
+        </el-button>
         <el-button type="success" @click="handleSave" :loading="saving">保存草稿</el-button>
         <el-button type="primary" @click="publishDialogOpen = true">发布 / 灰度</el-button>
       </div>
@@ -172,6 +175,46 @@
                 :rows="3"
               />
             </el-form-item>
+            <template v-if="selectedNode.data.kind === 'tool' || selectedNode.data.kind === 'skill'">
+              <el-divider>变量映射</el-divider>
+              <el-form-item label="输出别名">
+                <el-input
+                  v-model="selectedNode.data.outputAlias"
+                  placeholder="如 customer / order / approval"
+                />
+              </el-form-item>
+              <el-form-item label="入参映射">
+                <el-input
+                  :model-value="formatInputMapping(selectedNode.data.inputMapping)"
+                  type="textarea"
+                  :rows="5"
+                  placeholder="每行一个映射，如：customerId = queryCustomer.response.data.id"
+                  @update:model-value="updateSelectedInputMapping"
+                />
+              </el-form-item>
+              <el-form-item label="映射备注">
+                <el-input
+                  v-model="selectedNode.data.mappingNote"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="说明这些变量与业务对象的关系"
+                />
+              </el-form-item>
+              <div v-if="selectedNode.data.kind === 'tool'" class="param-hints">
+                <div class="param-hints-title">接口图谱参数来源提示</div>
+                <el-empty v-if="!paramHints.length" description="暂无已确认参数来源" />
+                <div v-for="hint in paramHints" :key="`${hint.targetPath}-${hint.sourcePath}`" class="param-hint-item">
+                  <div>
+                    <strong>{{ hint.targetPath }}</strong>
+                    <span> 通常来自 </span>
+                    <code>{{ hint.sourceApi }}.{{ hint.sourcePath }}</code>
+                  </div>
+                  <el-button size="small" text type="primary" @click="applyParamHint(hint)">
+                    应用映射
+                  </el-button>
+                </div>
+              </div>
+            </template>
           </el-form>
 
           <el-button
@@ -233,6 +276,10 @@
           </el-button>
         </div>
         <el-divider>结果</el-divider>
+        <div class="result-section">
+          <strong>变量映射预览：</strong>
+          <pre>{{ JSON.stringify(variablePreview, null, 2) }}</pre>
+        </div>
         <div class="debug-result">
           <div v-if="debugResult">
             <div class="result-section">
@@ -315,7 +362,9 @@ import { canvasToDefinition, definitionToCanvas, kindColor } from '@/utils/studi
 import TraceTimeline from '@/components/TraceTimeline.vue'
 import { getTraceDetail } from '@/api/trace'
 import type { TraceNode } from '@/types/trace'
-import { extractDraftFromTrace } from '@/api/skillMining'
+import { extractDraftFromTrace, extractDraftFromCanvas } from '@/api/skillMining'
+import { getApiGraphParamHints } from '@/api/apiGraph'
+import type { ApiGraphParamSourceHint } from '@/api/apiGraph'
 
 const route = useRoute()
 const router = useRouter()
@@ -335,6 +384,7 @@ const currentTraceId = ref<string>('')
 const traceNodes = ref<TraceNode[]>([])
 const skillPickTools = ref<string[]>([])
 const extracting = ref(false)
+const canvasExtracting = ref(false)
 const traceToolNames = computed(() => {
   const names = traceNodes.value
     .map((n) => (n.toolName || '').trim())
@@ -344,6 +394,7 @@ const traceToolNames = computed(() => {
 
 const toolOptions = ref<ToolInfo[]>([])
 const skillOptions = ref<SkillInfo[]>([])
+const paramHints = ref<ApiGraphParamSourceHint[]>([])
 const availableTools = computed(() =>
   toolOptions.value.filter((t) => t.enabled && t.agentVisible),
 )
@@ -380,6 +431,10 @@ const selectedNodeId = ref<string | null>(null)
 const selectedNode = computed(() =>
   nodes.value.find((n) => n.id === selectedNodeId.value) ?? null,
 )
+const selectedToolInfo = computed(() => {
+  const refName = selectedNode.value?.data.kind === 'tool' ? selectedNode.value.data.ref : ''
+  return toolOptions.value.find((t) => t.name === refName) ?? null
+})
 
 const publishForm = reactive({
   version: 'v1.0.0',
@@ -410,6 +465,26 @@ const publishWarnings = computed(() => {
   return warnings
 })
 
+const variablePreview = computed(() => {
+  const flowNodes = nodes.value
+    .filter((n) => n.data.kind === 'tool' || n.data.kind === 'skill')
+    .map((n) => ({
+      id: n.id,
+      kind: n.data.kind,
+      ref: n.data.ref || '',
+      outputAlias: n.data.outputAlias || '',
+      inputMapping: n.data.inputMapping || {},
+    }))
+  return {
+    context: {
+      userId: '$context.userId',
+      tenantId: '$context.tenantId',
+      roles: '$context.roles',
+    },
+    nodes: flowNodes,
+  }
+})
+
 const paletteItems: { kind: CanvasNodeKind; label: string; hint: string }[] = [
   { kind: 'skill', label: 'Skill 节点', hint: '引用已注册的 SubAgentSkill' },
   { kind: 'tool', label: 'Tool 节点', hint: '引用原子工具（HTTP/Code）' },
@@ -436,8 +511,72 @@ function onDrop(event: DragEvent) {
       ref: '',
       groupId: '',
       description: '',
+      outputAlias: kind === 'tool' || kind === 'skill' ? `${kind}_${nodes.value.length + 1}` : '',
+      inputMapping: {},
     },
   })
+}
+
+function formatInputMapping(mapping?: Record<string, string>) {
+  if (!mapping || Object.keys(mapping).length === 0) {
+    return ''
+  }
+  return Object.entries(mapping)
+    .map(([key, value]) => `${key} = ${value}`)
+    .join('\n')
+}
+
+function parseInputMapping(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const rawLine of (text || '').split('\n')) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
+      continue
+    }
+    const idx = line.indexOf('=')
+    if (idx <= 0) {
+      continue
+    }
+    const key = line.slice(0, idx).trim()
+    const value = line.slice(idx + 1).trim()
+    if (key && value) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+function updateSelectedInputMapping(text: string) {
+  if (!selectedNode.value) {
+    return
+  }
+  selectedNode.value.data.inputMapping = parseInputMapping(text)
+}
+
+async function refreshParamHints() {
+  paramHints.value = []
+  const tool = selectedToolInfo.value
+  if (!tool?.projectId || !tool.name) {
+    return
+  }
+  try {
+    const { data } = await getApiGraphParamHints(tool.projectId, tool.name)
+    paramHints.value = Array.isArray(data) ? data : []
+  } catch {
+    paramHints.value = []
+  }
+}
+
+function applyParamHint(hint: ApiGraphParamSourceHint) {
+  if (!selectedNode.value) {
+    return
+  }
+  const mapping = { ...(selectedNode.value.data.inputMapping || {}) }
+  mapping[hint.targetPath] = `${hint.sourceApi}.${hint.sourcePath}`
+  selectedNode.value.data.inputMapping = mapping
+  if (!selectedNode.value.data.mappingNote) {
+    selectedNode.value.data.mappingNote = '参数来源由接口图谱确认关系生成。'
+  }
 }
 
 function onNodeClick(evt: { node: { id: string } }) {
@@ -646,6 +785,30 @@ async function handleExtractSkill() {
   }
 }
 
+async function handleExtractCanvasSkill() {
+  const toolNames = nodes.value
+    .filter((n) => n.data.kind === 'tool' && n.data.ref)
+    .map((n) => n.data.ref as string)
+  if (toolNames.length < 2) {
+    ElMessage.warning('画布中至少需要 2 个 Tool 节点才能抽取 Skill 草稿')
+    return
+  }
+  canvasExtracting.value = true
+  try {
+    const snapshot = { nodes: nodes.value, edges: edges.value }
+    const { data } = await extractDraftFromCanvas({
+      agentName: form.name,
+      toolNames,
+      canvasJson: JSON.stringify(snapshot),
+    })
+    ElMessage.success(`已从画布生成 Skill 草稿：${data.name}（ID ${data.id}）`)
+  } catch (err) {
+    ElMessage.error('画布抽取失败：' + (err as Error).message)
+  } finally {
+    canvasExtracting.value = false
+  }
+}
+
 function handleSwitchToForm() {
   ElMessageBox.confirm('切换到表单视图会丢弃未保存的画布变更，是否继续？', '提示')
     .then(() => router.push(`/agent/${agentId}/edit`))
@@ -657,6 +820,13 @@ onMounted(async () => {
   await loadAgent()
   await nextTick()
 })
+
+watch(
+  () => `${selectedNode.value?.data.kind || ''}:${selectedNode.value?.data.ref || ''}`,
+  () => {
+    refreshParamHints()
+  },
+)
 
 // 保留 watch 以便未来联动：若 tools 变化需要反映到画布，可在此同步
 watch(
@@ -679,6 +849,35 @@ watch(
   ul {
     margin: 4px 0 0;
     padding-left: 18px;
+  }
+}
+
+.param-hints {
+  margin: 8px 0 16px;
+  padding: 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.param-hints-title {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.param-hint-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  border-top: 1px solid #ebeef5;
+
+  code {
+    color: #409eff;
   }
 }
 

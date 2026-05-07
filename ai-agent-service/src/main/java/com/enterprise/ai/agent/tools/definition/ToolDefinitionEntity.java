@@ -23,6 +23,9 @@ public class ToolDefinitionEntity {
 
     private String aiDescription;
 
+    /** Java 侧 @AiCapability 声明的原始结构化元数据 JSON。 */
+    private String capabilityMetadataJson;
+
     private String parametersJson;
 
     /** Skill 专属 spec JSON（SubAgent: {systemPrompt, toolWhitelist, llmProvider, llmModel, maxSteps}）。 */

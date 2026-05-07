@@ -98,6 +98,7 @@ public interface ScannerServiceClient {
         private String requestBodyType;
         private String responseType;
         private ToolSourceData source;
+        private Map<String, Object> capabilityMetadata;
     }
 
     @Data
@@ -110,6 +111,7 @@ public interface ScannerServiceClient {
         private boolean required;
         private String location;
         private List<ToolParameterData> children;
+        private Map<String, Object> metadata;
     }
 
     @Data

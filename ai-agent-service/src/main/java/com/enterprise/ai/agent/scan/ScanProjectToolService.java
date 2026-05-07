@@ -168,7 +168,8 @@ public class ScanProjectToolService {
                             incoming.description(),
                             incoming.required(),
                             incoming.location(),
-                            old.children()
+                            old.children(),
+                            incoming.metadata()
                     );
                 })
                 .toList();
@@ -188,7 +189,7 @@ public class ScanProjectToolService {
                 request.enabled(),
                 request.agentVisible(),
                 request.lightweightEnabled()
-        );
+        ).withCapabilityMetadata(request.capabilityMetadata());
     }
 
     private static String childrenMergeKey(String name, String location) {
@@ -249,7 +250,8 @@ public class ScanProjectToolService {
         }
         String globalName = allocateUniqueGlobalName(st.getName());
         List<ToolDefinitionParameter> parameters = parseParameters(st.getParametersJson());
-        String inferredSideEffect = SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath());
+        String inferredSideEffect = declaredSideEffect(st.getCapabilityMetadataJson())
+                .orElseGet(() -> SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath()));
         ToolDefinitionUpsertRequest req = new ToolDefinitionUpsertRequest(
                 globalName,
                 "TOOL",
@@ -270,7 +272,8 @@ public class ScanProjectToolService {
                 inferredSideEffect,
                 null,
                 null,
-                false
+                false,
+                parseCapabilityMetadata(st.getCapabilityMetadataJson())
         );
         ToolDefinitionEntity created = toolDefinitionService.create(req);
         semanticDocService.migrateScanToolDocsToGlobal(projectId, scanToolId, created.getId());
@@ -375,7 +378,8 @@ public class ScanProjectToolService {
         if (!Objects.equals(st.getProjectId(), g.getProjectId())) {
             return false;
         }
-        String inferred = SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath());
+        String inferred = declaredSideEffect(st.getCapabilityMetadataJson())
+                .orElseGet(() -> SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath()));
         String gSide = g.getSideEffect() == null || g.getSideEffect().isBlank()
                 ? "WRITE"
                 : g.getSideEffect().trim().toUpperCase(Locale.ROOT);
@@ -386,6 +390,9 @@ public class ScanProjectToolService {
             return false;
         }
         if (!Objects.equals(trimOrNull(st.getAiDescription()), trimOrNull(g.getAiDescription()))) {
+            return false;
+        }
+        if (!Objects.equals(trimOrNull(st.getCapabilityMetadataJson()), trimOrNull(g.getCapabilityMetadataJson()))) {
             return false;
         }
         return true;
@@ -435,7 +442,8 @@ public class ScanProjectToolService {
         ToolDefinitionEntity g = toolDefinitionService.findById(st.getGlobalToolDefinitionId())
                 .orElseThrow(() -> new IllegalStateException("关联的全局 Tool 已不存在，请从 Tool 中下架后重新添加"));
         List<ToolDefinitionParameter> parameters = parseParameters(st.getParametersJson());
-        String inferredSideEffect = SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath());
+        String inferredSideEffect = declaredSideEffect(st.getCapabilityMetadataJson())
+                .orElseGet(() -> SideEffectInferrer.inferAsString(st.getHttpMethod(), st.getEndpointPath()));
         ToolDefinitionUpsertRequest req = new ToolDefinitionUpsertRequest(
                 g.getName(),
                 "TOOL",
@@ -456,7 +464,8 @@ public class ScanProjectToolService {
                 inferredSideEffect,
                 null,
                 null,
-                false
+                false,
+                parseCapabilityMetadata(st.getCapabilityMetadataJson())
         );
         ToolDefinitionEntity updated = toolDefinitionService.update(g.getName(), req);
         syncAiDescriptionToGlobalTool(st, updated.getId());
@@ -502,6 +511,7 @@ public class ScanProjectToolService {
         e.setEnabled(r.enabled());
         e.setAgentVisible(r.agentVisible());
         e.setLightweightEnabled(r.lightweightEnabled());
+        e.setCapabilityMetadataJson(serializeCapabilityMetadata(r.capabilityMetadata()));
     }
 
     private List<ToolDefinitionParameter> parseParameters(String json) {
@@ -520,6 +530,40 @@ public class ScanProjectToolService {
             return objectMapper.writeValueAsString(parameters == null ? List.of() : parameters);
         } catch (Exception ex) {
             throw new IllegalStateException("无法序列化工具参数", ex);
+        }
+    }
+
+    private Object parseCapabilityMetadata(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("无法解析能力声明元数据 JSON", ex);
+        }
+    }
+
+    private Optional<String> declaredSideEffect(String metadataJson) {
+        Object metadata = parseCapabilityMetadata(metadataJson);
+        if (!(metadata instanceof Map<?, ?> map)) {
+            return Optional.empty();
+        }
+        Object raw = map.get("sideEffect");
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(String.valueOf(raw).trim().toUpperCase(Locale.ROOT));
+    }
+
+    private String serializeCapabilityMetadata(Object metadata) {
+        if (metadata == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (Exception ex) {
+            throw new IllegalStateException("无法序列化能力声明元数据", ex);
         }
     }
 }

@@ -465,7 +465,8 @@ public class ScanProjectController {
                 globalToolName,
                 globalToolOutOfSync,
                 moduleId,
-                moduleDisplayName
+                moduleDisplayName,
+                entity.getCapabilityMetadataJson()
         );
     }
 
@@ -567,7 +568,8 @@ public class ScanProjectController {
             String globalToolName,
             boolean globalToolOutOfSync,
             Long moduleId,
-            String moduleDisplayName
+            String moduleDisplayName,
+            String capabilityMetadataJson
     ) {
     }
 
@@ -631,7 +633,8 @@ public class ScanProjectController {
                             boolean required,
                             String location,
                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
-                            List<ToolParameterDTO> children) {
+                            List<ToolParameterDTO> children,
+                            Object metadata) {
         static ToolParameterDTO from(ToolDefinitionParameter parameter) {
             List<ToolDefinitionParameter> rawChildren = parameter.children();
             List<ToolParameterDTO> mappedChildren = rawChildren == null || rawChildren.isEmpty()
@@ -643,7 +646,8 @@ public class ScanProjectController {
                     parameter.description(),
                     parameter.required(),
                     parameter.location(),
-                    mappedChildren
+                    mappedChildren,
+                    parameter.metadata()
             );
         }
     }

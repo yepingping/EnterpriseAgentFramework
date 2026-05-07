@@ -11,7 +11,8 @@ public record ToolParameterDefinition(
         String description,
         boolean required,
         ParameterLocation location,
-        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<ToolParameterDefinition> children
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<ToolParameterDefinition> children,
+        ParameterMetadata metadata
 ) {
     public ToolParameterDefinition {
         children = children == null ? List.of() : List.copyOf(children);
@@ -22,6 +23,15 @@ public record ToolParameterDefinition(
                                    String description,
                                    boolean required,
                                    ParameterLocation location) {
-        this(name, type, description, required, location, List.of());
+        this(name, type, description, required, location, List.of(), null);
+    }
+
+    public ToolParameterDefinition(String name,
+                                   String type,
+                                   String description,
+                                   boolean required,
+                                   ParameterLocation location,
+                                   List<ToolParameterDefinition> children) {
+        this(name, type, description, required, location, children, null);
     }
 }

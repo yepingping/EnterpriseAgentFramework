@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS `scan_project_tool` (
     `request_body_type`   VARCHAR(256) DEFAULT NULL            COMMENT '请求体类型',
     `response_type`       VARCHAR(256) DEFAULT NULL            COMMENT '响应类型',
     `ai_description`      VARCHAR(1024) DEFAULT NULL           COMMENT 'AI 摘要（冗余）',
+    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL         COMMENT '@AiCapability 能力声明元数据 JSON',
     `enabled`             TINYINT      NOT NULL DEFAULT 0      COMMENT '是否启用',
     `agent_visible`       TINYINT      NOT NULL DEFAULT 0      COMMENT '是否对 Agent 可见',
     `lightweight_enabled` TINYINT      NOT NULL DEFAULT 0      COMMENT '是否轻量可见',

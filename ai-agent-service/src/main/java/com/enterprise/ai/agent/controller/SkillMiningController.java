@@ -61,6 +61,13 @@ public class SkillMiningController {
         return ResponseEntity.ok(draft);
     }
 
+    @PostMapping("/drafts/from-canvas")
+    public ResponseEntity<SkillDraftEntity> fromCanvas(@RequestBody ExtractFromCanvasRequest req) {
+        SkillDraftEntity draft = skillMiningService.extractDraftFromCanvas(
+                req.agentName(), req.toolNames(), req.canvasJson());
+        return ResponseEntity.ok(draft);
+    }
+
     @PostMapping("/demo-traces/generate")
     public ResponseEntity<SkillMiningService.DemoTraceResult> generateDemoTraces(@RequestBody DemoTraceRequest req) {
         return ResponseEntity.ok(skillMiningService.generateDemoTraces(
@@ -82,6 +89,8 @@ public class SkillMiningController {
     public record StatusRequest(String status, String reviewNote) {}
 
     public record ExtractFromTraceRequest(String traceId, List<String> toolNames) {}
+
+    public record ExtractFromCanvasRequest(String agentName, List<String> toolNames, String canvasJson) {}
 
     public record DemoTraceRequest(String scenario, int traceCount, double successRate, double noiseRate) {
         public int traceCount() { return traceCount <= 0 ? 120 : traceCount; }

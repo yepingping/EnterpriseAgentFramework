@@ -32,7 +32,8 @@ public record ToolDefinitionUpsertRequest(
         String sideEffect,
         String skillKind,
         String specJson,
-        Boolean draft
+        Boolean draft,
+        Object capabilityMetadata
 ) {
 
     /** 老的 15 参构造保持兼容：等价于 kind=TOOL、sideEffect/skillKind/specJson/draft 为空。 */
@@ -56,7 +57,7 @@ public record ToolDefinitionUpsertRequest(
                 httpMethod, baseUrl, contextPath, endpointPath,
                 requestBodyType, responseType, projectId,
                 enabled, agentVisible, lightweightEnabled,
-                null, null, null, false);
+                null, null, null, false, null);
     }
 
     public static ToolDefinitionUpsertRequest skill(
@@ -91,6 +92,15 @@ public record ToolDefinitionUpsertRequest(
                 null, null, null, null,
                 null, null, null,
                 enabled, agentVisible, false,
-                sideEffect, skillKind, specJson, draft);
+                sideEffect, skillKind, specJson, draft, null);
+    }
+
+    public ToolDefinitionUpsertRequest withCapabilityMetadata(Object metadata) {
+        return new ToolDefinitionUpsertRequest(
+                name, kind, description, parameters, source, sourceLocation,
+                httpMethod, baseUrl, contextPath, endpointPath,
+                requestBodyType, responseType, projectId,
+                enabled, agentVisible, lightweightEnabled,
+                sideEffect, skillKind, specJson, draft, metadata);
     }
 }

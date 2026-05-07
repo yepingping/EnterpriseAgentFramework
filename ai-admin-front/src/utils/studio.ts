@@ -83,7 +83,13 @@ export function definitionToCanvas(def: AgentDefinition): CanvasSnapshot {
       id: `node-${idx}`,
       type: item.kind,
       position: { x: 260 + idx * 220, y: 220 },
-      data: { label: item.name, kind: item.kind, ref: item.name },
+      data: {
+        label: item.name,
+        kind: item.kind,
+        ref: item.name,
+        outputAlias: item.name.replace(/[^A-Za-z0-9_]+/g, '_'),
+        inputMapping: {},
+      },
     })
     edges.push({
       id: `e-start-${idx}`,

@@ -1,7 +1,9 @@
 package com.enterprise.ai.text.tooling.scanner.controller;
 
 import com.enterprise.ai.text.tooling.scanner.ScanOptions;
+import com.enterprise.ai.text.tooling.scanner.manifest.CapabilityMetadata;
 import com.enterprise.ai.text.tooling.scanner.manifest.ParameterLocation;
+import com.enterprise.ai.text.tooling.scanner.manifest.ParameterMetadata;
 import com.enterprise.ai.text.tooling.scanner.manifest.ProjectMetadata;
 import com.enterprise.ai.text.tooling.scanner.manifest.ToolDefinition;
 import com.enterprise.ai.text.tooling.scanner.manifest.ToolManifest;
@@ -63,7 +65,6 @@ public class ControllerAnnotationToolManifestScanner {
     private static final class ScanState {
         ScanOptions options;
         long incrementalSinceMs;
-        Path sourcePath;
     }
 
     private static final ThreadLocal<ScanState> STATE = new ThreadLocal<>();
@@ -76,7 +77,6 @@ public class ControllerAnnotationToolManifestScanner {
         ScanState s = new ScanState();
         s.options = options == null ? ScanOptions.empty() : options;
         s.incrementalSinceMs = incrementalSinceEpochMs == null || incrementalSinceEpochMs < 0 ? 0L : incrementalSinceEpochMs;
-        s.sourcePath = sourcePath;
         STATE.set(s);
         try {
             // 类索引必须覆盖全仓库源码：增量时若只索引「本次变更的 .java」，则无法解析其它文件里的 VO/DTO，
@@ -160,10 +160,14 @@ public class ControllerAnnotationToolManifestScanner {
                 List<ToolParameterDefinition> parameters = extractParameters(method, classIndex, bodyExtractor, state);
                 parameters = appendResolvedResponseParameter(parameters, extractResponseType(method), bodyExtractor, classIndex);
                 String requestBodyType = extractRequestBodyType(method);
+                Optional<AnnotationExpr> aiCapability = findAnnotation(method.getAnnotations(), "AiCapability");
+                CapabilityMetadata capabilityMetadata = aiCapability
+                        .map(this::extractCapabilityMetadata)
+                        .orElse(null);
 
                 tools.add(new ToolDefinition(
-                        resolveToolName(method, joinPath(basePath, definition.path())),
-                        resolveToolDescription(method, state),
+                        resolveToolName(method, joinPath(basePath, definition.path()), aiCapability),
+                        resolveToolDescription(method, state, aiCapability),
                         definition.httpMethod(),
                         joinPath(basePath, definition.path()),
                         definition.httpMethod() + " " + joinPath(projectMetadata.contextPath(), joinPath(basePath, definition.path())),
@@ -173,7 +177,8 @@ public class ControllerAnnotationToolManifestScanner {
                         new ToolSource(
                                 "controller",
                                 javaFile.getFileName() + "#" + declaration.getNameAsString() + "#" + method.getNameAsString()
-                        )
+                        ),
+                        capabilityMetadata
                 ));
             }
         }
@@ -281,10 +286,11 @@ public class ControllerAnnotationToolManifestScanner {
                 parameters.add(new ToolParameterDefinition(
                         "body_json",
                         "json",
-                        "JSON 请求体，对应 " + rawType,
-                        annotationBooleanValue(parameter, "RequestBody", "required").orElse(true),
+                        aiParamDescription(parameter).orElse("JSON 请求体，对应 " + rawType),
+                        aiParamRequired(parameter).orElse(annotationBooleanValue(parameter, "RequestBody", "required").orElse(true)),
                         ParameterLocation.BODY,
-                        children
+                        children,
+                        extractAiParamMetadata(parameter).orElse(null)
                 ));
                 continue;
             }
@@ -370,6 +376,10 @@ public class ControllerAnnotationToolManifestScanner {
     }
 
     private String resolveParameterText(Parameter param, MethodDeclaration method, ScanState s, String fallback) {
+        Optional<String> aiParam = aiParamDescription(param);
+        if (aiParam.isPresent()) {
+            return aiParam.get();
+        }
         for (String key : paramDescriptionOrder(s)) {
             if (key == null) {
                 continue;
@@ -580,6 +590,102 @@ public class ControllerAnnotationToolManifestScanner {
                 .map(value -> Boolean.parseBoolean(value.replace("\"", "")));
     }
 
+    private Optional<AnnotationExpr> findAnnotation(NodeList<AnnotationExpr> annotations, String annotationName) {
+        return annotations.stream()
+                .filter(annotation -> annotationName.equals(annotation.getNameAsString()))
+                .findFirst();
+    }
+
+    private CapabilityMetadata extractCapabilityMetadata(AnnotationExpr annotation) {
+        List<String> tags = extractStringArray(annotation, "tags");
+        List<String> roles = extractStringArray(annotation, "requiredRoles");
+        Integer timeoutMs = extractIntMember(annotation, "timeoutMs").filter(v -> v > 0).orElse(null);
+        Integer retryLimit = extractIntMember(annotation, "retryLimit").filter(v -> v >= 0).orElse(null);
+        return new CapabilityMetadata(
+                true,
+                extractNamedMember(annotation, "name").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractNamedMember(annotation, "title").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractNamedMember(annotation, "domain").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractNamedMember(annotation, "module").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                tags,
+                extractNamedMember(annotation, "sideEffect").map(this::extractEnumName).filter(s -> !s.isBlank()).orElse(null),
+                extractBooleanMember(annotation, "agentVisible").orElse(null),
+                roles,
+                timeoutMs,
+                retryLimit,
+                "AiCapability"
+        );
+    }
+
+    private Optional<String> aiParamDescription(Parameter parameter) {
+        return findAnnotation(parameter.getAnnotations(), "AiParam")
+                .flatMap(annotation -> extractNamedMember(annotation, "description"))
+                .map(this::extractStringValue)
+                .filter(value -> !value.isBlank());
+    }
+
+    private Optional<Boolean> aiParamRequired(Parameter parameter) {
+        return findAnnotation(parameter.getAnnotations(), "AiParam")
+                .flatMap(annotation -> extractBooleanMember(annotation, "required"))
+                .filter(Boolean::booleanValue);
+    }
+
+    private Optional<ParameterMetadata> extractAiParamMetadata(Parameter parameter) {
+        return findAnnotation(parameter.getAnnotations(), "AiParam").map(annotation -> new ParameterMetadata(
+                extractNamedMember(annotation, "example").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractNamedMember(annotation, "sourceHint").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractNamedMember(annotation, "dictType").map(this::extractStringValue).filter(s -> !s.isBlank()).orElse(null),
+                extractBooleanMember(annotation, "sensitive").orElse(null),
+                null,
+                List.of(),
+                "AiParam"
+        ));
+    }
+
+    private Optional<Boolean> extractBooleanMember(AnnotationExpr annotation, String name) {
+        return extractNamedMember(annotation, name)
+                .map(Expression::toString)
+                .map(raw -> raw.replace("\"", "").trim().toLowerCase(Locale.ROOT))
+                .filter(raw -> "true".equals(raw) || "false".equals(raw))
+                .map(Boolean::parseBoolean);
+    }
+
+    private Optional<Integer> extractIntMember(AnnotationExpr annotation, String name) {
+        return extractNamedMember(annotation, name)
+                .map(Expression::toString)
+                .map(raw -> raw.replace("\"", "").trim())
+                .flatMap(raw -> {
+                    try {
+                        return Optional.of(Integer.parseInt(raw));
+                    } catch (NumberFormatException ex) {
+                        return Optional.empty();
+                    }
+                });
+    }
+
+    private List<String> extractStringArray(AnnotationExpr annotation, String name) {
+        Optional<Expression> expr = extractNamedMember(annotation, name);
+        if (expr.isEmpty()) {
+            return List.of();
+        }
+        Expression value = expr.get();
+        if (value.isArrayInitializerExpr()) {
+            return value.asArrayInitializerExpr().getValues().stream()
+                    .map(this::extractStringValue)
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .toList();
+        }
+        String single = extractStringValue(value).trim();
+        return single.isBlank() ? List.of() : List.of(single);
+    }
+
+    private String extractEnumName(Expression expression) {
+        String raw = expression.toString().replace("\"", "").trim();
+        int dot = raw.lastIndexOf('.');
+        return dot >= 0 ? raw.substring(dot + 1) : raw;
+    }
+
     private boolean hasAnnotation(Parameter parameter, String annotationName) {
         return parameter.getAnnotations().stream()
                 .anyMatch(annotation -> annotationName.equals(annotation.getNameAsString()));
@@ -664,7 +770,8 @@ public class ControllerAnnotationToolManifestScanner {
                     tool.parameters(),
                     tool.requestBodyType(),
                     tool.responseType(),
-                    tool.source()
+                    tool.source(),
+                    tool.capabilityMetadata()
             ));
         }
         return uniqueTools;
@@ -689,7 +796,15 @@ public class ControllerAnnotationToolManifestScanner {
         };
     }
 
-    private String resolveToolDescription(MethodDeclaration method, ScanState s) {
+    private String resolveToolDescription(MethodDeclaration method, ScanState s, Optional<AnnotationExpr> aiCapability) {
+        Optional<String> declared = aiCapability
+                .flatMap(annotation -> extractNamedMember(annotation, "description"))
+                .map(this::extractStringValue)
+                .map(String::trim)
+                .filter(text -> !text.isBlank());
+        if (declared.isPresent()) {
+            return declared.get();
+        }
         for (String key : descriptionOrder(s)) {
             if (key == null) {
                 continue;
@@ -778,7 +893,15 @@ public class ControllerAnnotationToolManifestScanner {
         return text.substring(0, MAX_OPERATION_DESCRIPTION_CHARS) + "...";
     }
 
-    private String resolveToolName(MethodDeclaration method, String fullPath) {
+    private String resolveToolName(MethodDeclaration method, String fullPath, Optional<AnnotationExpr> aiCapability) {
+        Optional<String> declared = aiCapability
+                .flatMap(annotation -> extractNamedMember(annotation, "name"))
+                .map(this::extractStringValue)
+                .map(this::normalizeName)
+                .filter(name -> !name.isBlank());
+        if (declared.isPresent()) {
+            return declared.get();
+        }
         String methodName = normalizeName(method.getNameAsString());
         if (GENERIC_METHOD_NAMES.contains(methodName)) {
             return normalizeName(fullPath);

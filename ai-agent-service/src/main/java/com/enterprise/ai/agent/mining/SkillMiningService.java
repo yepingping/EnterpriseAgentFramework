@@ -174,6 +174,53 @@ public class SkillMiningService {
         return entity;
     }
 
+    /**
+     * Agent Studio 画布 → Skill 草稿：
+     * 第一阶段只抽取画布中的 Tool 顺序，避免把 Skill 嵌套 Skill 带入 SubAgentSkill。
+     */
+    public SkillDraftEntity extractDraftFromCanvas(String agentName, List<String> toolNames, String canvasJson) {
+        List<String> sequence = toolNames == null ? List.of() : toolNames.stream()
+                .filter(name -> name != null && !name.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (sequence.size() < 2) {
+            throw new IllegalArgumentException("画布中有效 Tool 少于 2 个，无法生成 Skill 草稿");
+        }
+        PrefixSpanMiner.ChainPattern pattern = new PrefixSpanMiner.ChainPattern(sequence);
+        pattern.addTraceId("canvas:" + (agentName == null || agentName.isBlank() ? "agent" : agentName.trim()));
+        SkillDraftLlmWriter.DraftContent draft = llmWriter.write(pattern);
+        String sourceKey = "canvas:" + String.join(">", sequence);
+        SkillDraftEntity existing = draftMapper.selectOne(new LambdaQueryWrapper<SkillDraftEntity>()
+                .eq(SkillDraftEntity::getName, draft.name())
+                .in(SkillDraftEntity::getStatus, List.of("DRAFT", "APPROVED", "ROLLBACK_CANDIDATE"))
+                .last("limit 1"));
+        if (existing != null) {
+            existing.setDescription(draft.description() + "（来自 Studio 画布）");
+            existing.setSourceTraceIds(sourceKey);
+            existing.setConfidenceScore(1.0);
+            existing.setSpecJson(draft.specJson());
+            existing.setReviewNote("extracted-from-canvas");
+            existing.setUpdateTime(LocalDateTime.now());
+            draftMapper.updateById(existing);
+            return existing;
+        }
+        SkillDraftEntity entity = new SkillDraftEntity();
+        entity.setName(draft.name());
+        entity.setDescription(draft.description() + "（来自 Studio 画布）");
+        entity.setStatus("DRAFT");
+        entity.setSourceTraceIds(sourceKey);
+        entity.setSpecJson(draft.specJson());
+        entity.setConfidenceScore(1.0);
+        entity.setReviewNote((canvasJson == null || canvasJson.isBlank())
+                ? "extracted-from-canvas"
+                : "extracted-from-canvas; canvasJson captured in agent_version");
+        entity.setCreateTime(LocalDateTime.now());
+        entity.setUpdateTime(LocalDateTime.now());
+        draftMapper.insert(entity);
+        return entity;
+    }
+
     public void markDraftStatus(Long id, String status, String reviewNote) {
         SkillDraftEntity entity = draftMapper.selectById(id);
         if (entity == null) {

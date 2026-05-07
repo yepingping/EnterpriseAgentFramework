@@ -7,6 +7,8 @@ export interface ToolParameter {
   location?: string | null
   /** body_json 解析出的 DTO 子字段（可递归），仅展示用，运行时 body 以整体 JSON 传入 */
   children?: ToolParameter[]
+  /** @AiParam / @AiOutput 扫描得到的参数级元数据 */
+  metadata?: Record<string, unknown> | null
 }
 
 /** 已注册 Tool 信息 */
@@ -27,6 +29,8 @@ export interface ToolInfo {
   sourceProjectName?: string | null
   /** 从扫描项目语义/接口文档同步的「AI 理解」摘要，用于 Agent 与列表展示 */
   aiDescription?: string | null
+  /** @AiCapability 扫描得到的能力声明元数据 JSON */
+  capabilityMetadataJson?: string | null
   enabled: boolean
   agentVisible: boolean
   lightweightEnabled: boolean

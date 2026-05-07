@@ -23,6 +23,12 @@ export interface CanvasNodeData {
   groupId?: string
   /** 展示用描述 */
   description?: string
+  /** 当前节点输出在流程变量中的别名，如 customer / contract */
+  outputAlias?: string
+  /** 入参映射：参数路径 -> 上游输出 / 上下文 / 常量表达式 */
+  inputMapping?: Record<string, string>
+  /** 变量映射备注，便于运营记录业务含义 */
+  mappingNote?: string
 }
 
 export interface CanvasNode {
@@ -35,6 +41,9 @@ export interface CanvasNode {
     ref?: string
     groupId?: string
     description?: string
+    outputAlias?: string
+    inputMapping?: Record<string, string>
+    mappingNote?: string
   }
 }
 
