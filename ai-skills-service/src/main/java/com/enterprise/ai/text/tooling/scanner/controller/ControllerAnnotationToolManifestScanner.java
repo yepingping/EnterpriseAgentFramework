@@ -79,8 +79,11 @@ public class ControllerAnnotationToolManifestScanner {
         s.sourcePath = sourcePath;
         STATE.set(s);
         try {
-            List<Path> javaFiles = collectJavaFilesWithIncremental(sourcePath, s);
-            Map<String, TypeDeclaration<?>> classIndex = buildClassIndex(javaFiles);
+            // 类索引必须覆盖全仓库源码：增量时若只索引「本次变更的 .java」，则无法解析其它文件里的 VO/DTO，
+            // 导致「返回值」RESPONSE 子树为空（接口图谱级联只能选到 VO 根）。
+            List<Path> allJavaFiles = collectJavaFiles(sourcePath);
+            Map<String, TypeDeclaration<?>> classIndex = buildClassIndex(allJavaFiles);
+            List<Path> javaFiles = collectJavaFilesWithIncremental(allJavaFiles, sourcePath, s);
             List<ToolDefinition> tools = new ArrayList<>();
             javaFiles.forEach(javaFile -> {
                 try {
@@ -155,6 +158,7 @@ public class ControllerAnnotationToolManifestScanner {
 
                 MappingDefinition definition = mapping.get();
                 List<ToolParameterDefinition> parameters = extractParameters(method, classIndex, bodyExtractor, state);
+                parameters = appendResolvedResponseParameter(parameters, extractResponseType(method), bodyExtractor, classIndex);
                 String requestBodyType = extractRequestBodyType(method);
 
                 tools.add(new ToolDefinition(
@@ -311,6 +315,60 @@ public class ControllerAnnotationToolManifestScanner {
         return parameters;
     }
 
+    /**
+     * 当方法返回类型可解析为源码中的 DTO/VO 并展开出字段时，追加 {@code location=RESPONSE} 的「返回值」参数树，
+     * 使下游接口图谱能选到 VO 内字段，而不仅是根类型节点。
+     */
+    private List<ToolParameterDefinition> appendResolvedResponseParameter(
+            List<ToolParameterDefinition> parameters,
+            String responseType,
+            RequestBodySchemaExtractor bodyExtractor,
+            Map<String, TypeDeclaration<?>> classIndex) {
+        if (responseType == null || responseType.isBlank()) {
+            return parameters;
+        }
+        String trimmed = responseType.trim();
+        if ("void".equalsIgnoreCase(trimmed)) {
+            return parameters;
+        }
+        List<ToolParameterDefinition> responseChildren =
+                bodyExtractor.extract(trimmed, classIndex, ParameterLocation.RESPONSE);
+        if (responseChildren.isEmpty()) {
+            if (log.isDebugEnabled() && looksLikeUnresolvedDtoName(trimmed)) {
+                log.debug("Controller scan: skip RESPONSE schema for return type '{}' (no resolvable fields in index; e.g. VO in another module, Lombok-only, or primitive wrapper)",
+                        trimmed);
+            }
+            return parameters;
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Controller scan: append RESPONSE schema for return type '{}' ({} top-level fields)",
+                    trimmed, responseChildren.size());
+        }
+        List<ToolParameterDefinition> out = new ArrayList<>(parameters);
+        out.add(new ToolParameterDefinition(
+                "返回值",
+                trimmed,
+                "由控制器方法返回类型解析的响应体结构",
+                false,
+                ParameterLocation.RESPONSE,
+                responseChildren
+        ));
+        return out;
+    }
+
+    /** 避免对 string、void 等打无意义 debug */
+    private static boolean looksLikeUnresolvedDtoName(String trimmed) {
+        if (trimmed == null || trimmed.isBlank()) {
+            return false;
+        }
+        String t = trimmed.trim();
+        if ("void".equalsIgnoreCase(t)) {
+            return false;
+        }
+        char c = t.charAt(0);
+        return Character.isUpperCase(c);
+    }
+
     private String resolveParameterText(Parameter param, MethodDeclaration method, ScanState s, String fallback) {
         for (String key : paramDescriptionOrder(s)) {
             if (key == null) {
@@ -380,10 +438,24 @@ public class ControllerAnnotationToolManifestScanner {
         return null;
     }
 
+    private static final Pattern GENERIC_WRAPPER_PATTERN = Pattern.compile("^\\s*([A-Z]\\w*)\\s*<(.+)>\\s*$");
+
+    /** 常见 HTTP 响应包装类型前缀；匹配时会剥掉外层泛型，只保留内部类型参数。 */
+    private static final Set<String> RESPONSE_WRAPPER_PREFIXES = Set.of(
+            "apiresult", "webapiresult", "apiresponse", "result",
+            "responseentity", "response", "basresult", "commonresult",
+            "restult", "ajaxresult", "jsonresult", "httpentity"
+    );
+
     private String extractResponseType(MethodDeclaration method) {
         String type = method.getType().asString();
-        if (type.startsWith("ApiResult<") && type.endsWith(">")) {
-            return type.substring("ApiResult<".length(), type.length() - 1);
+        // 处理常见泛型包装：ApiResult<T>、WebApiResult<T>、ResponseEntity<T> 等
+        java.util.regex.Matcher m = GENERIC_WRAPPER_PATTERN.matcher(type);
+        if (m.matches()) {
+            String wrapperName = m.group(1).toLowerCase(Locale.ROOT);
+            if (RESPONSE_WRAPPER_PREFIXES.contains(wrapperName)) {
+                return m.group(2).trim();
+            }
         }
         return type;
     }
@@ -524,12 +596,14 @@ public class ControllerAnnotationToolManifestScanner {
                 .anyMatch(name -> "RestController".equals(name) || "Controller".equals(name));
     }
 
-    private List<Path> collectJavaFilesWithIncremental(Path sourcePath, ScanState s) {
-        List<Path> all = collectJavaFiles(sourcePath);
+    /**
+     * @param allJavaFiles {@link #collectJavaFiles} 的完整列表（避免重复 walk）
+     */
+    private List<Path> collectJavaFilesWithIncremental(List<Path> allJavaFiles, Path sourcePath, ScanState s) {
         if (s.incrementalSinceMs > 0) {
-            return IncrementalFileFilter.apply(all, sourcePath, s.incrementalSinceMs, s.options);
+            return IncrementalFileFilter.apply(allJavaFiles, sourcePath, s.incrementalSinceMs, s.options);
         }
-        return all;
+        return allJavaFiles;
     }
 
     private List<Path> collectJavaFiles(Path sourcePath) {

@@ -82,16 +82,41 @@ export function getApiGraphSnapshot(projectId: number) {
   return agentRequest.get<ApiGraphSnapshot>(`/api/api-graph/projects/${projectId}/snapshot`)
 }
 
+/** 校验并规范化图谱快照（兼容裸 REST 或 ApiResult 包裹后的 body） */
+export function parseApiGraphSnapshot(raw: unknown): ApiGraphSnapshot {
+  let body = raw
+  if (body !== null && typeof body === 'object' && typeof (body as Record<string, unknown>).code === 'number') {
+    const wrap = body as { code: number; message?: string; data?: unknown }
+    if (wrap.code !== 200 && wrap.code !== 0) {
+      throw new Error(wrap.message || '请求失败')
+    }
+    body = wrap.data
+  }
+  if (body === null || typeof body !== 'object') {
+    throw new Error('图谱响应为空')
+  }
+  const s = body as Record<string, unknown>
+  if (!Array.isArray(s.nodes) || !Array.isArray(s.edges) || !Array.isArray(s.layouts)) {
+    throw new Error('图谱快照格式错误：缺少 nodes / edges / layouts')
+  }
+  return body as ApiGraphSnapshot
+}
+
 export function rebuildApiGraph(projectId: number) {
-  return agentRequest.post<ApiGraphSnapshot>(`/api/api-graph/projects/${projectId}/rebuild`)
+  return agentRequest.post<ApiGraphSnapshot>(`/api/api-graph/projects/${projectId}/rebuild`, {})
+}
+
+/** 删除本项目图谱后按扫描结果全量再生（节点 ID 会变；手工连线与布局丢失） */
+export function regenerateApiGraph(projectId: number) {
+  return agentRequest.post<ApiGraphSnapshot>(`/api/api-graph/projects/${projectId}/regenerate`, {})
 }
 
 export function inferApiGraphModelEdges(projectId: number) {
-  return agentRequest.post<ApiGraphInferResult>(`/api/api-graph/projects/${projectId}/infer`)
+  return agentRequest.post<ApiGraphInferResult>(`/api/api-graph/projects/${projectId}/infer`, {})
 }
 
 export function inferApiGraphRequestResponseEdges(projectId: number) {
-  return agentRequest.post<ApiGraphInferResult>(`/api/api-graph/projects/${projectId}/infer/request-response`)
+  return agentRequest.post<ApiGraphInferResult>(`/api/api-graph/projects/${projectId}/infer/request-response`, {})
 }
 
 export function listApiGraphCandidates(projectId: number, status = 'CANDIDATE', minConfidence?: number) {

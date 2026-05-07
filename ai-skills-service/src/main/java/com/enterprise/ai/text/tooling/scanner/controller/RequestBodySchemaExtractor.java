@@ -64,13 +64,24 @@ class RequestBodySchemaExtractor {
 
     List<ToolParameterDefinition> extract(String typeLiteral,
                                           Map<String, TypeDeclaration<?>> classIndex) {
-        return resolveFields(typeLiteral, classIndex, new HashSet<>(), 0);
+        return extract(typeLiteral, classIndex, ParameterLocation.BODY);
+    }
+
+    /**
+     * 与 {@link #extract(String, Map)} 相同，但嵌套字段使用指定 location（如 RESPONSE 用于从返回类型展开的响应体树）。
+     */
+    List<ToolParameterDefinition> extract(String typeLiteral,
+                                          Map<String, TypeDeclaration<?>> classIndex,
+                                          ParameterLocation fieldLocation) {
+        ParameterLocation loc = fieldLocation == null ? ParameterLocation.BODY : fieldLocation;
+        return resolveFields(typeLiteral, classIndex, new HashSet<>(), 0, loc);
     }
 
     private List<ToolParameterDefinition> resolveFields(String typeLiteral,
                                                         Map<String, TypeDeclaration<?>> classIndex,
                                                         Set<String> visited,
-                                                        int depth) {
+                                                        int depth,
+                                                        ParameterLocation fieldLocation) {
         if (depth >= MAX_DEPTH) {
             return List.of();
         }
@@ -91,7 +102,7 @@ class RequestBodySchemaExtractor {
             List<ToolParameterDefinition> params = new ArrayList<>();
             if (declaration instanceof RecordDeclaration recordDeclaration) {
                 for (Parameter component : recordDeclaration.getParameters()) {
-                    params.add(parameterFromComponent(component, classIndex, visited, depth));
+                    params.add(parameterFromComponent(component, classIndex, visited, depth, fieldLocation));
                 }
             } else if (declaration instanceof ClassOrInterfaceDeclaration classDecl) {
                 for (FieldDeclaration field : classDecl.getFields()) {
@@ -102,7 +113,7 @@ class RequestBodySchemaExtractor {
                         continue;
                     }
                     for (VariableDeclarator variable : field.getVariables()) {
-                        params.add(parameterFromField(field, variable, classIndex, visited, depth));
+                        params.add(parameterFromField(field, variable, classIndex, visited, depth, fieldLocation));
                     }
                 }
             }
@@ -115,18 +126,19 @@ class RequestBodySchemaExtractor {
     private ToolParameterDefinition parameterFromComponent(Parameter component,
                                                            Map<String, TypeDeclaration<?>> classIndex,
                                                            Set<String> visited,
-                                                           int depth) {
+                                                           int depth,
+                                                           ParameterLocation fieldLocation) {
         String rawType = component.getType().asString();
         String displayName = jsonPropertyName(component.getAnnotations(), component.getNameAsString());
         String description = describeByOrder(component.getAnnotations(), null, component.getNameAsString());
         boolean required = isRequired(component.getAnnotations());
-        List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1);
+        List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1, fieldLocation);
         return new ToolParameterDefinition(
                 displayName,
                 mapDisplayType(rawType),
                 description,
                 required,
-                ParameterLocation.BODY,
+                fieldLocation,
                 children
         );
     }
@@ -135,7 +147,8 @@ class RequestBodySchemaExtractor {
                                                        VariableDeclarator variable,
                                                        Map<String, TypeDeclaration<?>> classIndex,
                                                        Set<String> visited,
-                                                       int depth) {
+                                                       int depth,
+                                                       ParameterLocation fieldLocation) {
         String rawType = variable.getType().asString();
         String displayName = jsonPropertyName(field.getAnnotations(), variable.getNameAsString());
         String javadoc = field.getJavadoc()
@@ -144,13 +157,13 @@ class RequestBodySchemaExtractor {
                 .orElse(null);
         String description = describeByOrder(field.getAnnotations(), javadoc, variable.getNameAsString());
         boolean required = isRequired(field.getAnnotations());
-        List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1);
+        List<ToolParameterDefinition> children = resolveFields(rawType, classIndex, visited, depth + 1, fieldLocation);
         return new ToolParameterDefinition(
                 displayName,
                 mapDisplayType(rawType),
                 description,
                 required,
-                ParameterLocation.BODY,
+                fieldLocation,
                 children
         );
     }

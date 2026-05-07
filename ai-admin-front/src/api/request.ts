@@ -16,13 +16,21 @@ function createInstance(baseURL: string): AxiosInstance {
   )
 
   instance.interceptors.response.use(
-    (response: AxiosResponse<ApiResult>) => {
-      const res = response.data
-      if (res.code !== undefined && res.code !== 200) {
-        ElMessage.error(res.message || '请求失败')
-        return Promise.reject(new Error(res.message || '请求失败'))
+    (response: AxiosResponse<unknown>) => {
+      const res = response.data as Record<string, unknown> | null
+      // ai-common ApiResult：成功多为 code=200；部分网关使用 code=0 表示成功
+      if (res !== null && typeof res === 'object' && 'code' in res && typeof res.code === 'number') {
+        const code = res.code as number
+        if (code !== 200 && code !== 0) {
+          const msg = typeof res.message === 'string' ? res.message : '请求失败'
+          ElMessage.error(msg)
+          return Promise.reject(new Error(msg))
+        }
+        if ('data' in res && Object.prototype.hasOwnProperty.call(res, 'data')) {
+          response.data = res.data as unknown
+        }
       }
-      return response
+      return response as AxiosResponse<ApiResult>
     },
     (error) => {
       const message =

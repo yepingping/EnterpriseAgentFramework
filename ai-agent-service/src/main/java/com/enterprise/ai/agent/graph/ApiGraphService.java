@@ -16,9 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,6 +40,7 @@ import java.util.Set;
  *   <li>{@link #upsertManualEdge} / {@link #deleteEdge} —— 运营手动连线 / 删边</li>
  *   <li>{@link #loadGraph} —— 拉取 {nodes, edges, layout} 给前端 G6 渲染</li>
  *   <li>{@link #saveLayout} —— 保存运营布局</li>
+ *   <li>{@link #regenerateGraphInteractive} —— 清空后全量再生（管理端）</li>
  *   <li>{@link #deleteByProject} —— 项目删除时联动清理</li>
  * </ul>
  *
@@ -99,6 +103,31 @@ public class ApiGraphService {
         }
     }
 
+    /**
+     * 管理端 / OpenAPI 「重建图谱」专用：失败抛出异常，便于接口返回明确错误。
+     * 扫描链路仍使用 {@link #rebuildForProject}。
+     */
+    @Transactional
+    public void rebuildGraphInteractive(Long projectId) {
+        if (projectId == null) {
+            throw new IllegalArgumentException("projectId 不能为空");
+        }
+        doRebuild(projectId);
+    }
+
+    /**
+     * 管理端「重新生成」：删除本项目下全部图谱节点、边与画布布局后，再执行与 {@link #doRebuild} 相同的全量投影与 MODEL_REF 推断。
+     * <p>手工连线、候选边、卡片坐标等均会丢失；扫描侧 {@link ScanProjectToolEntity} 数据不变。</p>
+     */
+    @Transactional
+    public void regenerateGraphInteractive(Long projectId) {
+        if (projectId == null) {
+            throw new IllegalArgumentException("projectId 不能为空");
+        }
+        repository.deleteByProject(projectId);
+        doRebuild(projectId);
+    }
+
     private void doRebuild(Long projectId) {
         List<ScanModuleEntity> modules = scanModuleService.listByProject(projectId);
         Map<Long, Long> moduleNodeIds = new LinkedHashMap<>();
@@ -153,6 +182,9 @@ public class ApiGraphService {
         for (ApiGraphNodeEntity dtoNode : dtoNodeByType.values()) {
             keepIds.add(dtoNode.getId());
         }
+
+        // Controller 扫描等仅有 responseType、无 RESPONSE 子参树时，复合出参只有一层节点；从同类型已展开字段克隆子树
+        expandBareCompositeFields(projectId, keepIds);
 
         repository.deleteNodesNotIn(projectId, keepIds);
 
@@ -282,6 +314,234 @@ public class ApiGraphService {
         }
     }
 
+    /**
+     * 当扫描结果只有类型名（如 Controller 的 responseType=WebApiResult&lt;TeamInfoVO&gt;）而没有 RESPONSE 子参 JSON 时，
+     * {@link #walkAndUpsertField} 只会建一层复合出/入参节点，级联里选不到 VO 内字段。
+     * 若项目中已有「同简单类型名」且已展开子树的字段，则把该子树克隆挂到当前裸复合字段下（paramPath 前缀替换）。
+     */
+    private void expandBareCompositeFields(Long projectId, Set<Long> keepIds) {
+        List<ApiGraphNodeEntity> allNodes = repository.listNodesByProject(projectId);
+        Map<Long, ApiGraphNodeEntity> byId = new HashMap<>(allNodes.size() * 2);
+        for (ApiGraphNodeEntity n : allNodes) {
+            byId.put(n.getId(), n);
+        }
+        List<ApiGraphEdgeEntity> edges = repository.listEdgesByProject(projectId);
+
+        Map<Long, List<ApiGraphNodeEntity>> childrenByParent = new HashMap<>();
+        for (ApiGraphNodeEntity n : allNodes) {
+            if (n.getParentId() == null) {
+                continue;
+            }
+            if (ApiGraphNodeKind.FIELD_IN.equals(n.getKind()) || ApiGraphNodeKind.FIELD_OUT.equals(n.getKind())) {
+                childrenByParent.computeIfAbsent(n.getParentId(), k -> new ArrayList<>()).add(n);
+            }
+        }
+
+        Set<Long> fieldIdsWithDtoBelongs = new HashSet<>();
+        for (ApiGraphEdgeEntity e : edges) {
+            if (!Objects.equals(projectId, e.getProjectId())) {
+                continue;
+            }
+            if (!ApiGraphEdgeKind.BELONGS_TO.equals(e.getKind())) {
+                continue;
+            }
+            ApiGraphNodeEntity tgt = byId.get(e.getTargetNodeId());
+            if (tgt != null && ApiGraphNodeKind.DTO.equals(tgt.getKind())) {
+                fieldIdsWithDtoBelongs.add(e.getSourceNodeId());
+            }
+        }
+
+        List<ApiGraphNodeEntity> fieldNodes = new ArrayList<>();
+        for (ApiGraphNodeEntity n : allNodes) {
+            if (ApiGraphNodeKind.FIELD_IN.equals(n.getKind()) || ApiGraphNodeKind.FIELD_OUT.equals(n.getKind())) {
+                fieldNodes.add(n);
+            }
+        }
+
+        // 构建 fieldId → BELONGS_TO DTO nodeId 映射
+        Map<Long, Long> fieldToDtoId = new HashMap<>();
+        for (ApiGraphEdgeEntity e : edges) {
+            if (!Objects.equals(projectId, e.getProjectId())) continue;
+            if (!ApiGraphEdgeKind.BELONGS_TO.equals(e.getKind())) continue;
+            ApiGraphNodeEntity tgt = byId.get(e.getTargetNodeId());
+            if (tgt != null && ApiGraphNodeKind.DTO.equals(tgt.getKind())) {
+                fieldToDtoId.put(e.getSourceNodeId(), e.getTargetNodeId());
+            }
+        }
+
+        for (ApiGraphNodeEntity bare : fieldNodes) {
+            if (!fieldIdsWithDtoBelongs.contains(bare.getId())) {
+                continue;
+            }
+            if (!childrenByParent.getOrDefault(bare.getId(), List.of()).isEmpty()) {
+                continue;
+            }
+            String tpl = simpleTypeName(bare.getTypeName());
+            if (tpl.isBlank() || isPrimitive(tpl)) {
+                continue;
+            }
+
+            // 策略一：按同简单类型名找 witness（原有逻辑）
+            Optional<ApiGraphNodeEntity> witnessOpt = pickWitnessFieldForTemplate(
+                    fieldNodes, childrenByParent, fieldIdsWithDtoBelongs, tpl, bare.getId(), bare.getKind());
+
+            // 策略二：若按类型名找不到，通过 BELONGS_TO DTO 节点找 ——
+            //         只要另一个字段也引用了同一个 DTO 节点且有子级，就用它做模板
+            if (witnessOpt.isEmpty()) {
+                Long bareDtoId = fieldToDtoId.get(bare.getId());
+                if (bareDtoId != null) {
+                    witnessOpt = fieldNodes.stream()
+                            .filter(w -> !Objects.equals(w.getId(), bare.getId()))
+                            .filter(w -> Objects.equals(fieldToDtoId.get(w.getId()), bareDtoId))
+                            .filter(w -> !childrenByParent.getOrDefault(w.getId(), List.of()).isEmpty())
+                            .min(Comparator.comparingInt(w -> fieldPath(w).length()));
+                }
+            }
+
+            if (witnessOpt.isEmpty()) {
+                continue;
+            }
+            ApiGraphNodeEntity witness = witnessOpt.get();
+            String wRoot = fieldPath(witness);
+            String bRoot = fieldPath(bare);
+            Long refId = bare.getRefId();
+            if (refId == null) {
+                continue;
+            }
+            cloneWitnessFieldSubtree(projectId, bare.getId(), witness, wRoot, bRoot, refId, bare.getKind(),
+                    childrenByParent, edges, byId, keepIds);
+        }
+    }
+
+    private Optional<ApiGraphNodeEntity> pickWitnessFieldForTemplate(
+            List<ApiGraphNodeEntity> fieldNodes,
+            Map<Long, List<ApiGraphNodeEntity>> childrenByParent,
+            Set<Long> fieldIdsWithDtoBelongs,
+            String templateSimple,
+            Long excludeId,
+            String preferredKind) {
+        Optional<ApiGraphNodeEntity> sameKind = fieldNodes.stream()
+                .filter(w -> preferredKind.equals(w.getKind()))
+                .filter(w -> !Objects.equals(w.getId(), excludeId))
+                .filter(w -> fieldIdsWithDtoBelongs.contains(w.getId()))
+                .filter(w -> templateSimple.equals(simpleTypeName(w.getTypeName())))
+                .filter(w -> !childrenByParent.getOrDefault(w.getId(), List.of()).isEmpty())
+                .min(Comparator.comparingInt(w -> fieldPath(w).length()));
+        if (sameKind.isPresent()) {
+            return sameKind;
+        }
+        return fieldNodes.stream()
+                .filter(w -> !Objects.equals(w.getId(), excludeId))
+                .filter(w -> fieldIdsWithDtoBelongs.contains(w.getId()))
+                .filter(w -> templateSimple.equals(simpleTypeName(w.getTypeName())))
+                .filter(w -> !childrenByParent.getOrDefault(w.getId(), List.of()).isEmpty())
+                .min(Comparator.comparingInt(w -> fieldPath(w).length()));
+    }
+
+    private void cloneWitnessFieldSubtree(Long projectId,
+                                          Long bareRootId,
+                                          ApiGraphNodeEntity witness,
+                                          String witnessRootPath,
+                                          String bareRootPath,
+                                          Long targetRefId,
+                                          String fieldKind,
+                                          Map<Long, List<ApiGraphNodeEntity>> childrenByParent,
+                                          List<ApiGraphEdgeEntity> edges,
+                                          Map<Long, ApiGraphNodeEntity> nodeById,
+                                          Set<Long> keepIds) {
+        ArrayDeque<WitnessCloneFrame> queue = new ArrayDeque<>();
+        for (ApiGraphNodeEntity ch : childrenByParent.getOrDefault(witness.getId(), List.of())) {
+            queue.addLast(new WitnessCloneFrame(ch, bareRootId));
+        }
+        while (!queue.isEmpty()) {
+            WitnessCloneFrame frame = queue.removeFirst();
+            ApiGraphNodeEntity v = frame.node();
+            Long newParentId = frame.parentId();
+
+            String newParamPath = remapFieldPathPrefix(witnessRootPath, bareRootPath, fieldPath(v));
+            ApiGraphNodeEntity clone = cloneFieldNode(projectId, v, targetRefId, newParentId, fieldKind, newParamPath);
+            keepIds.add(clone.getId());
+
+            copyBelongsToDtoEdges(projectId, v.getId(), clone.getId(), edges, nodeById);
+
+            for (ApiGraphNodeEntity c : childrenByParent.getOrDefault(v.getId(), List.of())) {
+                queue.addLast(new WitnessCloneFrame(c, clone.getId()));
+            }
+        }
+    }
+
+    private record WitnessCloneFrame(ApiGraphNodeEntity node, Long parentId) {
+    }
+
+    private static String remapFieldPathPrefix(String witnessRoot, String bareRoot, String pathV) {
+        String suffix;
+        if (witnessRoot.isEmpty()) {
+            suffix = pathV;
+        } else if (pathV.equals(witnessRoot)) {
+            suffix = "";
+        } else if (pathV.startsWith(witnessRoot + ".")) {
+            suffix = pathV.substring(witnessRoot.length() + 1);
+        } else {
+            int dot = pathV.lastIndexOf('.');
+            suffix = dot >= 0 ? pathV.substring(dot + 1) : pathV;
+        }
+        if (suffix.isEmpty()) {
+            return bareRoot;
+        }
+        return bareRoot.isEmpty() ? suffix : bareRoot + "." + suffix;
+    }
+
+    private ApiGraphNodeEntity cloneFieldNode(Long projectId,
+                                              ApiGraphNodeEntity template,
+                                              Long refId,
+                                              Long parentId,
+                                              String kind,
+                                              String newParamPath) {
+        ApiGraphNodeEntity n = new ApiGraphNodeEntity();
+        n.setProjectId(projectId);
+        n.setKind(kind);
+        n.setRefId(refId);
+        n.setParentId(parentId);
+        n.setLabel(template.getLabel());
+        n.setTypeName(template.getTypeName());
+        Map<String, Object> props = new LinkedHashMap<>(readJsonMap(template.getPropsJson()));
+        props.put("paramPath", newParamPath);
+        n.setPropsJson(writeJsonOrNull(props));
+        return repository.upsertNode(n);
+    }
+
+    private void copyBelongsToDtoEdges(Long projectId,
+                                       Long witnessFieldId,
+                                       Long clonedFieldId,
+                                       List<ApiGraphEdgeEntity> edges,
+                                       Map<Long, ApiGraphNodeEntity> nodeById) {
+        for (ApiGraphEdgeEntity e : edges) {
+            if (!Objects.equals(projectId, e.getProjectId())) {
+                continue;
+            }
+            if (!ApiGraphEdgeKind.BELONGS_TO.equals(e.getKind())) {
+                continue;
+            }
+            if (!Objects.equals(witnessFieldId, e.getSourceNodeId())) {
+                continue;
+            }
+            ApiGraphNodeEntity tgt = nodeById.get(e.getTargetNodeId());
+            if (tgt == null || !ApiGraphNodeKind.DTO.equals(tgt.getKind())) {
+                continue;
+            }
+            ApiGraphEdgeEntity edge = new ApiGraphEdgeEntity();
+            edge.setProjectId(projectId);
+            edge.setSourceNodeId(clonedFieldId);
+            edge.setTargetNodeId(e.getTargetNodeId());
+            edge.setKind(ApiGraphEdgeKind.BELONGS_TO);
+            edge.setSource(ApiGraphEdgeKind.SOURCE_AUTO);
+            edge.setConfidence(1.0);
+            edge.setEvidenceJson(writeJsonOrNull(Map.of("by", "cloned_from_witness")));
+            edge.setEnabled(Boolean.TRUE);
+            repository.upsertEdge(edge);
+        }
+    }
+
     // ====================================================================================
     // 二、自动推断「数据模型共享」紫色虚线边（MODEL_REF）
     // ====================================================================================
@@ -329,6 +589,10 @@ public class ApiGraphService {
                     ApiGraphNodeEntity b = fields.get(j);
                     if (Objects.equals(a.getRefId(), b.getRefId())) {
                         // 同一 API 内部不画 MODEL_REF（噪音过大）
+                        continue;
+                    }
+                    // 仅允许出参 ↔ 入参之间的 MODEL_REF，出参↔出参、入参↔入参不做连接
+                    if (Objects.equals(a.getKind(), b.getKind())) {
                         continue;
                     }
                     ApiGraphEdgeEntity edge = new ApiGraphEdgeEntity();
@@ -574,6 +838,13 @@ public class ApiGraphService {
         return location != null && location.equalsIgnoreCase("RESPONSE");
     }
 
+    /** 常见 HTTP 响应包装类型（不区分大小写），剥壳后保留内部类型参数。 */
+    private static final Set<String> RESPONSE_WRAPPER_NAMES = Set.of(
+            "apiresult", "webapiresult", "apiresponse", "result",
+            "responseentity", "response", "basresult", "commonresult",
+            "restult", "ajaxresult", "jsonresult", "httpentity"
+    );
+
     /**
      * OpenAPI / Controller 扫描器把 HTTP 响应类型写在 {@link ScanProjectToolEntity#getResponseType()}，
      * 一般不在 parametersJson 里带 location=RESPONSE 的根参数；若不补偿则图谱无 FIELD_OUT，
@@ -595,13 +866,36 @@ public class ApiGraphService {
         if (isPrimitive(simple) && "void".equalsIgnoreCase(simple)) {
             return null;
         }
+        // 剥掉常见泛型包装壳：WebApiResult<TeamInfoVO> → TeamInfoVO
+        String unwrapped = unwrapResponseType(trimmed);
         return new ToolDefinitionParameter(
                 "返回值",
-                trimmed,
+                unwrapped,
                 "由扫描结果的 responseType 生成，用于接口图谱出参与数据来源选择",
                 false,
                 "RESPONSE"
         );
+    }
+
+    /**
+     * 若响应类型是常见包装泛型（如 WebApiResult&lt;T&gt;），提取内部类型参数；
+     * 非包装类型原样返回。
+     */
+    private static String unwrapResponseType(String rawType) {
+        if (rawType == null) {
+            return rawType;
+        }
+        String trimmed = rawType.trim();
+        int lt = trimmed.indexOf('<');
+        int gt = trimmed.lastIndexOf('>');
+        if (lt <= 0 || gt <= lt) {
+            return trimmed;
+        }
+        String wrapperName = trimmed.substring(0, lt).trim().toLowerCase(Locale.ROOT);
+        if (RESPONSE_WRAPPER_NAMES.contains(wrapperName)) {
+            return trimmed.substring(lt + 1, gt).trim();
+        }
+        return trimmed;
     }
 
     /**

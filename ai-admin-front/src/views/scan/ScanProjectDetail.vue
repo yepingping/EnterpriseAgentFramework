@@ -510,6 +510,7 @@
       <ApiGraphCanvas
         v-if="apiGraphMounted"
         :project-id="projectId"
+        :panel-expanded="detailPanelActive.includes('apiGraph')"
       />
       <el-empty
         v-else

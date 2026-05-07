@@ -5,6 +5,8 @@ import com.enterprise.ai.agent.graph.ApiGraphLayoutEntity;
 import com.enterprise.ai.agent.graph.ApiGraphNodeEntity;
 import com.enterprise.ai.agent.graph.ApiGraphService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,6 +16,7 @@ import java.util.List;
  * 接口图谱 REST：扫描项目维度的节点 / 边 / 布局读写。
  * 路径前缀 {@code /api/api-graph/projects/{projectId}}，与 {@code /api/scan-projects/{id}} 平行。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/api-graph/projects/{projectId}")
 @RequiredArgsConstructor
@@ -30,9 +33,37 @@ public class ApiGraphController {
 
     /** 重新从 scan_project_tool / scan_module 投影节点（同时跑一次 MODEL_REF 自动推断）。 */
     @PostMapping("/rebuild")
-    public ResponseEntity<SnapshotDTO> rebuild(@PathVariable Long projectId) {
-        apiGraphService.rebuildForProject(projectId);
-        return snapshot(projectId);
+    public ResponseEntity<?> rebuild(@PathVariable Long projectId) {
+        try {
+            apiGraphService.rebuildGraphInteractive(projectId);
+            log.info("[ApiGraphController] rebuild finished projectId={}", projectId);
+            return snapshot(projectId);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        } catch (Exception ex) {
+            log.warn("[ApiGraphController] rebuild failed projectId={}", projectId, ex);
+            String msg = ex.getMessage() != null ? ex.getMessage() : "图谱重建失败";
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ApiErrorResponse(msg));
+        }
+    }
+
+    /**
+     * 清空本项目图谱（节点、边、布局）后按扫描结果全量重新生成。
+     * <p>与 {@link #rebuild} 不同：会删除已有数据再插入，节点 ID 将重新分配；手工连线与画布坐标丢失。</p>
+     */
+    @PostMapping("/regenerate")
+    public ResponseEntity<?> regenerate(@PathVariable Long projectId) {
+        try {
+            apiGraphService.regenerateGraphInteractive(projectId);
+            log.info("[ApiGraphController] regenerate finished projectId={}", projectId);
+            return snapshot(projectId);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        } catch (Exception ex) {
+            log.warn("[ApiGraphController] regenerate failed projectId={}", projectId, ex);
+            String msg = ex.getMessage() != null ? ex.getMessage() : "图谱重新生成失败";
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ApiErrorResponse(msg));
+        }
     }
 
     /** 仅触发 MODEL_REF 紫色虚线边重新推断（不动节点）。 */

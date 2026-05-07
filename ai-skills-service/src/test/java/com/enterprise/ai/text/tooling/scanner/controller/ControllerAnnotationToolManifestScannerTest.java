@@ -47,6 +47,14 @@ class ControllerAnnotationToolManifestScannerTest {
         assertEquals("string", detailLevel.type());
         assertEquals(ParameterLocation.QUERY, detailLevel.location());
 
+        ToolParameterDefinition responseRoot = getOrder.parameters().get(2);
+        assertEquals("返回值", responseRoot.name());
+        assertEquals("OrderDetailResponse", responseRoot.type());
+        assertEquals(ParameterLocation.RESPONSE, responseRoot.location());
+        assertEquals(1, responseRoot.children().size());
+        assertEquals("orderId", responseRoot.children().get(0).name());
+        assertEquals(ParameterLocation.RESPONSE, responseRoot.children().get(0).location());
+
         ToolDefinition createOrder = manifest.tools().get(1);
         assertEquals("create_order", createOrder.name());
         assertEquals("POST", createOrder.method());
