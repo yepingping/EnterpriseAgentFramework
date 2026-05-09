@@ -49,6 +49,9 @@ public class ScanProjectToolEntity {
     /** Java 侧 @AiCapability 声明的原始结构化元数据 JSON。 */
     private String capabilityMetadataJson;
 
+    /** LLM 敏感数据扫描结果 JSON，见 {@link com.enterprise.ai.agent.scan.sensitive.SensitiveDataStored} */
+    private String sensitiveDataJson;
+
     private Boolean enabled;
 
     private Boolean agentVisible;

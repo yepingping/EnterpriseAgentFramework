@@ -139,6 +139,30 @@ export interface ScanProjectBlockers {
   agents: { id: string; name: string }[]
 }
 
+/** GET tools 返回的敏感扫描摘要（来自 scan_project_tool.sensitive_data_json） */
+export interface ScanToolSensitiveData {
+  types: string[]
+  summary?: string | null
+  scannedAt?: string | null
+  modelName?: string | null
+}
+
+export type SensitiveScanTaskStage = 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'
+
+export interface SensitiveScanTask {
+  taskId: string
+  projectId: number
+  stage: SensitiveScanTaskStage
+  totalSteps: number
+  completedSteps: number
+  failedCount: number
+  currentStep: string | null
+  errorMessage: string | null
+  totalTokens: number
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 export interface ProjectToolInfo extends ToolInfo {
   /** 扫描表 scan_project_tool.id，编辑/测试/语义生成/添加为 Tool 均依赖此字段 */
   scanToolId: number
@@ -162,6 +186,8 @@ export interface ProjectToolInfo extends ToolInfo {
   toolSyncDiffFields?: string[]
   /** 最近一次能力快照中存在待评审的 SDK diff（与 qualifiedName 匹配） */
   sdkCapabilityReviewPending?: boolean
+  /** GET tools 返回的敏感扫描摘要 */
+  sensitiveData?: ScanToolSensitiveData | null
 }
 
 /** POST /api/scan-projects/:id/tools/reconcile 汇总 */

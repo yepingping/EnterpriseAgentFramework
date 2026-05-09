@@ -11,6 +11,9 @@ import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
 import com.enterprise.ai.agent.scan.ScanProjectToolEntity;
 import com.enterprise.ai.agent.scan.ScanProjectToolService;
+import com.enterprise.ai.agent.scan.sensitive.SensitiveDataScanOrchestrator;
+import com.enterprise.ai.agent.scan.sensitive.SensitiveDataScanTask;
+import com.enterprise.ai.agent.scan.sensitive.SensitiveDataStored;
 import com.enterprise.ai.agent.scan.ScanSettings;
 import com.enterprise.ai.agent.scan.ScanSettingsJson;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
@@ -22,12 +25,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -43,6 +48,7 @@ public class ScanProjectController {
     private final ScanModuleService scanModuleService;
     private final ScanProjectToolService scanProjectToolService;
     private final AiRegistryService aiRegistryService;
+    private final SensitiveDataScanOrchestrator sensitiveDataScanOrchestrator;
 
     @PostMapping
     public ResponseEntity<ScanProjectDTO> create(@RequestBody ScanProjectUpsertRequest request) {
@@ -206,6 +212,30 @@ public class ScanProjectController {
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.notFound().build();
         }
+    }
+
+    @PostMapping("/{id}/sensitive-data/scan")
+    public ResponseEntity<?> startSensitiveDataScan(@PathVariable Long id,
+                                                    @RequestParam(value = "provider", required = false) String provider,
+                                                    @RequestParam(value = "model", required = false) String model) {
+        try {
+            String taskId = sensitiveDataScanOrchestrator.startProjectScan(id, provider, model);
+            return ResponseEntity.accepted().body(new SensitiveScanStartResponse(taskId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(409).body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @GetMapping("/{id}/sensitive-data/status")
+    public ResponseEntity<SensitiveScanTaskDTO> sensitiveDataScanStatus(@PathVariable Long id,
+                                                                        @RequestParam(value = "taskId", required = false) String taskId) {
+        Optional<SensitiveDataScanTask> task = taskId != null
+                ? sensitiveDataScanOrchestrator.getTask(taskId)
+                : sensitiveDataScanOrchestrator.findLatestByProject(id);
+        return task.map(t -> ResponseEntity.ok(SensitiveScanTaskDTO.from(t)))
+                .orElse(ResponseEntity.ok().body(null));
     }
 
     /**
@@ -478,6 +508,7 @@ public class ScanProjectController {
                 pendingSdkQualifiedNames == null ? Set.of() : pendingSdkQualifiedNames);
         boolean globalToolOutOfSync = link.status() == ApiToolLinkStatus.PENDING_UPDATE;
         boolean removedFromSource = Boolean.TRUE.equals(entity.getRemovedFromSource());
+        SensitiveDataViewDTO sensitiveData = parseSensitiveDataView(entity.getSensitiveDataJson());
         return new ProjectToolDTO(
                 entity.getId(),
                 entity.getName(),
@@ -505,8 +536,22 @@ public class ScanProjectController {
                 link.status().name(),
                 link.message(),
                 link.diffFields(),
-                link.sdkCapabilityReviewPending()
+                link.sdkCapabilityReviewPending(),
+                sensitiveData
         );
+    }
+
+    private SensitiveDataViewDTO parseSensitiveDataView(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            SensitiveDataStored s = objectMapper.readValue(json, SensitiveDataStored.class);
+            List<String> types = s.getTypes() == null ? List.of() : s.getTypes();
+            return new SensitiveDataViewDTO(types, s.getSummary(), s.getScannedAt(), s.getModelName());
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private static String resolveModuleDisplayName(Long moduleId, Map<Long, ScanModuleEntity> modulesById) {
@@ -601,6 +646,43 @@ public class ScanProjectController {
     record DuplicateStableKeyDTO(String stableKey, List<Long> scanToolIds) {
     }
 
+    record SensitiveScanStartResponse(String taskId) {
+    }
+
+    record SensitiveScanTaskDTO(String taskId,
+                                Long projectId,
+                                String stage,
+                                int totalSteps,
+                                int completedSteps,
+                                int failedCount,
+                                String currentStep,
+                                String errorMessage,
+                                int totalTokens,
+                                Instant startedAt,
+                                Instant finishedAt) {
+        static SensitiveScanTaskDTO from(SensitiveDataScanTask task) {
+            return new SensitiveScanTaskDTO(
+                    task.getTaskId(),
+                    task.getProjectId(),
+                    task.getStage() == null ? null : task.getStage().name(),
+                    task.getTotalSteps(),
+                    task.getCompletedSteps(),
+                    task.getFailedCount(),
+                    task.getCurrentStep(),
+                    task.getErrorMessage(),
+                    task.getTotalTokens(),
+                    task.getStartedAt(),
+                    task.getFinishedAt()
+            );
+        }
+    }
+
+    record SensitiveDataViewDTO(List<String> types,
+                                String summary,
+                                String scannedAt,
+                                String modelName) {
+    }
+
     record ProjectToolDTO(
             Long scanToolId,
             String name,
@@ -628,7 +710,8 @@ public class ScanProjectController {
             String toolLinkStatus,
             String toolLinkMessage,
             List<String> toolSyncDiffFields,
-            boolean sdkCapabilityReviewPending
+            boolean sdkCapabilityReviewPending,
+            SensitiveDataViewDTO sensitiveData
     ) {
     }
 

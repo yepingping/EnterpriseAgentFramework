@@ -231,7 +231,7 @@
       name="aiGen"
       title="AI 理解生成设置"
     >
-      <p class="ai-settings-hint">以下模型选择与「一键生成 / 强制重生成」对项目级摘要、模块列表及下方接口列表中的单条「重新生成」均生效。</p>
+      <p class="ai-settings-hint">以下模型选择与「一键生成 / 强制重生成」对项目级摘要、模块列表及下方接口列表中的单条「重新生成」均生效；「扫描敏感数据」也使用同一 Provider 与模型。</p>
       <div class="ai-toolbar">
         <el-button type="primary" :loading="batchStarting" @click="startBatchGenerate(false)">
           一键生成 AI 理解
@@ -336,6 +336,23 @@
         <div class="tools-header">
           <span>扫描接口与 AI 语义</span>
           <div class="tools-actions" @click.stop>
+            <el-button
+              size="small"
+              type="warning"
+              plain
+              :loading="sensitiveScanStarting || sensitiveTaskPolling"
+              @click="startSensitiveDataScanFlow"
+            >
+              扫描敏感数据
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!tools.length"
+              :loading="exportScanToolsExcelLoading"
+              @click="handleExportScanToolsExcel"
+            >
+              导出 EXCEL
+            </el-button>
             <el-button size="small" @click="batchToggle(false)">全部禁用</el-button>
             <el-button size="small" type="primary" @click="batchToggle(true)">全部启用</el-button>
           </div>
@@ -408,6 +425,26 @@
                       <div><b>请求体类型：</b>{{ row.requestBodyType || '-' }}</div>
                       <div><b>响应类型：</b>{{ row.responseType || '-' }}</div>
                     </div>
+                    <h4 class="expand-ai-heading">敏感数据</h4>
+                    <div
+                      v-if="row.sensitiveData && (row.sensitiveData.types?.length || row.sensitiveData.summary)"
+                      class="expand-sensitive"
+                    >
+                      <div v-if="row.sensitiveData.types?.length" class="sensitive-tags">
+                        <el-tag
+                          v-for="t in row.sensitiveData.types"
+                          :key="t"
+                          size="small"
+                          type="warning"
+                          class="sensitive-tag"
+                        >
+                          {{ scanSensitiveTypeLabel(t) }}
+                        </el-tag>
+                      </div>
+                      <p v-if="row.sensitiveData.summary" class="expand-sensitive-summary">{{ row.sensitiveData.summary }}</p>
+                      <p v-if="row.sensitiveData.scannedAt" class="expand-sensitive-meta">扫描时间：{{ row.sensitiveData.scannedAt }}</p>
+                    </div>
+                    <el-empty v-else description="尚未扫描或暂无结果" :image-size="48" />
                     <h4 class="expand-ai-heading">AI 语义文档</h4>
                     <div v-if="toolDocMap[row.scanToolId]" class="markdown-body expand-md" v-html="renderMd(toolDocMap[row.scanToolId].contentMd)" />
                     <el-empty v-else description="该接口还没有 AI 描述" :image-size="60" />
@@ -439,6 +476,31 @@
                     {{ toolDocMap[row.scanToolId].status }}
                   </el-tag>
                   <el-tag v-else size="small" type="warning">未生成</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="敏感数据" min-width="200">
+                <template #default="{ row }">
+                  <template
+                    v-if="!row.sensitiveData || (!row.sensitiveData.types?.length && !row.sensitiveData.summary)"
+                  >
+                    <span class="sensitive-cell-empty">-</span>
+                  </template>
+                  <el-tooltip v-else :content="sensitiveCellTooltip(row)" placement="top" :show-after="300">
+                    <div class="sensitive-cell">
+                      <template v-if="row.sensitiveData.types?.length">
+                        <el-tag
+                          v-for="t in row.sensitiveData.types"
+                          :key="t"
+                          size="small"
+                          type="warning"
+                          class="sensitive-tag"
+                        >
+                          {{ scanSensitiveTypeLabel(t) }}
+                        </el-tag>
+                      </template>
+                      <span v-else class="sensitive-cell-summary">{{ row.sensitiveData.summary }}</span>
+                    </div>
+                  </el-tooltip>
                 </template>
               </el-table-column>
               <el-table-column label="启用" width="78" align="center">
@@ -791,7 +853,7 @@ import { marked } from 'marked'
 
 const ApiGraphCanvas = defineAsyncComponent(() => import('./ApiGraphCanvas.vue'))
 import type { ProviderInfo } from '@/types/model'
-import type { DescriptionSource, ParamDescriptionSource, ProjectToolInfo, ScanProject, ScanSettings } from '@/types/scanProject'
+import type { DescriptionSource, ParamDescriptionSource, ProjectToolInfo, ScanProject, ScanSettings, SensitiveScanTask } from '@/types/scanProject'
 import { getDefaultScanSettings } from '@/types/scanProject'
 import type { ToolParameter, ToolTestResult, ToolUpsertRequest } from '@/types/tool'
 import type { ScanModule, SemanticDoc, SemanticTask } from '@/types/semanticDoc'
@@ -800,6 +862,7 @@ import {
   getScanProjectDetail,
   getScanProjectOperationBlockers,
   getScanProjectTools,
+  getSensitiveDataScanStatus,
   promoteScanModuleToolsToGlobal,
   promoteScanProjectToolToGlobal,
   pushScanProjectToolToGlobalTool,
@@ -812,11 +875,13 @@ import {
   updateScanProjectAuthSettings,
   updateScanProjectScanSettings,
   updateScanProjectTool,
+  startSensitiveDataScan,
 } from '@/api/scanProject'
 import {
   formatScanProjectBlockersMessage,
   parseScanProjectBlockersFromError,
 } from '@/utils/scanProjectBlockers'
+import { exportScanProjectToolsExcel, scanSensitiveTypeLabel } from '@/utils/scanProjectToolExport'
 import { startToolRetrievalRebuild } from '@/api/toolRetrieval'
 import {
   editSemanticDoc,
@@ -1599,6 +1664,15 @@ const toolModuleGroups = computed<ToolModuleGroup[]>(() => {
 })
 
 const batchStarting = ref(false)
+const sensitiveScanStarting = ref(false)
+const exportScanToolsExcelLoading = ref(false)
+const sensitiveTask = ref<SensitiveScanTask | null>(null)
+let sensitivePollTimer: ReturnType<typeof setInterval> | null = null
+
+const sensitiveTaskPolling = computed(
+  () => sensitiveTask.value?.stage === 'RUNNING' || sensitiveTask.value?.stage === 'QUEUED',
+)
+
 const task = ref<SemanticTask | null>(null)
 const projectGenLoading = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -1636,6 +1710,17 @@ const taskPercent = computed(() => {
 function renderMd(content: string | null | undefined): string {
   if (!content) return ''
   return marked.parse(content, { async: false }) as string
+}
+
+function sensitiveCellTooltip(row: ProjectToolInfo): string {
+  const s = row.sensitiveData
+  if (!s) return ''
+  const parts: string[] = []
+  if (s.types?.length) parts.push(`类型: ${s.types.map((t) => scanSensitiveTypeLabel(t)).join('、')}`)
+  if (s.summary) parts.push(s.summary)
+  if (s.scannedAt) parts.push(`扫描时间: ${s.scannedAt}`)
+  if (s.modelName) parts.push(`模型: ${s.modelName}`)
+  return parts.join('\n')
 }
 
 function toolDocSummary(tool: ProjectToolInfo): string {
@@ -1782,6 +1867,85 @@ function stopPollingTask() {
   }
 }
 
+async function resumeSensitiveTaskIfAny() {
+  try {
+    const { data } = await getSensitiveDataScanStatus(projectId.value)
+    sensitiveTask.value = data ?? null
+    if (data && (data.stage === 'RUNNING' || data.stage === 'QUEUED')) {
+      startPollingSensitiveTask(data.taskId)
+    }
+  } catch {
+    sensitiveTask.value = null
+  }
+}
+
+async function startSensitiveDataScanFlow() {
+  sensitiveScanStarting.value = true
+  try {
+    const { data } = await startSensitiveDataScan(projectId.value, semanticLlmParams())
+    ElMessage.success('已提交敏感数据扫描任务')
+    startPollingSensitiveTask(data.taskId)
+  } catch {
+    // 全局拦截器已提示
+  } finally {
+    sensitiveScanStarting.value = false
+  }
+}
+
+function handleExportScanToolsExcel() {
+  if (!tools.value.length) {
+    ElMessage.warning('暂无接口可导出')
+    return
+  }
+  exportScanToolsExcelLoading.value = true
+  try {
+    const name = project.value?.name?.trim() || `项目${projectId.value}`
+    exportScanProjectToolsExcel(tools.value, name)
+    ElMessage.success('已导出 Excel')
+  } finally {
+    exportScanToolsExcelLoading.value = false
+  }
+}
+
+function startPollingSensitiveTask(taskId: string) {
+  stopPollingSensitiveTask()
+  const poll = async () => {
+    try {
+      const { data } = await getSensitiveDataScanStatus(projectId.value, taskId)
+      if (data == null) {
+        sensitiveTask.value = null
+        stopPollingSensitiveTask()
+        return
+      }
+      sensitiveTask.value = data
+      if (data.stage === 'DONE' || data.stage === 'FAILED') {
+        stopPollingSensitiveTask()
+        if (data.stage === 'DONE') {
+          if (data.errorMessage) {
+            ElMessage.warning(`敏感扫描完成：${data.errorMessage}`)
+          } else {
+            ElMessage.success('敏感扫描完成')
+          }
+        } else {
+          ElMessage.error(data.errorMessage || '敏感扫描失败')
+        }
+        await refreshAll()
+      }
+    } catch {
+      stopPollingSensitiveTask()
+    }
+  }
+  void poll()
+  sensitivePollTimer = setInterval(poll, 2500)
+}
+
+function stopPollingSensitiveTask() {
+  if (sensitivePollTimer) {
+    clearInterval(sensitivePollTimer)
+    sensitivePollTimer = null
+  }
+}
+
 async function regenerateProject() {
   projectGenLoading.value = true
   try {
@@ -1915,8 +2079,12 @@ onMounted(() => {
   void refreshAll()
   void loadSemanticProviders()
   void resumeBatchTaskIfAny()
+  void resumeSensitiveTaskIfAny()
 })
-onUnmounted(stopPollingTask)
+onUnmounted(() => {
+  stopPollingTask()
+  stopPollingSensitiveTask()
+})
 </script>
 
 <style scoped lang="scss">
@@ -2181,6 +2349,49 @@ onUnmounted(stopPollingTask)
 
 .merged-interface-table {
   min-width: 1080px;
+}
+
+.sensitive-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  cursor: default;
+}
+
+.sensitive-cell-empty {
+  color: #94a3b8;
+}
+
+.sensitive-cell-summary {
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sensitive-tag {
+  margin: 0;
+}
+
+.expand-sensitive {
+  margin-bottom: 8px;
+}
+
+.expand-sensitive-summary {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #e2e8f0;
+}
+
+.expand-sensitive-meta {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .expand-merged .expand-ai-heading {
