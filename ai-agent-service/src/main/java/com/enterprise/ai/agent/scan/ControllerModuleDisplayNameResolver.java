@@ -101,7 +101,7 @@ public final class ControllerModuleDisplayNameResolver {
         ScanSettings s = settings != null ? settings : ScanSettings.defaults();
         List<String> p = s.getDescriptionSourceOrder();
         if (p == null || p.isEmpty()) {
-            p = List.of("JAVADOC", "SWAGGER_API_OPERATION", "OPENAPI_OPERATION", "METHOD_NAME");
+            p = List.of("SWAGGER_API_OPERATION", "OPENAPI_OPERATION", "JAVADOC", "METHOD_NAME");
         } else {
             p = new ArrayList<>(p);
         }

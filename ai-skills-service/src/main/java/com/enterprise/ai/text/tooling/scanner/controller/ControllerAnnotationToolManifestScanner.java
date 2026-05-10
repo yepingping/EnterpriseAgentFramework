@@ -202,7 +202,7 @@ public class ControllerAnnotationToolManifestScanner {
     private static List<String> paramDescriptionOrder(ScanState s) {
         List<String> p = s.options.getParamDescriptionSourceOrder();
         if (p == null || p.isEmpty()) {
-            p = List.of(ScanOptions.PS_JD, ScanOptions.PS_SCHEMA, ScanOptions.PS_PARAM, ScanOptions.PS_FIELD);
+            p = List.of(ScanOptions.PS_PARAM, ScanOptions.PS_SCHEMA, ScanOptions.PS_JD, ScanOptions.PS_FIELD);
         }
         return applySourceEnabled(p, s.options.getParamDescriptionSourceEnabled());
     }
@@ -210,8 +210,8 @@ public class ControllerAnnotationToolManifestScanner {
     private static List<String> descriptionOrder(ScanState s) {
         List<String> p = s.options.getDescriptionSourceOrder();
         if (p == null || p.isEmpty()) {
-            p = List.of(ScanOptions.SRC_JAVADOC, ScanOptions.SRC_SWAGGER_API,
-                    ScanOptions.SRC_OPENAPI_OP, ScanOptions.SRC_METHOD_NAME);
+            p = List.of(ScanOptions.SRC_SWAGGER_API, ScanOptions.SRC_OPENAPI_OP,
+                    ScanOptions.SRC_JAVADOC, ScanOptions.SRC_METHOD_NAME);
         }
         return applySourceEnabled(p, s.options.getDescriptionSourceEnabled());
     }

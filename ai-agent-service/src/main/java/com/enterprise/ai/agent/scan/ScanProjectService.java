@@ -1,8 +1,13 @@
 package com.enterprise.ai.agent.scan;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.enterprise.ai.agent.client.ScannerServiceClient;
 import com.enterprise.ai.agent.graph.ApiGraphService;
+import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
+import com.enterprise.ai.agent.registry.ProjectInstanceMapper;
+import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.semantic.SemanticDocService;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
@@ -45,6 +50,12 @@ public class ScanProjectService {
 
     @Autowired(required = false)
     private ApiGraphService apiGraphService;
+
+    @Autowired(required = false)
+    private RegistrySecurityService registrySecurityService;
+
+    @Autowired(required = false)
+    private ProjectInstanceMapper projectInstanceMapper;
 
     /** 扫描完成后是否自动重建接口图谱；默认关闭，需在管理端手动重建或设环境变量开启。 */
     @Value("${ai.api-graph.rebuild-on-scan:false}")
@@ -91,8 +102,20 @@ public class ScanProjectService {
                 .ifPresent(entity -> {
                     throw new IllegalArgumentException("扫描项目已存在: " + request.name());
                 });
+        String oldProjectCode = existing.getProjectCode();
         ScanProjectEntity updated = applyRequest(existing, request);
         projectMapper.updateById(updated);
+        String newCode = updated.getProjectCode();
+        if (!sameProjectCode(oldProjectCode, newCode)) {
+            if (registrySecurityService != null) {
+                registrySecurityService.syncCredentialProjectCode(id, newCode);
+            }
+            if (projectInstanceMapper != null) {
+                projectInstanceMapper.update(null, Wrappers.<ProjectInstanceEntity>lambdaUpdate()
+                        .eq(ProjectInstanceEntity::getProjectId, id)
+                        .set(ProjectInstanceEntity::getProjectCode, newCode));
+            }
+        }
         return updated;
     }
 
@@ -303,6 +326,7 @@ public class ScanProjectService {
         ).withCapabilityMetadata(matched.getCapabilityMetadata());
         ScanProjectToolEntity updated = scanProjectToolService.update(projectId, scanToolId, upsert);
         scanModuleService.bootstrapFromTools(project.getId());
+        clearStaleProjectErrorAfterSingleToolRefresh(project);
         return updated;
     }
 
@@ -685,6 +709,12 @@ public class ScanProjectService {
         return "project_" + project.getId();
     }
 
+    private static boolean sameProjectCode(String a, String b) {
+        String ta = a == null ? "" : a.trim();
+        String tb = b == null ? "" : b.trim();
+        return ta.equals(tb);
+    }
+
     private String normalizeName(String value) {
         return value == null
                 ? ""
@@ -779,6 +809,34 @@ public class ScanProjectService {
         project.setStatus(status);
         project.setErrorMessage(errorMessage);
         projectMapper.updateById(project);
+        // updateById 默认忽略 null，无法清空 error_message；扫描成功后需显式写入 NULL
+        if (errorMessage == null) {
+            projectMapper.update(null, Wrappers.<ScanProjectEntity>lambdaUpdate()
+                    .eq(ScanProjectEntity::getId, project.getId())
+                    .set(ScanProjectEntity::getErrorMessage, null));
+        }
+    }
+
+    /**
+     * 单条接口「扫描更新」成功后：清除全量扫描遗留的项目级错误文案，
+     * 并将 {@code failed} 恢复为 {@code scanned}。
+     */
+    private void clearStaleProjectErrorAfterSingleToolRefresh(ScanProjectEntity project) {
+        boolean hadMessage = project.getErrorMessage() != null && !project.getErrorMessage().isBlank();
+        boolean failedStatus = "failed".equalsIgnoreCase(project.getStatus());
+        if (!hadMessage && !failedStatus) {
+            return;
+        }
+        LambdaUpdateWrapper<ScanProjectEntity> uw = Wrappers.lambdaUpdate();
+        uw.eq(ScanProjectEntity::getId, project.getId()).set(ScanProjectEntity::getErrorMessage, null);
+        if (failedStatus) {
+            uw.set(ScanProjectEntity::getStatus, "scanned");
+        }
+        projectMapper.update(null, uw);
+        project.setErrorMessage(null);
+        if (failedStatus) {
+            project.setStatus("scanned");
+        }
     }
 
     public void markFailed(Long projectId, String errorMessage) {

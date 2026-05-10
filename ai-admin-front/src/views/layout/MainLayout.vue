@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-container class="main-layout" :class="{ 'registry-shell': isRegistryShell, 'is-dark': theme === 'dark' }">
     <el-aside width="240px" class="sidebar">
       <div class="logo">
@@ -20,7 +20,7 @@
             <span>概览</span>
           </el-menu-item>
 
-          <!-- 2 AI 注册中心（项目目录 + 能力评审） -->
+          <!-- 2 AI 注册中心 -->
           <el-sub-menu index="/registry-group">
             <template #title>
               <el-icon><Connection /></el-icon>
@@ -50,7 +50,7 @@
             <el-menu-item index="/skill/slot/logs">槽位调用日志</el-menu-item>
           </el-sub-menu>
 
-          <!-- 5 Tool（含 ACL） -->
+          <!-- 5 Tool -->
           <el-sub-menu index="/tool-group">
             <template #title>
               <el-icon><SetUp /></el-icon>
@@ -87,7 +87,7 @@
 
           <div class="menu-divider" />
 
-          <!-- 8 对外开放：MCP + A2A -->
+          <!-- 8 对外开放 -->
           <el-sub-menu index="/open-group">
             <template #title>
               <el-icon><Share /></el-icon>
@@ -191,7 +191,7 @@ const { theme, toggleTheme } = useTheme()
 
 const route = useRoute()
 
-/** 默认展开的侧边栏分组（可按需填入 index，如 '/registry-group'） */
+/** 默认展开的侧边栏分组，可按需填入 index，如 '/registry-group' */
 const defaultOpenMenuGroups: string[] = []
 
 const activeMenu = computed(() => {
@@ -237,9 +237,12 @@ const isRegistryShell = computed(() => route.path.startsWith('/registry/projects
 }
 
 .sidebar {
-  background: rgba(15, 15, 25, 0.85);
-  backdrop-filter: blur(24px);
-  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  background:
+    radial-gradient(circle at 24px 24px, rgba(99, 102, 241, 0.28), transparent 26%),
+    radial-gradient(circle at 210px 160px, rgba(14, 165, 233, 0.12), transparent 30%),
+    linear-gradient(180deg, #07111f 0%, #08101c 42%, #050b14 100%);
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: 18px 0 46px rgba(2, 6, 23, 0.22);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -249,11 +252,24 @@ const isRegistryShell = computed(() => route.path.startsWith('/registry/projects
   &::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent 62%);
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 64px;
     right: 0;
-    height: 120px;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.06) 0%, transparent 100%);
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.65), transparent 40%, rgba(14, 165, 233, 0.22));
     pointer-events: none;
   }
 }
@@ -262,30 +278,54 @@ const isRegistryShell = computed(() => route.path.startsWith('/registry/projects
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 64px;
-  padding: 0 24px;
+  height: 72px;
+  padding: 0 22px;
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+
+  &::after {
+    content: 'Enterprise AI';
+    position: absolute;
+    left: 72px;
+    bottom: 13px;
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 700;
+    color: rgba(148, 163, 184, 0.64);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
 }
 
 .logo-icon-wrap {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent),
+    linear-gradient(135deg, #4f46e5 0%, #2563eb 52%, #0ea5e9 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow:
+    0 12px 28px rgba(37, 99, 235, 0.32),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+
+  .el-icon {
+    filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.35));
+  }
 }
 
 .logo-text {
   font-size: 17px;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  background: linear-gradient(135deg, #6366f1, #a78bfa);
+  line-height: 1.1;
+  letter-spacing: 0;
+  padding-bottom: 10px;
+  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 46%, #93c5fd 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -298,83 +338,223 @@ const isRegistryShell = computed(() => route.path.startsWith('/registry/projects
 
 .menu-divider {
   height: 1px;
-  margin: 8px 20px;
-  background: rgba(255, 255, 255, 0.04);
+  margin: 12px 20px;
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.18), transparent);
 }
 
 .sidebar-menu {
   border-right: none;
-  padding: 0 8px;
+  padding: 14px 10px 18px;
+  background: transparent;
+
+  :deep(.el-menu) {
+    background: transparent;
+    border: none;
+  }
+
+  :deep(.el-menu-item),
+  :deep(.el-sub-menu__title) {
+    isolation: isolate;
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
 
   :deep(.el-menu-item) {
-    height: 42px;
-    line-height: 42px;
-    margin: 2px 0;
+    height: 44px;
+    line-height: 44px;
+    margin: 4px 0;
+    padding-right: 12px;
     border-radius: 8px;
-    font-size: 13px;
-    color: #94a3b8;
-    transition: all 0.2s ease;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #a8b3c7;
+    transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
     position: relative;
 
     .el-icon {
+      width: 28px;
+      height: 28px;
+      margin-right: 10px;
+      border-radius: 8px;
       font-size: 16px;
-      margin-right: 8px;
+      color: #8da2c0;
+      background: rgba(148, 163, 184, 0.08);
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.07);
+      transition: color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
     }
 
     &:hover {
-      background: rgba(99, 102, 241, 0.08);
-      color: #e2e8f0;
+      background: rgba(99, 102, 241, 0.12);
+      color: #f8fafc;
+      transform: translateX(2px);
+
+      .el-icon {
+        color: #dbeafe;
+        background: rgba(99, 102, 241, 0.18);
+        box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.18);
+      }
     }
 
     &.is-active {
-      background: rgba(99, 102, 241, 0.12);
-      color: #e2e8f0;
+      background:
+        linear-gradient(135deg, rgba(79, 70, 229, 0.92), rgba(37, 99, 235, 0.76)),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent);
+      color: #ffffff;
+      box-shadow:
+        0 12px 26px rgba(37, 99, 235, 0.24),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.13);
 
       &::before {
         content: '';
         position: absolute;
-        left: 0;
+        left: -10px;
         top: 8px;
         bottom: 8px;
-        width: 3px;
-        border-radius: 0 3px 3px 0;
-        background: linear-gradient(180deg, #6366f1, #8b5cf6);
-        box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+        width: 4px;
+        border-radius: 0 999px 999px 0;
+        background: linear-gradient(180deg, #67e8f9, #818cf8);
+        box-shadow: 0 0 14px rgba(103, 232, 249, 0.55);
+      }
+
+      &::after {
+        content: '';
+        position: absolute;
+        inset: 1px;
+        border-radius: 7px;
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent 42%);
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      .el-icon {
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.16);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
       }
     }
   }
 
   :deep(.el-sub-menu__title) {
-    height: 42px;
-    line-height: 42px;
-    margin: 2px 0;
+    height: 44px;
+    line-height: 44px;
+    margin: 4px 0;
+    padding-right: 12px;
     border-radius: 8px;
-    font-size: 13px;
-    color: #94a3b8;
-    transition: all 0.2s ease;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #a8b3c7;
+    transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 
     .el-icon {
+      width: 28px;
+      height: 28px;
+      margin-right: 10px;
+      border-radius: 8px;
       font-size: 16px;
-      margin-right: 8px;
+      color: #8da2c0;
+      background: rgba(148, 163, 184, 0.08);
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.07);
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .el-sub-menu__icon-arrow {
+      width: auto;
+      height: auto;
+      margin-right: 0;
+      background: transparent;
+      box-shadow: none;
+      color: #64748b;
     }
 
     &:hover {
-      background: rgba(99, 102, 241, 0.06);
-      color: #e2e8f0;
+      background: rgba(99, 102, 241, 0.10);
+      color: #f8fafc;
+      transform: translateX(2px);
+
+      .el-icon {
+        color: #dbeafe;
+        background: rgba(99, 102, 241, 0.16);
+      }
+
+      .el-sub-menu__icon-arrow {
+        color: #94a3b8;
+        background: transparent;
+        box-shadow: none;
+      }
+    }
+  }
+
+  :deep(.el-sub-menu.is-opened > .el-sub-menu__title) {
+    color: #f8fafc;
+    background: rgba(148, 163, 184, 0.08);
+
+    .el-icon {
+      color: #c7d2fe;
+      background: rgba(99, 102, 241, 0.16);
     }
   }
 
   :deep(.el-sub-menu .el-menu) {
     background: transparent;
-    padding: 0;
+    padding: 2px 0 6px 18px;
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 22px;
+      top: 2px;
+      bottom: 8px;
+      width: 1px;
+      background: linear-gradient(180deg, rgba(99, 102, 241, 0.35), rgba(148, 163, 184, 0.08));
+    }
   }
 
   :deep(.el-sub-menu .el-menu-item) {
-    padding-left: 52px !important;
-    height: 38px;
-    line-height: 38px;
-    margin: 1px 0;
+    padding-left: 34px !important;
+    height: 36px;
+    line-height: 36px;
+    margin: 2px 0 2px 8px;
     font-size: 12.5px;
+    font-weight: 600;
+    color: #8fa0ba;
+    background: transparent;
+    box-shadow: none;
+
+    &::before {
+      left: -18px;
+      top: 12px;
+      bottom: auto;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(148, 163, 184, 0.24);
+      box-shadow: none;
+    }
+
+    .el-icon {
+      display: none;
+    }
+
+    &:hover {
+      color: #e2e8f0;
+      background: rgba(99, 102, 241, 0.10);
+    }
+
+    &.is-active {
+      color: #ffffff;
+      background: linear-gradient(135deg, rgba(79, 70, 229, 0.72), rgba(37, 99, 235, 0.50));
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+
+      &::before {
+        background: #67e8f9;
+        box-shadow: 0 0 10px rgba(103, 232, 249, 0.55);
+      }
+    }
   }
 }
 
@@ -559,79 +739,4 @@ const isRegistryShell = computed(() => route.path.startsWith('/registry/projects
   }
 }
 
-// ── 日间模式布局覆盖 ──
-:global([data-theme="light"]) {
-  .sidebar {
-    background: #eef0f4;
-    border-right: 1px solid #dcdfe6;
-    backdrop-filter: none;
-
-    &::before {
-      background: linear-gradient(180deg, rgba(99, 102, 241, 0.05) 0%, transparent 100%);
-    }
-  }
-
-  .menu-divider {
-    background: #dcdfe6;
-  }
-
-  .sidebar-menu {
-    :deep(.el-menu-item) {
-      color: #303133;
-
-      &:hover {
-        background: rgba(99, 102, 241, 0.1);
-        color: #1e293b;
-      }
-
-      &.is-active {
-        background: rgba(99, 102, 241, 0.12);
-        color: #1e293b;
-
-        &::before {
-          box-shadow: 0 0 8px rgba(99, 102, 241, 0.25);
-        }
-      }
-    }
-
-    :deep(.el-sub-menu__title) {
-      color: #303133;
-
-      &:hover {
-        background: rgba(99, 102, 241, 0.08);
-        color: #1e293b;
-      }
-    }
-  }
-
-  .topbar-search {
-    .search-input {
-      :deep(.el-input__wrapper) {
-        background: #f0f2f5;
-      }
-    }
-  }
-
-  .topbar-btn {
-    background: #f0f2f5;
-    border-color: #dcdfe6;
-    color: #475569;
-
-    &:hover {
-      background: rgba(99, 102, 241, 0.1);
-      border-color: rgba(99, 102, 241, 0.25);
-      color: #1e293b;
-    }
-  }
-
-  .registry-shell .main-content {
-    background: #f7f8fc;
-  }
-
-  .main-content {
-    &::before {
-      background: radial-gradient(ellipse at 50% 0%, rgba(99, 102, 241, 0.03) 0%, transparent 70%);
-    }
-  }
-}
 </style>

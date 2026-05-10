@@ -45,12 +45,12 @@ export interface ScanSettings {
 export function getDefaultScanSettings(): ScanSettings {
   return {
     descriptionSourceOrder: [
-      'JAVADOC',
       'SWAGGER_API_OPERATION',
       'OPENAPI_OPERATION',
+      'JAVADOC',
       'METHOD_NAME',
     ],
-    paramDescriptionSourceOrder: ['JAVADOC_PARAM', 'SCHEMA_ANNO', 'PARAMETER_ANNO', 'FIELD_NAME'],
+    paramDescriptionSourceOrder: ['PARAMETER_ANNO', 'SCHEMA_ANNO', 'JAVADOC_PARAM', 'FIELD_NAME'],
     descriptionSourceEnabled: {
       JAVADOC: true,
       SWAGGER_API_OPERATION: true,
@@ -107,6 +107,9 @@ export interface ScanProject {
   apiCount?: number
   /** 列表展示状态摘要 */
   registryStatusSummary?: string | null
+  /** 仅 GET /api/scan-projects/:id 返回；列表不含 */
+  registryAppKey?: string | null
+  registryAppSecret?: string | null
   lastScannedAt?: string | null
 }
 

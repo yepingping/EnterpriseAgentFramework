@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -44,6 +45,32 @@ public class RegistrySecurityService {
         } else {
             credentialMapper.updateById(entity);
         }
+    }
+
+    /**
+     * 管理端展示接入配置用：取该项目下一条 ACTIVE 凭证（多凭证时取最近更新的）。
+     */
+    public Optional<RegistryCredentialEntity> findPrimaryActiveCredential(String projectCode) {
+        if (!StringUtils.hasText(projectCode)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(credentialMapper.selectOne(Wrappers.<RegistryCredentialEntity>lambdaQuery()
+                .eq(RegistryCredentialEntity::getProjectCode, projectCode.trim())
+                .eq(RegistryCredentialEntity::getStatus, "ACTIVE")
+                .orderByDesc(RegistryCredentialEntity::getUpdatedAt)
+                .last("LIMIT 1")));
+    }
+
+    /**
+     * 项目修改 project_code 后，按 project_id 同步注册凭证表中的编码。
+     */
+    public void syncCredentialProjectCode(Long projectId, String newProjectCode) {
+        if (projectId == null || !StringUtils.hasText(newProjectCode)) {
+            return;
+        }
+        credentialMapper.update(null, Wrappers.<RegistryCredentialEntity>lambdaUpdate()
+                .eq(RegistryCredentialEntity::getProjectId, projectId)
+                .set(RegistryCredentialEntity::getProjectCode, newProjectCode.trim()));
     }
 
     public void verifyIfConfigured(String projectCode, RegistrySignatureHeaders headers) {

@@ -11,9 +11,9 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ScanSettings {
 
-    /** 描述源优先级，见 skills 端约定：JAVADOC / SWAGGER_API_OPERATION / OPENAPI_OPERATION / METHOD_NAME */
+    /** 描述源优先级，见 skills 端约定：SWAGGER_API_OPERATION / OPENAPI_OPERATION / JAVADOC / METHOD_NAME */
     private List<String> descriptionSourceOrder;
-    /** 参数描述源：JAVADOC_PARAM / SCHEMA_ANNO / PARAMETER_ANNO / FIELD_NAME */
+    /** 参数描述源：PARAMETER_ANNO / SCHEMA_ANNO / JAVADOC_PARAM / FIELD_NAME */
     private List<String> paramDescriptionSourceOrder;
     /**
      * 各接口说明源是否参与解析；缺省或 key 未填视为 true。false 时该源不生效（优先级列表仍保留作排序）。
@@ -36,9 +36,9 @@ public class ScanSettings {
     public static ScanSettings defaults() {
         ScanSettings s = new ScanSettings();
         s.setDescriptionSourceOrder(List.of(
-                "JAVADOC", "SWAGGER_API_OPERATION", "OPENAPI_OPERATION", "METHOD_NAME"));
+                "SWAGGER_API_OPERATION", "OPENAPI_OPERATION", "JAVADOC", "METHOD_NAME"));
         s.setParamDescriptionSourceOrder(List.of(
-                "JAVADOC_PARAM", "SCHEMA_ANNO", "PARAMETER_ANNO", "FIELD_NAME"));
+                "PARAMETER_ANNO", "SCHEMA_ANNO", "JAVADOC_PARAM", "FIELD_NAME"));
         s.setOnlyRestController(true);
         s.setHttpMethodWhitelist(List.of());
         s.setClassIncludeRegex(null);

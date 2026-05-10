@@ -7,9 +7,6 @@
       </div>
       <div class="header-actions">
         <el-button @click="goBack">返回列表</el-button>
-        <el-button type="danger" plain :loading="deleteProjectLoading" @click="handleDeleteProject">
-          删除项目
-        </el-button>
         <el-button type="primary" plain :loading="reconcileLoading" @click="handleReconcile">
           对账同步 API 与 Tool
         </el-button>
@@ -873,7 +870,6 @@ import { getDefaultScanSettings } from '@/types/scanProject'
 import type { ToolParameter, ToolTestResult, ToolUpsertRequest } from '@/types/tool'
 import type { ScanModule, SemanticDoc, SemanticTask } from '@/types/semanticDoc'
 import {
-  deleteScanProject,
   getScanProjectDetail,
   getScanProjectOperationBlockers,
   getScanProjectTools,
@@ -928,7 +924,6 @@ const tools = ref<ProjectToolInfo[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const rescanLoading = ref(false)
-const deleteProjectLoading = ref(false)
 const rebuildEmbeddingLoading = ref(false)
 const reconcileLoading = ref(false)
 const diffDialogVisible = ref(false)
@@ -1403,42 +1398,6 @@ async function handleRescan() {
     await refreshAll()
   } finally {
     rescanLoading.value = false
-  }
-}
-
-async function handleDeleteProject() {
-  if (!project.value) {
-    return
-  }
-  if (!(await ensureScanOperationAllowed())) {
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认删除扫描项目「${project.value.name}」吗？将删除关联扫描行、挂到本项目的全局 Tool/Skill 及模块与语义数据。`,
-      '删除确认',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  deleteProjectLoading.value = true
-  try {
-    await deleteScanProject(projectId.value)
-    ElMessage.success('已删除')
-    await router.push('/scan-project')
-  } catch (error) {
-    const blockers = parseScanProjectBlockersFromError(error)
-    if (blockers?.blocked) {
-      await ElMessageBox.alert(formatScanProjectBlockersMessage(blockers), '无法删除', {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      })
-      return
-    }
-    ElMessage.error((error as Error).message || '删除失败')
-  } finally {
-    deleteProjectLoading.value = false
   }
 }
 

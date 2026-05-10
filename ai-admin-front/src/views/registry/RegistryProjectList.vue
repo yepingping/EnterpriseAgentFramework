@@ -49,7 +49,6 @@
         <el-tab-pane label="全部项目" name="all" />
         <el-tab-pane label="SDK 接入" name="sdk" />
         <el-tab-pane label="API 接入" name="api" />
-        <el-tab-pane label="扫描记录" name="scan" />
       </el-tabs>
 
       <div class="toolbar">
@@ -83,16 +82,22 @@
         <el-button link type="primary" @click="projectStore.setCurrentProject(null)">查看全部项目</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="pagedProjects" row-key="id" class="project-table">
+      <el-table
+        v-loading="loading"
+        :data="pagedProjects"
+        row-key="id"
+        class="project-table"
+        :max-height="projectTableMaxHeight"
+      >
         <el-table-column label="项目名称" min-width="230">
           <template #default="{ row }">
-            <div class="project-name-cell">
+            <button type="button" class="project-name-cell project-name-cell-btn" @click="goDetail(row)">
               <div class="project-avatar" :class="avatarClass(row.projectKind)">{{ projectInitial(row.name) }}</div>
               <div>
                 <strong>{{ row.name }}</strong>
                 <span>{{ row.projectCode || `ID ${row.id}` }}</span>
               </div>
-            </div>
+            </button>
           </template>
         </el-table-column>
         <el-table-column label="项目描述" min-width="240" show-overflow-tooltip>
@@ -132,31 +137,6 @@
               <el-avatar :size="22">{{ projectInitial(row.owner || row.name) }}</el-avatar>
               <span>{{ row.owner || '未分配' }}</span>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="goDetail(row)">查看详情</el-button>
-            <el-button link type="primary" @click="goApiConfig(row)">配置 API</el-button>
-            <el-button
-              link
-              type="primary"
-              :disabled="row.projectKind === 'REGISTERED'"
-              :loading="scanLoadingId === row.id"
-              @click="handleScan(row)"
-            >
-              {{ row.toolCount > 0 ? '重新扫描' : '扫描' }}
-            </el-button>
-            <el-dropdown trigger="click" @command="(cmd: string) => handleRowCommand(row, cmd)">
-              <el-button link>更多</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="edit">编辑项目</el-dropdown-item>
-                  <el-dropdown-item command="sdk">接入文档</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除项目</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -242,7 +222,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="scanDialogVisible" :title="isScanEditMode ? `编辑项目 - ${scanForm.name}` : '扫描已有项目'" width="720px">
+    <el-dialog v-model="scanDialogVisible" title="扫描已有项目" width="720px">
       <el-form label-width="120px">
         <el-form-item label="项目名称" required>
           <el-input v-model="scanForm.name" placeholder="如 legacy-crm" />
@@ -340,18 +320,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search, Close } from '@element-plus/icons-vue'
 import {
   createScanProject,
-  deleteScanProject,
-  getScanProjectOperationBlockers,
+  getScanProjectDetail,
   getScanProjects,
-  triggerRescan,
-  triggerScan,
-  updateScanProject,
 } from '@/api/scanProject'
 import { registerRegistryProject } from '@/api/registry'
 import type { ScanProject, ScanProjectUpsertRequest } from '@/types/scanProject'
@@ -364,10 +340,6 @@ import {
   formatProjectKindLabel,
   formatScanStatusLabel,
 } from '@/utils/projectLabels'
-import {
-  formatScanProjectBlockersMessage,
-  parseScanProjectBlockersFromError,
-} from '@/utils/scanProjectBlockers'
 
 const router = useRouter()
 const projectStore = useProjectStore()
@@ -393,7 +365,6 @@ function dismissAccessBanner() {
 
 const loading = ref(false)
 const saving = ref(false)
-const scanLoadingId = ref<number | null>(null)
 const projects = ref<ScanProject[]>([])
 const activeTab = ref('all')
 const keyword = ref('')
@@ -405,7 +376,46 @@ const pageSize = ref(10)
 const sdkDialogVisible = ref(false)
 const scanDialogVisible = ref(false)
 const guideDrawerVisible = ref(false)
-const editingScanId = ref<number | null>(null)
+const guideYamlSource = ref<ScanProject | null>(null)
+/** 打开接入指南时优先使用该项目的详情（含 registry 凭证）；否则用顶部当前项目 */
+const guideFocusProjectId = ref<number | null>(null)
+
+/** 限制表格主体高度，使横向滚动条落在视口内（靠近浏览器窗口底部），无需先滚到卡片最底 */
+const projectTableMaxHeight = ref(480)
+
+let mainContentScrollEl: HTMLElement | null = null
+
+let tableHeightRaf = 0
+function scheduleUpdateProjectTableMaxHeight() {
+  if (typeof window === 'undefined') return
+  if (tableHeightRaf) return
+  tableHeightRaf = requestAnimationFrame(() => {
+    tableHeightRaf = 0
+    updateProjectTableMaxHeight()
+  })
+}
+
+function updateProjectTableMaxHeight() {
+  if (typeof window === 'undefined') return
+  const root = document.querySelector('.registry-project-page')
+  const tableEl = root?.querySelector('.project-table') as HTMLElement | undefined
+  const footerEl = root?.querySelector('.table-footer') as HTMLElement | undefined
+  if (!tableEl) {
+    projectTableMaxHeight.value = Math.max(280, window.innerHeight - 420)
+    return
+  }
+  const tableTop = tableEl.getBoundingClientRect().top
+  const viewportPad = 16
+  let bottomLimit = window.innerHeight - viewportPad
+  if (footerEl && footerEl.offsetParent !== null) {
+    const footerTop = footerEl.getBoundingClientRect().top
+    if (footerTop > tableTop && footerTop < window.innerHeight) {
+      bottomLimit = footerTop - 12
+    }
+  }
+  const h = bottomLimit - tableTop
+  projectTableMaxHeight.value = Math.max(260, Math.floor(h))
+}
 
 const sdkForm = reactive<RegistryProjectRegisterRequest>({
   projectCode: '',
@@ -420,7 +430,6 @@ const sdkForm = reactive<RegistryProjectRegisterRequest>({
 })
 
 const scanForm = reactive<ScanProjectUpsertRequest>(createEmptyScanForm())
-const isScanEditMode = computed(() => editingScanId.value !== null)
 
 const ownerOptions = computed(() => {
   return Array.from(new Set(projects.value.map((project) => project.owner).filter(Boolean))) as string[]
@@ -433,8 +442,7 @@ const filteredProjects = computed(() => {
     const matchesTab =
       activeTab.value === 'all' ||
       (activeTab.value === 'sdk' && (kind === 'REGISTERED' || kind === 'HYBRID')) ||
-      (activeTab.value === 'api' && project.toolCount > 0) ||
-      (activeTab.value === 'scan' && kind !== 'REGISTERED')
+      (activeTab.value === 'api' && project.toolCount > 0)
     const matchesContext = !projectStore.currentProjectId || project.id === projectStore.currentProjectId
     const matchesKeyword =
       !text ||
@@ -480,10 +488,91 @@ const metrics = computed(() => {
   ]
 })
 
-onMounted(loadProjects)
+onMounted(() => {
+  loadProjects().finally(() => {
+    nextTick(scheduleUpdateProjectTableMaxHeight)
+  })
+  mainContentScrollEl = document.querySelector('.main-layout .main-content') as HTMLElement | null
+  mainContentScrollEl?.addEventListener('scroll', scheduleUpdateProjectTableMaxHeight, { passive: true })
+  window.addEventListener('resize', scheduleUpdateProjectTableMaxHeight)
+})
+
+onUnmounted(() => {
+  mainContentScrollEl?.removeEventListener('scroll', scheduleUpdateProjectTableMaxHeight)
+  window.removeEventListener('resize', scheduleUpdateProjectTableMaxHeight)
+})
 
 watch([activeTab, keyword, kindFilter, statusFilter, ownerFilter, () => projectStore.currentProjectId, pageSize], () => {
   currentPage.value = 1
+})
+
+watch([accessBannerVisible, activeTab, () => filteredProjects.value.length], () => {
+  nextTick(scheduleUpdateProjectTableMaxHeight)
+})
+
+/** 与 RegistryProjectDetail 一致：VITE_AI_AGENT_SERVICE_URL，默认本地 8603 */
+const agentServiceBaseUrl = computed(() => {
+  const raw = import.meta.env.VITE_AI_AGENT_SERVICE_URL?.trim()
+  const fallback = 'http://localhost:8603'
+  if (!raw) return fallback
+  return raw.replace(/\/$/, '')
+})
+
+function yamlSafeScalar(raw: string): string {
+  const s = raw.trim()
+  if (!s) return '""'
+  if (/[:#\n[\]{}|>&*!'"`]/.test(s) || /^\s|\s$/.test(raw) || /^[\d.-]+$/.test(s)) {
+    return `'${s.replace(/'/g, "''")}'`
+  }
+  return s
+}
+
+const yamlSnippet = computed(() => {
+  const p = guideYamlSource.value ?? projectStore.currentProject
+  const registryUrl = yamlSafeScalar(agentServiceBaseUrl.value)
+  const code = p?.projectCode?.trim() || 'your-project-code'
+  const name = p?.name?.trim() || '你的业务系统名称'
+  const baseUrl = p?.baseUrl?.trim() || 'http://localhost:8080'
+  const env = p?.environment?.trim() || 'dev'
+  const ctx = (p?.contextPath ?? '').trim()
+  const appKey = p?.registryAppKey?.trim() || 'your-app-key'
+  const appSecret = p?.registryAppSecret?.trim() || 'your-app-secret'
+  const ctxLine = ctx ? `\n    context-path: ${yamlSafeScalar(ctx)}` : ''
+  return `eaf:
+  registry:
+    enabled: true
+    url: ${registryUrl}
+    app-key: ${yamlSafeScalar(appKey)}
+    app-secret: ${yamlSafeScalar(appSecret)}
+  project:
+    code: ${yamlSafeScalar(code)}
+    name: ${yamlSafeScalar(name)}
+    base-url: ${yamlSafeScalar(baseUrl)}${ctxLine}
+    environment: ${yamlSafeScalar(env)}
+  capability:
+    scan-controller: true
+    sync-on-startup: true`
+})
+
+watch(guideDrawerVisible, async (open) => {
+  if (!open) {
+    guideYamlSource.value = null
+    guideFocusProjectId.value = null
+    return
+  }
+  const id = guideFocusProjectId.value ?? projectStore.currentProjectId
+  if (!id) {
+    guideYamlSource.value = null
+    return
+  }
+  const row = projectStore.projects.find((x) => x.id === id)
+  guideYamlSource.value = row ?? null
+  try {
+    const { data } = await getScanProjectDetail(id)
+    guideYamlSource.value = data
+  } catch {
+    // 保留列表快照，凭证字段可能为空
+  }
 })
 
 const mavenSnippet = `<!-- 与 Enterprise Agent Framework 根 pom 版本一致，或改为你们私服坐标 -->
@@ -492,21 +581,6 @@ const mavenSnippet = `<!-- 与 Enterprise Agent Framework 根 pom 版本一致�
   <artifactId>ai-spring-boot-starter</artifactId>
   <version>1.0.0-SNAPSHOT</version>
 </dependency>`
-
-const yamlSnippet = `eaf:
-  registry:
-    enabled: true
-    url: http://localhost:8603
-    app-key: your-app-key
-    app-secret: your-app-secret
-  project:
-    code: your-project-code
-    name: 你的业务系统名称
-    base-url: http://localhost:8080
-    environment: dev
-  capability:
-    scan-controller: true
-    sync-on-startup: true`
 
 const javaSnippet = `@RestController
 @RequestMapping("/api/orders")
@@ -580,6 +654,7 @@ async function loadProjects() {
     ElMessage.error('加载项目失败')
   } finally {
     loading.value = false
+    nextTick(scheduleUpdateProjectTableMaxHeight)
   }
 }
 
@@ -589,14 +664,7 @@ function openSdkDialog() {
 }
 
 function openScanCreateDialog() {
-  editingScanId.value = null
   applyScanForm(createEmptyScanForm())
-  scanDialogVisible.value = true
-}
-
-function openScanEditDialog(project: ScanProject) {
-  editingScanId.value = project.id
-  applyScanForm(project)
   scanDialogVisible.value = true
 }
 
@@ -607,7 +675,7 @@ async function saveSdkProject() {
   }
   saving.value = true
   try {
-    await registerRegistryProject({
+    const { data } = await registerRegistryProject({
       ...sdkForm,
       appKey: sdkForm.appKey || undefined,
       appSecret: sdkForm.appSecret || undefined,
@@ -615,6 +683,7 @@ async function saveSdkProject() {
     ElMessage.success('SDK 接入项目已创建')
     sdkDialogVisible.value = false
     await loadProjects()
+    guideFocusProjectId.value = data.projectId
     guideDrawerVisible.value = true
   } finally {
     saving.value = false
@@ -633,13 +702,8 @@ async function saveScanProject() {
       specFile: scanForm.scanType === 'openapi' ? scanForm.specFile || null : null,
       contextPath: scanForm.contextPath || '',
     }
-    if (isScanEditMode.value && editingScanId.value !== null) {
-      await updateScanProject(editingScanId.value, payload)
-      ElMessage.success('项目已更新')
-    } else {
-      await createScanProject(payload)
-      ElMessage.success('扫描项目已创建')
-    }
+    await createScanProject(payload)
+    ElMessage.success('扫描项目已创建')
     scanDialogVisible.value = false
     await loadProjects()
   } catch (error) {
@@ -647,73 +711,6 @@ async function saveScanProject() {
   } finally {
     saving.value = false
   }
-}
-
-async function handleScan(project: ScanProject) {
-  scanLoadingId.value = project.id
-  try {
-    const { data: blockers } = await getScanProjectOperationBlockers(project.id)
-    if (blockers.blocked) {
-      await ElMessageBox.alert(formatScanProjectBlockersMessage(blockers), '操作被阻止', {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      })
-      return
-    }
-    const request = project.toolCount > 0 ? triggerRescan(project.id) : triggerScan(project.id)
-    const { data } = await request
-    ElMessage.success(`${project.toolCount > 0 ? '重新扫描' : '扫描'}完成，发现 ${data.toolCount} 个接口`)
-    await loadProjects()
-  } catch (error) {
-    const blockers = parseScanProjectBlockersFromError(error)
-    if (blockers?.blocked) {
-      await ElMessageBox.alert(formatScanProjectBlockersMessage(blockers), '操作被阻止', {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      })
-      return
-    }
-    ElMessage.error((error as Error).message || '扫描失败')
-    await loadProjects()
-  } finally {
-    scanLoadingId.value = null
-  }
-}
-
-async function handleDelete(project: ScanProject) {
-  try {
-    const { data: blockers } = await getScanProjectOperationBlockers(project.id)
-    if (blockers.blocked) {
-      await ElMessageBox.alert(formatScanProjectBlockersMessage(blockers), '无法删除', {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      })
-      return
-    }
-    await ElMessageBox.confirm(`确认删除项目 ${project.name} 吗？关联扫描工具也会一并删除。`, '删除确认', {
-      type: 'warning',
-    })
-    await deleteScanProject(project.id)
-    ElMessage.success('项目已删除')
-    await loadProjects()
-  } catch (error) {
-    if ((error as Error).message === 'cancel') return
-    const blockers = parseScanProjectBlockersFromError(error)
-    if (blockers?.blocked) {
-      await ElMessageBox.alert(formatScanProjectBlockersMessage(blockers), '无法删除', {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      })
-      return
-    }
-    ElMessage.error((error as Error).message || '删除失败')
-  }
-}
-
-function handleRowCommand(project: ScanProject, command: string) {
-  if (command === 'edit') openScanEditDialog(project)
-  if (command === 'sdk') guideDrawerVisible.value = true
-  if (command === 'delete') handleDelete(project)
 }
 
 function resetFilters() {
@@ -779,10 +776,6 @@ function goDetail(project: ScanProject) {
     router.push(`/registry/projects/${encodeURIComponent(project.projectCode)}`)
     return
   }
-  router.push(`/scan-project/${project.id}`)
-}
-
-function goApiConfig(project: ScanProject) {
   router.push(`/scan-project/${project.id}`)
 }
 </script>
@@ -1203,6 +1196,28 @@ function goApiConfig(project: ScanProject) {
     margin-top: 4px;
     color: #667085;
     font-size: 12px;
+  }
+}
+
+.project-name-cell-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+
+  &:hover strong {
+    color: #5b3df5;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(91, 61, 245, 0.35);
+    outline-offset: 2px;
+    border-radius: 10px;
   }
 }
 
@@ -1752,6 +1767,14 @@ function goApiConfig(project: ScanProject) {
     span {
       color: #64748b;
     }
+  }
+
+  .project-name-cell-btn:hover strong {
+    color: #a5b4fc;
+  }
+
+  .project-name-cell-btn:focus-visible {
+    outline-color: rgba(165, 180, 252, 0.45);
   }
 
   .muted,

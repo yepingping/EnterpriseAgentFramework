@@ -2,6 +2,8 @@ package com.enterprise.ai.agent.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.ai.agent.registry.AiRegistryService;
+import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
+import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
 import com.enterprise.ai.agent.scan.ApiToolLinkStatus;
 import com.enterprise.ai.agent.scan.ScanModuleEntity;
@@ -49,12 +51,13 @@ public class ScanProjectController {
     private final ScanModuleService scanModuleService;
     private final ScanProjectToolService scanProjectToolService;
     private final AiRegistryService aiRegistryService;
+    private final RegistrySecurityService registrySecurityService;
     private final SensitiveDataScanOrchestrator sensitiveDataScanOrchestrator;
 
     @PostMapping
     public ResponseEntity<ScanProjectDTO> create(@RequestBody ScanProjectUpsertRequest request) {
         try {
-            return ResponseEntity.ok(toDto(scanProjectService.create(request.toServiceRequest())));
+            return ResponseEntity.ok(toDto(scanProjectService.create(request.toServiceRequest()), false));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().build();
         }
@@ -63,14 +66,14 @@ public class ScanProjectController {
     @GetMapping
     public ResponseEntity<List<ScanProjectDTO>> list() {
         return ResponseEntity.ok(scanProjectService.list().stream()
-                .map(this::toDto)
+                .map(e -> toDto(e, false))
                 .toList());
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ScanProjectDTO> get(@PathVariable Long id) {
         try {
-            return ResponseEntity.ok(toDto(scanProjectService.getById(id)));
+            return ResponseEntity.ok(toDto(scanProjectService.getById(id), true));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.notFound().build();
         }
@@ -80,7 +83,7 @@ public class ScanProjectController {
     public ResponseEntity<ScanProjectDTO> update(@PathVariable Long id,
                                                  @RequestBody ScanProjectUpsertRequest request) {
         try {
-            return ResponseEntity.ok(toDto(scanProjectService.update(id, request.toServiceRequest())));
+            return ResponseEntity.ok(toDto(scanProjectService.update(id, request.toServiceRequest()), false));
         } catch (IllegalArgumentException ex) {
             return ex.getMessage() != null && ex.getMessage().contains("不存在")
                     ? ResponseEntity.notFound().build()
@@ -91,7 +94,7 @@ public class ScanProjectController {
     @PatchMapping("/{id}/scan-settings")
     public ResponseEntity<?> updateScanSettings(@PathVariable Long id, @RequestBody ScanSettings request) {
         try {
-            return ResponseEntity.ok(toDto(scanProjectService.updateScanSettings(id, request)));
+            return ResponseEntity.ok(toDto(scanProjectService.updateScanSettings(id, request), false));
         } catch (IllegalArgumentException ex) {
             if (ex.getMessage() != null && ex.getMessage().contains("不存在")) {
                 return ResponseEntity.notFound().build();
@@ -109,7 +112,7 @@ public class ScanProjectController {
                             request == null ? null : request.authType(),
                             request == null ? null : request.authApiKeyIn(),
                             request == null ? null : request.authApiKeyName(),
-                            request == null ? null : request.authApiKeyValue()))));
+                            request == null ? null : request.authApiKeyValue())), false));
         } catch (IllegalArgumentException ex) {
             if (ex.getMessage() != null && ex.getMessage().contains("不存在")) {
                 return ResponseEntity.notFound().build();
@@ -428,11 +431,21 @@ public class ScanProjectController {
         }
     }
 
-    private ScanProjectDTO toDto(ScanProjectEntity entity) {
+    private ScanProjectDTO toDto(ScanProjectEntity entity, boolean includeRegistryCredential) {
         ScanSettings settings = ScanSettingsJson.parseOrDefault(entity.getScanSettings(), objectMapper);
         String lastScanned = entity.getLastScannedAt() == null
                 ? null
                 : entity.getLastScannedAt().atZone(ZoneId.systemDefault()).toInstant().toString();
+        String registryAppKey = null;
+        String registryAppSecret = null;
+        if (includeRegistryCredential && StringUtils.hasText(entity.getProjectCode())) {
+            Optional<RegistryCredentialEntity> cred =
+                    registrySecurityService.findPrimaryActiveCredential(entity.getProjectCode());
+            if (cred.isPresent()) {
+                registryAppKey = cred.get().getAppKey();
+                registryAppSecret = cred.get().getAppSecret();
+            }
+        }
         return new ScanProjectDTO(
                 entity.getId(),
                 entity.getName(),
@@ -458,7 +471,9 @@ public class ScanProjectController {
                 resolveSdkVersion(entity),
                 entity.getToolCount() == null ? 0 : entity.getToolCount(),
                 resolveRegistryStatusSummary(entity),
-                lastScanned
+                lastScanned,
+                registryAppKey,
+                registryAppSecret
         );
     }
 
@@ -673,7 +688,9 @@ public class ScanProjectController {
             String sdkVersion,
             int apiCount,
             String registryStatusSummary,
-            String lastScannedAt
+            String lastScannedAt,
+            String registryAppKey,
+            String registryAppSecret
     ) {
     }
 
