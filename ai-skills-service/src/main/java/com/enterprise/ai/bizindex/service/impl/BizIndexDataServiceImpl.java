@@ -73,7 +73,7 @@ public class BizIndexDataServiceImpl implements BizIndexDataService {
 
         // 4. 主记录向量化并存入 Milvus
         String mainVectorId = UUID.randomUUID().toString();
-        List<Float> mainVector = embeddingService.embed(searchText);
+        List<Float> mainVector = embeddingService.embed(requireEmbeddingModelInstanceId(index), searchText);
 
         bizVectorService.insert(indexCode,
                 List.of(mainVectorId),
@@ -158,7 +158,7 @@ public class BizIndexDataServiceImpl implements BizIndexDataService {
 
                 // 重新向量化主记录
                 String mainVectorId = UUID.randomUUID().toString();
-                List<Float> mainVector = embeddingService.embed(newSearchText);
+                List<Float> mainVector = embeddingService.embed(requireEmbeddingModelInstanceId(index), newSearchText);
 
                 bizVectorService.insert(indexCode,
                         List.of(mainVectorId),
@@ -212,7 +212,7 @@ public class BizIndexDataServiceImpl implements BizIndexDataService {
             List<String> chunks = chunkStrategy.split(rawText, index.getChunkSize(), index.getChunkOverlap());
 
             // 批量向量化
-            List<List<Float>> vectors = embeddingService.embedBatch(chunks);
+            List<List<Float>> vectors = embeddingService.embedBatch(requireEmbeddingModelInstanceId(index), chunks);
 
             String fileType = extractFileType(fileName);
 
@@ -281,7 +281,7 @@ public class BizIndexDataServiceImpl implements BizIndexDataService {
         for (BusinessIndexAttachment firstChunk : firstChunks) {
             String rawText = firstChunk.getRawText();
             List<String> chunks = chunkStrategy.split(rawText, index.getChunkSize(), index.getChunkOverlap());
-            List<List<Float>> vectors = embeddingService.embedBatch(chunks);
+            List<List<Float>> vectors = embeddingService.embedBatch(requireEmbeddingModelInstanceId(index), chunks);
 
             List<String> vectorIds = new ArrayList<>();
             List<String> bizIds = new ArrayList<>();
@@ -357,6 +357,13 @@ public class BizIndexDataServiceImpl implements BizIndexDataService {
             throw new IllegalArgumentException("索引已停用: " + indexCode);
         }
         return index;
+    }
+
+    private String requireEmbeddingModelInstanceId(BusinessIndex index) {
+        if (index == null || index.getEmbeddingModelInstanceId() == null || index.getEmbeddingModelInstanceId().isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for business index");
+        }
+        return index.getEmbeddingModelInstanceId().trim();
     }
 
     @SuppressWarnings("unchecked")

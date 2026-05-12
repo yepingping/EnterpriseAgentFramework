@@ -2,29 +2,25 @@ package com.enterprise.ai.embedding;
 
 import java.util.List;
 
-/**
- * Embedding 服务接口 — 将文本转换为向量。
- * <p>扩展点：实现不同的 Embedding 模型（通义、OpenAI、BGE 等）。</p>
- */
 public interface EmbeddingService {
 
-    /**
-     * 单文本向量化
-     */
-    List<Float> embed(String text);
+    default List<Float> embed(String text) {
+        throw new IllegalStateException("modelInstanceId is required for embedding");
+    }
 
-    /**
-     * 批量文本向量化
-     */
-    List<List<Float>> embedBatch(List<String> texts);
+    List<Float> embed(String modelInstanceId, String text);
 
-    /**
-     * 返回当前模型标识
-     */
-    String getModelName();
+    default List<List<Float>> embedBatch(List<String> texts) {
+        throw new IllegalStateException("modelInstanceId is required for embedding");
+    }
 
-    /**
-     * 返回向量维度
-     */
-    int getDimension();
+    List<List<Float>> embedBatch(String modelInstanceId, List<String> texts);
+
+    default String getModelName() {
+        throw new IllegalStateException("modelInstanceId is required for embedding");
+    }
+
+    default int getDimension() {
+        throw new IllegalStateException("modelInstanceId is required for embedding");
+    }
 }

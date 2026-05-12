@@ -9,6 +9,8 @@ import com.enterprise.ai.domain.entity.KnowledgeBase;
 import com.enterprise.ai.domain.entity.KnowledgeQuestion;
 import com.enterprise.ai.domain.entity.KnowledgeTag;
 import com.enterprise.ai.domain.vo.SimilarItem;
+import com.enterprise.ai.client.ModelServiceClient;
+import com.enterprise.ai.common.dto.ApiResult;
 import com.enterprise.ai.embedding.EmbeddingService;
 import com.enterprise.ai.pipeline.chunk.ChunkStrategy;
 import com.enterprise.ai.pipeline.chunk.ChunkStrategyFactory;
@@ -48,6 +50,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final KnowledgeQuestionRepository knowledgeQuestionRepository;
     private final KnowledgeHitLogRepository knowledgeHitLogRepository;
     private final EmbeddingService embeddingService;
+    private final ModelServiceClient modelServiceClient;
     private final VectorService vectorService;
     private final DocumentParserFactory documentParserFactory;
     private final ChunkStrategyFactory chunkStrategyFactory;
@@ -76,7 +79,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
         // 3. 批量 Embedding
         List<String> texts = request.getChunks();
-        List<List<Float>> vectors = embeddingService.embedBatch(texts);
+        List<List<Float>> vectors = embeddingService.embedBatch(requireEmbeddingModelInstanceId(kb), texts);
 
         // 4. 生成 ID 列表
         List<String> ids = IntStream.range(0, texts.size())
@@ -183,7 +186,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         kb.setName(request.getName());
         kb.setCode(request.getCode());
         kb.setDescription(request.getDescription());
-        kb.setEmbeddingModel(request.getEmbeddingModel());
+        String embeddingModelInstanceId = requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), request.getCode());
+        kb.setEmbeddingModelInstanceId(embeddingModelInstanceId);
+        kb.setEmbeddingModel(defaultString(request.getEmbeddingModel(), embeddingModelInstanceId));
+        kb.setRerankModelInstanceId(trimToNull(request.getRerankModelInstanceId()));
         kb.setWorkspaceId(defaultString(request.getWorkspaceId(), "default"));
         kb.setProjectCode(request.getProjectCode());
         kb.setScope(defaultString(request.getScope(), "WORKSPACE"));
@@ -217,6 +223,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         kb.setDescription(request.getDescription());
         if (request.getEmbeddingModel() != null) {
             kb.setEmbeddingModel(request.getEmbeddingModel());
+        }
+        if (request.getEmbeddingModelInstanceId() != null) {
+            kb.setEmbeddingModelInstanceId(requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), kb.getCode()));
+        }
+        if (request.getRerankModelInstanceId() != null) {
+            kb.setRerankModelInstanceId(trimToNull(request.getRerankModelInstanceId()));
         }
         if (request.getWorkspaceId() != null) kb.setWorkspaceId(request.getWorkspaceId());
         if (request.getProjectCode() != null) kb.setProjectCode(request.getProjectCode());
@@ -382,7 +394,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         } catch (Exception e) {
             log.warn("Delete old vector failed, will insert replacement. vectorId={}, error={}", vectorId, e.getMessage());
         }
-        List<Float> vector = embeddingService.embed(chunk.getContent());
+        List<Float> vector = embeddingService.embed(requireEmbeddingModelInstanceId(kb), chunk.getContent());
         vectorService.insert(kb.getCode(), List.of(vectorId), List.of(vector), List.of(chunk.getFileId()), List.of(chunk.getContent()));
         chunk.setCollectionName(kb.getCode());
         chunkRepository.updateById(chunk);
@@ -492,7 +504,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
             // 3. 重新生成向量
             vectorService.ensureCollection(kb.getCode(), kb.getDimension() != null ? kb.getDimension() : dimension);
-            List<List<Float>> vectors = embeddingService.embedBatch(textChunks);
+            List<List<Float>> vectors = embeddingService.embedBatch(requireEmbeddingModelInstanceId(kb), textChunks);
             List<String> ids = IntStream.range(0, textChunks.size())
                     .mapToObj(i -> fileId + "_chunk_" + i)
                     .collect(Collectors.toList());
@@ -555,13 +567,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         float threshold = request.getScoreThreshold() != null ? request.getScoreThreshold() : defaultScoreThreshold;
         String searchMode = normalizeSearchMode(request.getSearchMode(), "hybrid");
 
-        List<Float> queryVector = !"keyword".equals(searchMode) ? embeddingService.embed(request.getQuery()) : List.of();
         List<KnowledgeBase> knowledgeBases = resolveKnowledgeBases(request.getKnowledgeBaseCodes());
 
         List<RetrievalTestResponse.RetrievalItem> allItems = new ArrayList<>();
         for (KnowledgeBase kb : knowledgeBases) {
             try {
                 if (!"keyword".equals(searchMode)) {
+                    List<Float> queryVector = embeddingService.embed(requireEmbeddingModelInstanceId(kb), request.getQuery());
                     List<VectorSearchResult> results = vectorService.search(
                             VectorSearchRequest.builder()
                                     .collectionName(kb.getCode())
@@ -623,6 +635,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
         }
         allItems = new ArrayList<>(merged.values());
+        applyModelRerank(request.getQuery(), kbMap, allItems);
         for (RetrievalTestResponse.RetrievalItem item : allItems) {
             KnowledgeBase kb = kbMap.get(item.getKnowledgeBaseCode());
             float vectorWeight = request.getVectorWeight() != null ? request.getVectorWeight()
@@ -1097,7 +1110,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             default -> vectorScore * vectorWeight + keywordScore * keywordWeight;
         };
         if (useRerank) {
-            float rerank = lightweightRerankScore(request.getQuery(), item.getContent());
+            float rerank = item.getRerankScore() != null
+                    ? item.getRerankScore()
+                    : lightweightRerankScore(request.getQuery(), item.getContent());
             item.setRerankScore(rerank);
             score = score * 0.8f + rerank * 0.2f;
         }
@@ -1149,6 +1164,38 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             log.setUserId(request.getUserId());
             knowledgeHitLogRepository.insert(log);
         }
+    }
+
+    private void applyModelRerank(String query, Map<String, KnowledgeBase> kbMap, List<RetrievalTestResponse.RetrievalItem> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        Map<String, List<RetrievalTestResponse.RetrievalItem>> byKb = items.stream()
+                .filter(item -> item.getContent() != null && !item.getContent().isBlank())
+                .collect(Collectors.groupingBy(RetrievalTestResponse.RetrievalItem::getKnowledgeBaseCode));
+        byKb.forEach((kbCode, group) -> {
+            KnowledgeBase kb = kbMap.get(kbCode);
+            if (kb == null || !Boolean.TRUE.equals(kb.getRerankEnabled()) || kb.getRerankModelInstanceId() == null || kb.getRerankModelInstanceId().isBlank()) {
+                return;
+            }
+            try {
+                List<String> documents = group.stream().map(RetrievalTestResponse.RetrievalItem::getContent).toList();
+                ApiResult<ModelServiceClient.RerankResult> result = modelServiceClient.rerank(
+                        new ModelServiceClient.RerankParam(kb.getRerankModelInstanceId(), query, documents, documents.size(), Map.of()));
+                if (result.getCode() != 200 || result.getData() == null || result.getData().results() == null) {
+                    log.warn("Rerank failed for kb={}, message={}", kbCode, result.getMessage());
+                    return;
+                }
+                for (ModelServiceClient.RerankItem rerankItem : result.getData().results()) {
+                    int index = rerankItem.index();
+                    if (index >= 0 && index < group.size()) {
+                        group.get(index).setRerankScore(rerankItem.score());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Rerank model failed for kb={}, error={}", kbCode, e.getMessage());
+            }
+        });
     }
 
     private void recordMisses(RetrievalTestRequest request, List<KnowledgeBase> knowledgeBases) {
@@ -1252,6 +1299,24 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private String defaultString(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private String trimToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String requireEmbeddingModelInstanceId(KnowledgeBase kb) {
+        if (kb == null) {
+            throw new IllegalArgumentException("knowledge base is required");
+        }
+        return requireEmbeddingModelInstanceId(kb.getEmbeddingModelInstanceId(), kb.getCode());
+    }
+
+    private String requireEmbeddingModelInstanceId(String modelInstanceId, String owner) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for " + owner);
+        }
+        return modelInstanceId.trim();
     }
 
     private int valueOrDefault(Integer value, int fallback) {

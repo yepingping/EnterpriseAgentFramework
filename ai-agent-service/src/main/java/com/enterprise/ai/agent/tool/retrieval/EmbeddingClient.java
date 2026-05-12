@@ -44,10 +44,13 @@ public class EmbeddingClient {
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
+        String modelInstanceId = nullIfBlank(properties.getEmbeddingModelInstanceId());
+        if (modelInstanceId == null) {
+            throw new EmbeddingException("ai.tool-retrieval.embedding-model-instance-id is required");
+        }
         try {
             ModelServiceClient.ModelEmbeddingRequest req = ModelServiceClient.ModelEmbeddingRequest.builder()
-                    .provider(nullIfBlank(properties.getEmbeddingProvider()))
-                    .model(nullIfBlank(properties.getEmbeddingModel()))
+                    .modelInstanceId(modelInstanceId)
                     .texts(texts)
                     .build();
             ModelServiceClient.ModelEmbeddingResult result = modelServiceClient.embed(req);

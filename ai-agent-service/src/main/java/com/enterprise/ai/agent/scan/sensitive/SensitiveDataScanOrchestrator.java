@@ -39,7 +39,7 @@ public class SensitiveDataScanOrchestrator {
         this.sensitiveDataScanService = sensitiveDataScanService;
     }
 
-    public String startProjectScan(Long projectId, String provider, String model) {
+    public String startProjectScan(Long projectId, String modelInstanceId) {
         scanProjectService.getById(projectId);
         if (projectLocks.putIfAbsent(projectId, "-") != null) {
             throw new IllegalStateException("项目已有敏感数据扫描任务在进行中: " + projectId);
@@ -47,8 +47,7 @@ public class SensitiveDataScanOrchestrator {
         SensitiveDataScanTask task = new SensitiveDataScanTask();
         task.setTaskId(UUID.randomUUID().toString());
         task.setProjectId(projectId);
-        task.setLlmProvider(blankToNull(provider));
-        task.setLlmModel(blankToNull(model));
+        task.setModelInstanceId(blankToNull(modelInstanceId));
         task.setStage(SensitiveDataScanTask.Stage.QUEUED);
         task.setStartedAt(Instant.now());
         tasks.put(task.getTaskId(), task);
@@ -70,8 +69,7 @@ public class SensitiveDataScanOrchestrator {
     @Async
     public void runBatchAsync(SensitiveDataScanTask task) {
         task.setStage(SensitiveDataScanTask.Stage.RUNNING);
-        String provider = task.getLlmProvider();
-        String model = task.getLlmModel();
+        String modelInstanceId = task.getModelInstanceId();
         try {
             List<ScanProjectToolEntity> tools = scanProjectService.listTools(task.getProjectId());
             task.setTotalSteps(tools.size());
@@ -79,7 +77,7 @@ public class SensitiveDataScanOrchestrator {
             for (ScanProjectToolEntity t : tools) {
                 task.setCurrentStep("tool:" + t.getName());
                 try {
-                    int tok = sensitiveDataScanService.scanAndPersist(t, provider, model);
+                    int tok = sensitiveDataScanService.scanAndPersist(t, modelInstanceId);
                     task.setTotalTokens(task.getTotalTokens() + tok);
                 } catch (Exception ex) {
                     failed++;

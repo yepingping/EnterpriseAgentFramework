@@ -16,6 +16,7 @@ export interface BizIndex {
   textTemplate: string
   fieldSchema: string
   embeddingModel: string
+  embeddingModelInstanceId: string
   dimension: number
   chunkSize: number
   chunkOverlap: number
@@ -36,6 +37,7 @@ export interface BizIndexForm {
   textTemplate: string
   fieldSchema: string
   embeddingModel?: string
+  embeddingModelInstanceId?: string
   dimension?: number
   chunkSize?: number
   chunkOverlap?: number

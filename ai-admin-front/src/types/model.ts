@@ -7,6 +7,7 @@ export interface ProviderInfo {
 /** 模型对话请求 */
 export interface ModelChatRequest {
   provider?: string
+  modelInstanceId?: string
   model?: string
   messages: ModelChatMessage[]
   options?: Record<string, unknown>
@@ -48,4 +49,59 @@ export interface ProviderTestResult {
   success: boolean
   message: string
   latencyMs: number
+}
+
+export type ModelType =
+  | 'LLM'
+  | 'EMBEDDING'
+  | 'RERANKER'
+  | 'STT'
+  | 'TTS'
+  | 'IMAGE'
+  | 'IMAGE_GENERATION'
+  | 'VIDEO'
+
+export type EndpointType = 'BUILT_IN' | 'OPENAI_COMPATIBLE'
+export type ModelInstanceStatus = 'ACTIVE' | 'DISABLED' | 'ERROR'
+
+export interface ModelInstance {
+  id: string
+  name: string
+  provider: string
+  modelType: ModelType
+  modelName: string
+  endpointType: EndpointType
+  workspaceId: string
+  credential: Record<string, unknown>
+  defaultOptions: Record<string, unknown>
+  paramsSchema: unknown
+  status: ModelInstanceStatus
+  remark?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ModelInstanceRequest {
+  name: string
+  provider: string
+  modelType: ModelType
+  modelName: string
+  endpointType: EndpointType
+  workspaceId?: string
+  credential?: Record<string, unknown>
+  defaultOptions?: Record<string, unknown>
+  paramsSchema?: unknown
+  status?: ModelInstanceStatus
+  remark?: string
+}
+
+export interface ModelInstanceTestResult {
+  success: boolean
+  latencyMs: number
+  message: string
+  modelInstanceId: string
+  provider: string
+  modelName: string
+  modelType: string
+  dimension?: number
 }

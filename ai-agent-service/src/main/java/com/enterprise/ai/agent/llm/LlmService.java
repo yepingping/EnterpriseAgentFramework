@@ -32,8 +32,8 @@ public class LlmService {
     private final ModelServiceClient modelServiceClient;
     private final ModelStreamClient modelStreamClient;
 
-    @Value("${agentscope.model.name:qwen-max}")
-    private String defaultModel;
+    @Value("${agent.model-instance-id:}")
+    private String modelInstanceId;
 
     public static final String DEFAULT_SYSTEM_PROMPT =
             "你是青岛地铁的企业级智能助手，名叫小铁宝。你能够帮助用户查询数据、搜索知识库、执行业务操作。请用专业且友好的语气回答问题。";
@@ -94,7 +94,7 @@ public class LlmService {
                 .role("user").content(userMessage).build());
 
         ModelChatRequest request = ModelChatRequest.builder()
-                .model(defaultModel)
+                .modelInstanceId(requireModelInstanceId())
                 .messages(messages)
                 .build();
 
@@ -150,8 +150,15 @@ public class LlmService {
                 .role("user").content(userMessage).build());
 
         return ModelChatRequest.builder()
-                .model(defaultModel)
+                .modelInstanceId(requireModelInstanceId())
                 .messages(messages)
                 .build();
+    }
+
+    private String requireModelInstanceId() {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalStateException("agent.model-instance-id is required");
+        }
+        return modelInstanceId.trim();
     }
 }

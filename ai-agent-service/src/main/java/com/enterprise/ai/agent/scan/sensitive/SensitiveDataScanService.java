@@ -30,10 +30,10 @@ public class SensitiveDataScanService {
     private final SemanticLlmClient llmClient;
     private final ScanProjectToolService scanProjectToolService;
 
-    public int scanAndPersist(ScanProjectToolEntity tool, String provider, String model) {
+    public int scanAndPersist(ScanProjectToolEntity tool, String modelInstanceId) {
         String toolSpec = buildToolSpecJson(tool);
         String userPrompt = promptLoader.renderUserPrompt(toolSpec);
-        SemanticGenerationResult result = llmClient.generateSensitiveScan(userPrompt, provider, model);
+        SemanticGenerationResult result = llmClient.generateSensitiveScan(userPrompt, modelInstanceId, null);
         parseAndStore(result.content(), result.modelName(), tool.getId());
         return result.tokenUsage();
     }

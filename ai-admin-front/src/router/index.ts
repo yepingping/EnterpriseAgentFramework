@@ -99,6 +99,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Provider 管理' },
       },
       {
+        path: 'model/instances',
+        name: 'ModelInstances',
+        component: () => import('@/views/model/ModelInstances.vue'),
+        meta: { title: '模型实例' },
+      },
+      {
         path: 'model/playground',
         name: 'ModelPlayground',
         component: () => import('@/views/model/ModelPlayground.vue'),
@@ -268,7 +274,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  document.title = `${(to.meta.title as string) || ''} - AI 能力中台`
+  document.title = `${(to.meta.title as string) || ''} - 睿池 ReachAI`
   next()
 })
 

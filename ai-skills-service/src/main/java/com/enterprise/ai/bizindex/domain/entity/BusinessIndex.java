@@ -34,6 +34,8 @@ public class BusinessIndex {
     /** 使用的 Embedding 模型标识 */
     private String embeddingModel;
 
+    private String embeddingModelInstanceId;
+
     /** 向量维度 */
     private Integer dimension;
 

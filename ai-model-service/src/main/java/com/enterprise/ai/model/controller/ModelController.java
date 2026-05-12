@@ -64,6 +64,11 @@ public class ModelController {
     }
 
     /** 可用 Provider 列表 */
+    @PostMapping("/rerank")
+    public ApiResult<RerankResponse> rerank(@RequestBody RerankRequest request) {
+        return ApiResult.ok(routingService.rerank(request));
+    }
+
     @GetMapping("/providers")
     public ApiResult<List<ModelRoutingService.ProviderInfo>> listProviders() {
         return ApiResult.ok(routingService.listProviders());

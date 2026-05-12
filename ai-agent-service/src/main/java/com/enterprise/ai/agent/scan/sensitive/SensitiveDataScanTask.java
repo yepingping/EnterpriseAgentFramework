@@ -14,8 +14,7 @@ public class SensitiveDataScanTask {
 
     private String taskId;
     private Long projectId;
-    private String llmProvider;
-    private String llmModel;
+    private String modelInstanceId;
     private Stage stage;
     private int totalSteps;
     private int completedSteps;

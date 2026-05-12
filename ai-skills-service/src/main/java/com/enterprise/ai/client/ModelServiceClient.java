@@ -25,7 +25,16 @@ public interface ModelServiceClient {
     @PostMapping("/embedding")
     ApiResult<EmbeddingResult> embed(@RequestBody EmbeddingParam request);
 
-    record EmbeddingParam(String provider, String model, List<String> texts) {}
+    @PostMapping("/rerank")
+    ApiResult<RerankResult> rerank(@RequestBody RerankParam request);
+
+    record EmbeddingParam(String modelInstanceId, List<String> texts) {}
 
     record EmbeddingResult(String model, String provider, int dimension, List<List<Float>> embeddings) {}
+
+    record RerankParam(String modelInstanceId, String query, List<String> documents, Integer topN, Map<String, Object> options) {}
+
+    record RerankResult(String model, String provider, List<RerankItem> results) {}
+
+    record RerankItem(int index, float score, String document) {}
 }

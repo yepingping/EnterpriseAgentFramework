@@ -28,8 +28,8 @@ public class AgentScopeConfig {
     @Value("${services.model-service.url:http://localhost:18601}")
     private String modelServiceUrl;
 
-    @Value("${agentscope.model.name:qwen-max}")
-    private String modelName;
+    @Value("${agentscope.model.instance-id:${agent.model-instance-id:}}")
+    private String modelInstanceId;
 
     /**
      * 单 Agent 场景模型（默认 Formatter）
@@ -42,11 +42,11 @@ public class AgentScopeConfig {
                                      ToolCallLogProperties toolCallLogProperties,
                                      ObjectMapper objectMapper) {
         String baseUrl = modelServiceUrl + "/model/openai-proxy/v1";
-        log.info("[AgentScope] 初始化模型: baseUrl={}, model={}", baseUrl, modelName);
+        log.info("[AgentScope] 初始化模型: baseUrl={}, modelInstanceId={}", baseUrl, requireModelInstanceId());
         Model inner = OpenAIChatModel.builder()
                 .apiKey("proxy-via-model-service")
                 .baseUrl(baseUrl)
-                .modelName(modelName)
+                .modelName(requireModelInstanceId())
                 .build();
         return new TracingModel(inner, toolCallLogService, toolCallLogProperties, objectMapper);
     }
@@ -65,9 +65,16 @@ public class AgentScopeConfig {
         Model inner = OpenAIChatModel.builder()
                 .apiKey("proxy-via-model-service")
                 .baseUrl(baseUrl)
-                .modelName(modelName)
+                .modelName(requireModelInstanceId())
                 .formatter(new OpenAIMultiAgentFormatter())
                 .build();
         return new TracingModel(inner, toolCallLogService, toolCallLogProperties, objectMapper);
+    }
+
+    private String requireModelInstanceId() {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalStateException("agentscope.model.instance-id or agent.model-instance-id is required");
+        }
+        return modelInstanceId.trim();
     }
 }

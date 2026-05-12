@@ -319,8 +319,7 @@ public class ToolRetrievalService {
         try {
             Map<String, Object> args = new LinkedHashMap<>();
             args.put("queryText", truncate(query, 4000));
-            args.put("provider", blankToNull(properties.getEmbeddingProvider()));
-            args.put("model", blankToNull(properties.getEmbeddingModel()));
+            args.put("modelInstanceId", blankToNull(properties.getEmbeddingModelInstanceId()));
             Map<String, Object> res = new LinkedHashMap<>();
             res.put("dimensions", vector == null ? 0 : vector.size());
             res.put("vectorPreview", previewVector(vector, 12));

@@ -11,16 +11,13 @@ import type {
 
 /** 语义生成（项目摘要 / 模块 / 工具 / 批量）可选的模型网关参数 */
 export type SemanticLlmParams = {
-  provider?: string
-  model?: string
+  modelInstanceId?: string
 }
 
 function llmQueryParams(llm?: SemanticLlmParams): Record<string, string> {
   const q: Record<string, string> = {}
-  const p = llm?.provider?.trim()
-  const m = llm?.model?.trim()
-  if (p) q.provider = p
-  if (m) q.model = m
+  const id = llm?.modelInstanceId?.trim()
+  if (id) q.modelInstanceId = id
   return q
 }
 

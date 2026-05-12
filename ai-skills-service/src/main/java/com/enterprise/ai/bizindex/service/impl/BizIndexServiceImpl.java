@@ -51,13 +51,15 @@ public class BizIndexServiceImpl implements BizIndexService {
 
         BusinessIndex index = new BusinessIndex();
         BeanUtils.copyProperties(request, index);
+        String embeddingModelInstanceId = requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), request.getIndexCode());
+        index.setEmbeddingModelInstanceId(embeddingModelInstanceId);
 
         // 默认使用系统当前的 Embedding 配置
         if (index.getEmbeddingModel() == null || index.getEmbeddingModel().isBlank()) {
-            index.setEmbeddingModel(embeddingService.getModelName());
+            index.setEmbeddingModel(embeddingModelInstanceId);
         }
         if (index.getDimension() == null || index.getDimension() == 0) {
-            index.setDimension(embeddingService.getDimension());
+            index.setDimension(1536);
         }
         if (index.getChunkSize() == null) {
             index.setChunkSize(500);
@@ -93,6 +95,13 @@ public class BizIndexServiceImpl implements BizIndexService {
         if (request.getIndexName() != null) index.setIndexName(request.getIndexName());
         if (request.getSourceSystem() != null) index.setSourceSystem(request.getSourceSystem());
         if (request.getFieldSchema() != null) index.setFieldSchema(request.getFieldSchema());
+        if (request.getEmbeddingModelInstanceId() != null) {
+            index.setEmbeddingModelInstanceId(requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), indexCode));
+            if (request.getEmbeddingModel() == null || request.getEmbeddingModel().isBlank()) {
+                index.setEmbeddingModel(index.getEmbeddingModelInstanceId());
+            }
+        }
+        if (request.getEmbeddingModel() != null) index.setEmbeddingModel(request.getEmbeddingModel());
         if (request.getChunkSize() != null) index.setChunkSize(request.getChunkSize());
         if (request.getChunkOverlap() != null) index.setChunkOverlap(request.getChunkOverlap());
         if (request.getSplitType() != null) index.setSplitType(request.getSplitType());
@@ -206,5 +215,12 @@ public class BizIndexServiceImpl implements BizIndexService {
             throw new IllegalArgumentException("索引不存在: " + indexCode);
         }
         return index;
+    }
+
+    private String requireEmbeddingModelInstanceId(String modelInstanceId, String owner) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for " + owner);
+        }
+        return modelInstanceId.trim();
     }
 }

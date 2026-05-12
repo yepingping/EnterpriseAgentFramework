@@ -98,7 +98,7 @@
               <template v-else>
                 <h4 style="margin-top: 16px">子 Agent Spec</h4>
                 <div class="meta-grid">
-                  <div><b>模型：</b>{{ (row.spec as any)?.llmProvider || '-' }} / {{ (row.spec as any)?.llmModel || '-' }}</div>
+                  <div><b>模型实例：</b>{{ (row.spec as any)?.modelInstanceId || '-' }}</div>
                   <div><b>最大步数：</b>{{ (row.spec as any)?.maxSteps ?? 8 }}</div>
                   <div class="span-2"><b>工具白名单：</b>{{ ((row.spec as any)?.toolWhitelist || []).join(', ') || '-' }}</div>
                   <div class="span-2"><b>系统提示词：</b><pre class="prompt-preview">{{ (row.spec as any)?.systemPrompt || '-' }}</pre></div>
@@ -351,14 +351,16 @@
                       <el-input-number v-model="form.spec.maxSteps" :min="1" :max="50" style="width: 100%" />
                     </el-form-item>
                   </el-col>
-                  <el-col :span="8">
-                    <el-form-item label="Provider">
-                      <el-input v-model="form.spec.llmProvider" placeholder="留空继承父 Agent" />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :span="8">
-                    <el-form-item label="Model">
-                      <el-input v-model="form.spec.llmModel" placeholder="留空继承父 Agent" />
+                  <el-col :span="16">
+                    <el-form-item label="模型实例">
+                      <el-select v-model="form.spec.modelInstanceId" clearable filterable placeholder="留空继承父 Agent" style="width: 100%">
+                        <el-option
+                          v-for="item in llmInstances"
+                          :key="item.id"
+                          :label="`${item.name} (${item.provider}/${item.modelName})`"
+                          :value="item.id"
+                        />
+                      </el-select>
                     </el-form-item>
                   </el-col>
                 </el-row>
@@ -644,6 +646,7 @@ import {
 } from '@/api/capability'
 import { getTools } from '@/api/tool'
 import { getScanProjects } from '@/api/scanProject'
+import { getModelInstances } from '@/api/model'
 import type {
   InteractiveFormSpec,
   CapabilityAdminTestPendingItem,
@@ -665,6 +668,7 @@ import {
 import { VISIBILITY_SELECT_OPTIONS, formatVisibilityLabel } from '@/utils/projectLabels'
 import type { ToolInfo } from '@/types/tool'
 import type { ScanProject } from '@/types/scanProject'
+import type { ModelInstance } from '@/types/model'
 import { useProjectStore } from '@/store/project'
 
 const route = useRoute()
@@ -683,6 +687,7 @@ const pagination = reactive({ current: 1, size: 20 })
 const saving = ref(false)
 
 const toolOptions = ref<ToolInfo[]>([])
+const llmInstances = ref<ModelInstance[]>([])
 
 const formDialogVisible = ref(false)
 const editingName = ref<string | null>(null)
@@ -759,8 +764,7 @@ function createEmptyForm(): CapabilityUpsertRequest {
     spec: {
       systemPrompt: '',
       toolWhitelist: [],
-      llmProvider: '',
-      llmModel: '',
+      modelInstanceId: '',
       maxSteps: 8,
       useMultiAgentModel: false,
     },
@@ -855,6 +859,15 @@ async function loadToolOptions(scopeProjectId?: number | null) {
   }
 }
 
+async function loadLlmInstances() {
+  try {
+    const { data } = await getModelInstances({ modelType: 'LLM' })
+    llmInstances.value = data?.data ?? []
+  } catch {
+    llmInstances.value = []
+  }
+}
+
 async function loadScanProjects() {
   try {
     const { data } = await getScanProjects()
@@ -936,8 +949,7 @@ function applyForm(data: CapabilityUpsertRequest) {
     form.spec = {
       systemPrompt: '',
       toolWhitelist: [],
-      llmProvider: '',
-      llmModel: '',
+      modelInstanceId: '',
       maxSteps: 8,
       useMultiAgentModel: false,
     }
@@ -946,8 +958,7 @@ function applyForm(data: CapabilityUpsertRequest) {
     form.spec = {
       systemPrompt: s?.systemPrompt || '',
       toolWhitelist: [...(s?.toolWhitelist || [])],
-      llmProvider: s?.llmProvider || '',
-      llmModel: s?.llmModel || '',
+      modelInstanceId: s?.modelInstanceId || '',
       maxSteps: s?.maxSteps ?? 8,
       useMultiAgentModel: s?.useMultiAgentModel ?? false,
     }
@@ -984,8 +995,7 @@ function openEditDialog(skill: CapabilityInfo) {
     spec: skill.spec || {
       systemPrompt: '',
       toolWhitelist: [],
-      llmProvider: '',
-      llmModel: '',
+      modelInstanceId: '',
       maxSteps: 8,
       useMultiAgentModel: false,
     },
@@ -1112,8 +1122,7 @@ async function handleVisibleChange(skill: CapabilityInfo, agentVisible: boolean)
         : ((skill.spec as SubAgentSpec) || {
             systemPrompt: '',
             toolWhitelist: [],
-            llmProvider: '',
-            llmModel: '',
+            modelInstanceId: '',
             maxSteps: 8,
             useMultiAgentModel: false,
           })
@@ -1310,6 +1319,7 @@ onMounted(async () => {
   await loadScanProjects()
   syncFiltersWithProjectContext()
   await loadToolOptions(filters.projectId ?? null)
+  await loadLlmInstances()
   fetchCapabilities()
 })
 

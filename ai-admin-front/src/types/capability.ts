@@ -301,8 +301,7 @@ export function validateInteractiveFormSpec(spec: InteractiveFormSpec | null): s
 export interface SubAgentSpec {
   systemPrompt: string
   toolWhitelist: string[]
-  llmProvider?: string | null
-  llmModel?: string | null
+  modelInstanceId?: string | null
   maxSteps?: number
   useMultiAgentModel?: boolean
 }

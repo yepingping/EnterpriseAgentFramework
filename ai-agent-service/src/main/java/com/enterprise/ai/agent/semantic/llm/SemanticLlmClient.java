@@ -26,8 +26,8 @@ public class SemanticLlmClient {
 
     private final ModelServiceClient modelServiceClient;
 
-    @Value("${agentscope.model.name:qwen-max}")
-    private String defaultModel;
+    @Value("${agent.semantic-model-instance-id:${agent.model-instance-id:}}")
+    private String defaultModelInstanceId;
 
     public SemanticLlmClient(ModelServiceClient modelServiceClient) {
         this.modelServiceClient = modelServiceClient;
@@ -37,17 +37,14 @@ public class SemanticLlmClient {
      * @param provider 非空时传给模型网关；为空则走网关默认 Provider
      * @param model    非空时使用该模型；为空则使用 {@code agentscope.model.name}
      */
-    public SemanticGenerationResult generate(String userPrompt, String provider, String model) {
-        String modelToUse = (model == null || model.isBlank()) ? defaultModel : model.trim();
+    public SemanticGenerationResult generate(String userPrompt, String modelInstanceId, String ignoredModel) {
+        String modelToUse = resolveModelInstanceId(modelInstanceId);
         ModelChatRequest.ModelChatRequestBuilder b = ModelChatRequest.builder()
-                .model(modelToUse)
+                .modelInstanceId(modelToUse)
                 .messages(List.of(
                         ModelChatRequest.ChatMessage.builder().role("system").content(SYSTEM_PROMPT).build(),
                         ModelChatRequest.ChatMessage.builder().role("user").content(userPrompt).build()
                 ));
-        if (provider != null && !provider.isBlank()) {
-            b.provider(provider.trim());
-        }
         ModelChatRequest request = b.build();
 
         ModelChatResult result;
@@ -68,19 +65,16 @@ public class SemanticLlmClient {
     }
 
     /**
-     * 敏感数据扫描：要求模型只输出 JSON（与 AI 理解使用相同的 provider/model 语义）。
+     * 敏感数据扫描：要求模型只输出 JSON（与 AI 理解使用相同的模型实例语义）。
      */
-    public SemanticGenerationResult generateSensitiveScan(String userPrompt, String provider, String model) {
-        String modelToUse = (model == null || model.isBlank()) ? defaultModel : model.trim();
+    public SemanticGenerationResult generateSensitiveScan(String userPrompt, String modelInstanceId, String ignoredModel) {
+        String modelToUse = resolveModelInstanceId(modelInstanceId);
         ModelChatRequest.ModelChatRequestBuilder b = ModelChatRequest.builder()
-                .model(modelToUse)
+                .modelInstanceId(modelToUse)
                 .messages(List.of(
                         ModelChatRequest.ChatMessage.builder().role("system").content(SENSITIVE_SYSTEM_PROMPT).build(),
                         ModelChatRequest.ChatMessage.builder().role("user").content(userPrompt).build()
                 ));
-        if (provider != null && !provider.isBlank()) {
-            b.provider(provider.trim());
-        }
         ModelChatRequest request = b.build();
         ModelChatResult result;
         try {
@@ -100,5 +94,15 @@ public class SemanticLlmClient {
     }
 
     public record SemanticGenerationResult(String content, String modelName, int tokenUsage) {
+    }
+
+    private String resolveModelInstanceId(String modelInstanceId) {
+        String resolved = modelInstanceId != null && !modelInstanceId.isBlank()
+                ? modelInstanceId.trim()
+                : defaultModelInstanceId;
+        if (resolved == null || resolved.isBlank()) {
+            throw new IllegalStateException("modelInstanceId is required for semantic LLM generation");
+        }
+        return resolved.trim();
     }
 }

@@ -45,10 +45,9 @@ public class SemanticDocController {
     @PostMapping("/scan-projects/{id}/semantic/generate")
     public ResponseEntity<?> batchGenerate(@PathVariable("id") Long id,
                                            @RequestParam(value = "force", defaultValue = "false") boolean force,
-                                           @RequestParam(value = "provider", required = false) String provider,
-                                           @RequestParam(value = "model", required = false) String model) {
+                                           @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         try {
-            String taskId = orchestrator.startProjectBatch(id, force, provider, model);
+            String taskId = orchestrator.startProjectBatch(id, force, modelInstanceId);
             return ResponseEntity.accepted().body(new BatchStartResponse(taskId));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.notFound().build();
@@ -72,10 +71,9 @@ public class SemanticDocController {
     @PostMapping("/scan-projects/{id}/semantic/generate-project")
     public ResponseEntity<?> generateProject(@PathVariable("id") Long id,
                                              @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                             @RequestParam(value = "provider", required = false) String provider,
-                                             @RequestParam(value = "model", required = false) String model) {
+                                             @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         try {
-            SemanticDocEntity doc = orchestrator.generateForProject(id, force, provider, model);
+            SemanticDocEntity doc = orchestrator.generateForProject(id, force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiError(ex.getMessage()));
@@ -85,10 +83,9 @@ public class SemanticDocController {
     @PostMapping("/scan-modules/{id}/semantic/generate")
     public ResponseEntity<?> generateModule(@PathVariable("id") Long id,
                                             @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                            @RequestParam(value = "provider", required = false) String provider,
-                                            @RequestParam(value = "model", required = false) String model) {
+                                            @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         try {
-            SemanticDocEntity doc = orchestrator.generateForModule(id, force, provider, model);
+            SemanticDocEntity doc = orchestrator.generateForModule(id, force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiError(ex.getMessage()));
@@ -98,14 +95,13 @@ public class SemanticDocController {
     @PostMapping("/tools/{name}/semantic/generate")
     public ResponseEntity<?> generateTool(@PathVariable("name") String name,
                                           @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                          @RequestParam(value = "provider", required = false) String provider,
-                                          @RequestParam(value = "model", required = false) String model) {
+                                          @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         ToolDefinitionEntity tool = toolDefinitionService.findByName(name).orElse(null);
         if (tool == null) {
             return ResponseEntity.notFound().build();
         }
         try {
-            SemanticDocEntity doc = orchestrator.generateForTool(tool.getId(), force, provider, model);
+            SemanticDocEntity doc = orchestrator.generateForTool(tool.getId(), force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiError(ex.getMessage()));
@@ -116,13 +112,12 @@ public class SemanticDocController {
     public ResponseEntity<?> generateScanProjectTool(@PathVariable("projectId") Long projectId,
                                                      @PathVariable("scanToolId") Long scanToolId,
                                                      @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                                     @RequestParam(value = "provider", required = false) String provider,
-                                                     @RequestParam(value = "model", required = false) String model) {
+                                                     @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         if (scanProjectToolService.findByProjectAndId(projectId, scanToolId).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         try {
-            SemanticDocEntity doc = orchestrator.generateForScanProjectTool(scanToolId, force, provider, model);
+            SemanticDocEntity doc = orchestrator.generateForScanProjectTool(scanToolId, force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiError(ex.getMessage()));

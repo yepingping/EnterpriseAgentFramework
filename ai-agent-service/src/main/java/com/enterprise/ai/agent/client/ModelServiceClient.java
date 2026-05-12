@@ -40,6 +40,7 @@ public interface ModelServiceClient {
     @AllArgsConstructor
     @JsonInclude(JsonInclude.Include.NON_NULL)
     class ModelChatRequest {
+        private String modelInstanceId;
         private String provider;
         private String model;
         private List<ChatMessage> messages;
@@ -107,6 +108,7 @@ public interface ModelServiceClient {
     @NoArgsConstructor
     @AllArgsConstructor
     class ModelEmbeddingRequest {
+        private String modelInstanceId;
         private String provider;
         private String model;
         private List<String> texts;

@@ -10,20 +10,18 @@
         <el-card shadow="never">
           <template #header>模型配置</template>
           <el-form label-width="80px" size="default">
-            <el-form-item label="Provider">
-              <el-select v-model="config.provider" placeholder="选择 Provider" style="width: 100%" @change="onProviderChange">
+            <el-form-item label="实例">
+              <el-select v-model="config.modelInstanceId" placeholder="请选择模型实例" style="width: 100%" @change="onInstanceChange">
                 <el-option
-                  v-for="p in providers"
-                  :key="p.name"
-                  :label="p.name"
-                  :value="p.name"
+                  v-for="item in llmInstances"
+                  :key="item.id"
+                  :label="`${item.name} / ${item.modelName}`"
+                  :value="item.id"
                 />
               </el-select>
             </el-form-item>
             <el-form-item label="Model">
-              <el-select v-model="config.model" placeholder="选择模型" style="width: 100%">
-                <el-option v-for="m in currentModels" :key="m" :label="m" :value="m" />
-              </el-select>
+              <el-input v-model="config.model" disabled placeholder="选择实例后自动带出" />
             </el-form-item>
             <el-form-item label="流式">
               <el-switch v-model="config.stream" />
@@ -86,7 +84,7 @@
               type="primary"
               @click="handleSend"
               :loading="sending"
-              :disabled="streaming || !config.provider"
+              :disabled="streaming || !config.modelInstanceId"
             >发送</el-button>
           </div>
         </div>
@@ -97,12 +95,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import type { ProviderInfo, ModelChatMessage, ModelChatResponse, TokenUsage } from '@/types/model'
-import { getProviders, modelChat, modelChatStream } from '@/api/model'
+import type { ModelChatMessage, ModelChatResponse, TokenUsage, ModelInstance } from '@/types/model'
+import { getModelInstances, modelChat } from '@/api/model'
 import { useSSE } from '@/composables/useSSE'
 
-const providers = ref<ProviderInfo[]>([])
+const llmInstances = ref<ModelInstance[]>([])
 const config = reactive({
+  modelInstanceId: '',
   provider: '',
   model: '',
   stream: true,
@@ -118,13 +117,12 @@ const messagesRef = ref<HTMLElement>()
 const { content: sseContent, isStreaming: streaming, start: startSSE, stop: stopSSE } = useSSE()
 const streamingContent = computed(() => streaming.value ? sseContent.value : '')
 
-const currentModels = computed(() => {
-  const p = providers.value.find((p) => p.name === config.provider)
-  return p?.models || []
-})
-
-function onProviderChange() {
-  config.model = currentModels.value[0] || ''
+function onInstanceChange() {
+  const selected = llmInstances.value.find((item) => item.id === config.modelInstanceId)
+  if (selected) {
+    config.provider = selected.provider
+    config.model = selected.modelName
+  }
 }
 
 function scrollToBottom() {
@@ -163,8 +161,7 @@ async function handleSend() {
 
   if (config.stream) {
     await startSSE('/model/chat/stream', {
-      provider: config.provider,
-      model: config.model,
+      modelInstanceId: config.modelInstanceId,
       messages: allMessages,
     }, {
       onChunk: () => scrollToBottom(),
@@ -177,8 +174,7 @@ async function handleSend() {
     sending.value = true
     try {
       const { data } = await modelChat({
-        provider: config.provider,
-        model: config.model,
+        modelInstanceId: config.modelInstanceId,
         messages: allMessages,
       })
       const resp = (data?.data ?? data) as ModelChatResponse
@@ -210,16 +206,18 @@ function handleClear() {
   lastUsage.value = null
 }
 
-async function fetchProviders() {
+async function fetchInstances() {
   try {
-    const { data } = await getProviders()
-    providers.value = data?.data ?? (Array.isArray(data) ? data : [])
+    const { data } = await getModelInstances({ modelType: 'LLM' })
+    llmInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
   } catch {
-    providers.value = []
+    llmInstances.value = []
   }
 }
 
-onMounted(fetchProviders)
+onMounted(async () => {
+  await fetchInstances()
+})
 </script>
 
 <style scoped lang="scss">

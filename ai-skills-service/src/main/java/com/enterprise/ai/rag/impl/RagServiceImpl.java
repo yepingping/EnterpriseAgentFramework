@@ -56,7 +56,7 @@ public class RagServiceImpl implements RagService {
         String filter = permissionService.buildMilvusFilter(fileIds);
 
         // 2. Embedding
-        List<Float> queryVector = embeddingService.embed(request.getQuestion());
+
 
         // 3. 确定要检索的知识库
         List<KnowledgeBase> knowledgeBases = knowledgeService.resolveKnowledgeBases(request.getKnowledgeBaseCodes());
@@ -64,6 +64,7 @@ public class RagServiceImpl implements RagService {
         // 4. 多库并行检索 + 权限过滤
         List<SimilarItem> allResults = new ArrayList<>();
         for (KnowledgeBase kb : knowledgeBases) {
+            List<Float> queryVector = embeddingService.embed(requireEmbeddingModelInstanceId(kb), request.getQuestion());
             List<VectorSearchResult> searchResults = vectorService.search(
                     VectorSearchRequest.builder()
                             .collectionName(kb.getCode())
@@ -106,5 +107,12 @@ public class RagServiceImpl implements RagService {
         response.setReferences(topResults);
 
         return response;
+    }
+
+    private String requireEmbeddingModelInstanceId(KnowledgeBase kb) {
+        if (kb == null || kb.getEmbeddingModelInstanceId() == null || kb.getEmbeddingModelInstanceId().isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for knowledge base");
+        }
+        return kb.getEmbeddingModelInstanceId().trim();
     }
 }

@@ -26,10 +26,10 @@ public class EmbeddingController {
      */
     @PostMapping("/vectorize")
     public ApiResult<EmbeddingResponse> vectorize(@Valid @RequestBody EmbeddingRequest request) {
-        List<List<Float>> embeddings = embeddingService.embedBatch(request.getTexts());
+        List<List<Float>> embeddings = embeddingService.embedBatch(request.getModelInstanceId(), request.getTexts());
         EmbeddingResponse response = new EmbeddingResponse();
         response.setEmbeddings(embeddings);
-        response.setModel(embeddingService.getModelName());
+        response.setModel(request.getModelInstanceId());
         return ApiResult.ok(response);
     }
 }

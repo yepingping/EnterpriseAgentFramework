@@ -132,13 +132,11 @@ export function promoteScanModuleToolsToGlobal(projectId: number, moduleId: numb
   })
 }
 
-/** 与 AI 理解生成使用相同的 provider/model 查询参数 */
+/** 与 AI 理解生成使用相同的模型实例查询参数 */
 function sensitiveScanLlmQuery(llm?: SemanticLlmParams): Record<string, string> {
   const q: Record<string, string> = {}
-  const p = llm?.provider?.trim()
-  const m = llm?.model?.trim()
-  if (p) q.provider = p
-  if (m) q.model = m
+  const id = llm?.modelInstanceId?.trim()
+  if (id) q.modelInstanceId = id
   return q
 }
 

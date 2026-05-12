@@ -34,7 +34,6 @@ public class SkillDraftLlmWriter {
                 systemPrompt,
                 sequence,
                 null,
-                null,
                 8,
                 false
         );

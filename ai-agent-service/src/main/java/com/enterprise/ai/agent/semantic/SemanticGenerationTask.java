@@ -15,9 +15,8 @@ public class SemanticGenerationTask {
     private String taskId;
     private Long projectId;
     /** 批量生成使用的模型网关 Provider，可为空（走默认） */
-    private String llmProvider;
     /** 批量生成使用的模型名，可为空（走 agentscope.model.name） */
-    private String llmModel;
+    private String modelInstanceId;
     private Stage stage;
     private int totalSteps;
     private int completedSteps;

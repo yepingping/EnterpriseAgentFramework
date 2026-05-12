@@ -146,8 +146,25 @@
             :disabled="isEdit"
           />
         </el-form-item>
-        <el-form-item label="Embedding 模型" prop="embeddingModel">
-          <el-input v-model="form.embeddingModel" placeholder="如 text-embedding-ada-002" />
+        <el-form-item label="Embedding 实例" prop="embeddingModelInstanceId">
+          <el-select v-model="form.embeddingModelInstanceId" placeholder="请选择 Embedding 模型实例" style="width: 100%">
+            <el-option
+              v-for="item in embeddingInstances"
+              :key="item.id"
+              :label="`${item.name} / ${item.modelName}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Rerank 实例">
+          <el-select v-model="form.rerankModelInstanceId" clearable placeholder="可选：请选择 Reranker 模型实例" style="width: 100%">
+            <el-option
+              v-for="item in rerankInstances"
+              :key="item.id"
+              :label="`${item.name} / ${item.modelName}`"
+              :value="item.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="描述" prop="description">
           <el-input
@@ -178,7 +195,9 @@ import { Plus, Collection, Document, Coin } from '@element-plus/icons-vue'
 import ViewToggle from '@/components/ViewToggle.vue'
 import { useKnowledgeStore } from '@/store/knowledge'
 import { createKnowledge, updateKnowledge, deleteKnowledge } from '@/api/knowledge'
+import { getModelInstances } from '@/api/model'
 import type { KnowledgeBase, KnowledgeBaseForm } from '@/types/knowledge'
+import type { ModelInstance } from '@/types/model'
 
 const router = useRouter()
 const knowledgeStore = useKnowledgeStore()
@@ -188,12 +207,16 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitLoading = ref(false)
 const formRef = ref<FormInstance>()
+const embeddingInstances = ref<ModelInstance[]>([])
+const rerankInstances = ref<ModelInstance[]>([])
 
 const form = reactive<KnowledgeBaseForm>({
   name: '',
   code: '',
   description: '',
   embeddingModel: '',
+  embeddingModelInstanceId: '',
+  rerankModelInstanceId: '',
 })
 
 const formRules: FormRules = {
@@ -209,6 +232,8 @@ function resetForm() {
   form.code = ''
   form.description = ''
   form.embeddingModel = ''
+  form.embeddingModelInstanceId = ''
+  form.rerankModelInstanceId = ''
 }
 
 function openCreateDialog() {
@@ -223,7 +248,19 @@ function openEditDialog(row: KnowledgeBase) {
   form.code = row.code
   form.description = row.description || ''
   form.embeddingModel = row.embeddingModel || ''
+  form.embeddingModelInstanceId = row.embeddingModelInstanceId || ''
+  form.rerankModelInstanceId = row.rerankModelInstanceId || ''
   dialogVisible.value = true
+}
+
+async function fetchEmbeddingInstances() {
+  const { data } = await getModelInstances({ modelType: 'EMBEDDING' })
+  embeddingInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+}
+
+async function fetchRerankInstances() {
+  const { data } = await getModelInstances({ modelType: 'RERANKER' })
+  rerankInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
 }
 
 async function handleSubmit() {
@@ -258,6 +295,8 @@ async function handleDelete(code: string) {
 
 onMounted(() => {
   knowledgeStore.fetchList()
+  fetchEmbeddingInstances()
+  fetchRerankInstances()
 })
 </script>
 

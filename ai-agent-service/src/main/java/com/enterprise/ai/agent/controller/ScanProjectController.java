@@ -221,10 +221,9 @@ public class ScanProjectController {
 
     @PostMapping("/{id}/sensitive-data/scan")
     public ResponseEntity<?> startSensitiveDataScan(@PathVariable Long id,
-                                                    @RequestParam(value = "provider", required = false) String provider,
-                                                    @RequestParam(value = "model", required = false) String model) {
+                                                    @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
         try {
-            String taskId = sensitiveDataScanOrchestrator.startProjectScan(id, provider, model);
+            String taskId = sensitiveDataScanOrchestrator.startProjectScan(id, modelInstanceId);
             return ResponseEntity.accepted().body(new SensitiveScanStartResponse(taskId));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.notFound().build();

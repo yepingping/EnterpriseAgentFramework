@@ -3,9 +3,9 @@
     <el-aside width="240px" class="sidebar">
       <div class="logo">
         <div class="logo-icon-wrap">
-          <el-icon :size="22"><Cpu /></el-icon>
+          <img src="/reachai-icon.svg" alt="睿池 ReachAI" />
         </div>
-        <span class="logo-text gradient-text">AI 能力中台</span>
+        <span class="logo-text">AI 能力中台</span>
       </div>
       <el-scrollbar class="sidebar-scroll">
         <el-menu
@@ -183,6 +183,12 @@
                 <span class="menu-en">Providers</span>
               </span>
             </el-menu-item>
+            <el-menu-item index="/model/instances">
+              <span class="menu-label leaf">
+                <span class="menu-cn">模型实例</span>
+                <span class="menu-en">Instances</span>
+              </span>
+            </el-menu-item>
             <el-menu-item index="/model/playground">
               <span class="menu-label leaf">
                 <span class="menu-cn">模型调试台</span>
@@ -349,6 +355,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/biz-index')) return '/biz-index'
   if (path.startsWith('/agent')) return '/agent'
   if (path.startsWith('/model/playground')) return '/model/playground'
+  if (path.startsWith('/model/instances')) return '/model/instances'
   if (path.startsWith('/model')) return '/model'
   if (path.startsWith('/tool/retrieval')) return '/tool/retrieval'
   if (path.startsWith('/settings/tool-acl')) return '/settings/tool-acl'
@@ -470,22 +477,21 @@ watch(
 }
 
 .logo-icon-wrap {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent),
-    linear-gradient(135deg, #4f46e5 0%, #2563eb 52%, #0ea5e9 100%);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
   box-shadow:
     0 12px 28px rgba(37, 99, 235, 0.32),
     inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+  overflow: hidden;
 
-  .el-icon {
-    filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.35));
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 }
 
@@ -495,7 +501,7 @@ watch(
   line-height: 1.1;
   letter-spacing: 0;
   padding-bottom: 10px;
-  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 46%, #93c5fd 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 48%, #93c5fd 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

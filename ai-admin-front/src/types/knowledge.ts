@@ -5,6 +5,8 @@ export interface KnowledgeBase {
   code: string
   description: string
   embeddingModel: string
+  embeddingModelInstanceId: string
+  rerankModelInstanceId?: string
   workspaceId: string
   projectCode: string
   scope: string
@@ -36,6 +38,8 @@ export interface KnowledgeBaseForm {
   code: string
   description: string
   embeddingModel: string
+  embeddingModelInstanceId: string
+  rerankModelInstanceId?: string
   workspaceId?: string
   projectCode?: string
   scope?: string

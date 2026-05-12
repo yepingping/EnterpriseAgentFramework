@@ -28,7 +28,7 @@ public class ToolDefinitionEntity {
 
     private String parametersJson;
 
-    /** Skill 专属 spec JSON（SubAgent: {systemPrompt, toolWhitelist, llmProvider, llmModel, maxSteps}）。 */
+    /** Skill 专属 spec JSON（SubAgent: {systemPrompt, toolWhitelist, modelInstanceId, maxSteps}）。 */
     private String specJson;
 
     private String source;

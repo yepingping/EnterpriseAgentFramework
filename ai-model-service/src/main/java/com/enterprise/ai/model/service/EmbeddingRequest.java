@@ -16,6 +16,9 @@ public class EmbeddingRequest {
     /** 指定 Provider，为空时使用默认 */
     private String provider;
 
+    /** Optional database-backed model instance id. */
+    private String modelInstanceId;
+
     /** 模型名称，为空时使用 Provider 默认模型 */
     private String model;
 

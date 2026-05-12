@@ -35,7 +35,7 @@ public class DedupServiceImpl implements DedupService {
         String filter = permissionService.buildMilvusFilter(fileIds);
 
         // 2. Embedding
-        List<Float> queryVector = embeddingService.embed(request.getText());
+
 
         // 3. 确定查重范围
         List<KnowledgeBase> knowledgeBases = knowledgeService.resolveKnowledgeBases(request.getKnowledgeBaseCodes());
@@ -43,6 +43,7 @@ public class DedupServiceImpl implements DedupService {
         // 4. 多库检索
         List<SimilarItem> allResults = new ArrayList<>();
         for (KnowledgeBase kb : knowledgeBases) {
+            List<Float> queryVector = embeddingService.embed(requireEmbeddingModelInstanceId(kb), request.getText());
             List<VectorSearchResult> searchResults = vectorService.search(
                     VectorSearchRequest.builder()
                             .collectionName(kb.getCode())
@@ -76,5 +77,12 @@ public class DedupServiceImpl implements DedupService {
         knowledgeService.enrichFileName(topResults);
 
         return DedupResponse.of(topResults);
+    }
+
+    private String requireEmbeddingModelInstanceId(KnowledgeBase kb) {
+        if (kb == null || kb.getEmbeddingModelInstanceId() == null || kb.getEmbeddingModelInstanceId().isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for knowledge base");
+        }
+        return kb.getEmbeddingModelInstanceId().trim();
     }
 }

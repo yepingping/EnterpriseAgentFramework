@@ -24,6 +24,10 @@ public class KnowledgeBase {
     /** Embedding 模型标识 */
     private String embeddingModel;
 
+    private String embeddingModelInstanceId;
+
+    private String rerankModelInstanceId;
+
     private String workspaceId;
 
     private String projectCode;

@@ -1,9 +1,12 @@
 package com.enterprise.ai.pipeline.step;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.enterprise.ai.domain.entity.KnowledgeBase;
 import com.enterprise.ai.embedding.EmbeddingService;
 import com.enterprise.ai.pipeline.PipelineContext;
 import com.enterprise.ai.pipeline.PipelineException;
 import com.enterprise.ai.pipeline.PipelineStep;
+import com.enterprise.ai.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -25,6 +28,7 @@ import java.util.List;
 public class EmbeddingStep implements PipelineStep {
 
     private final EmbeddingService embeddingService;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
 
     @Override
     public void process(PipelineContext context) {
@@ -33,7 +37,13 @@ public class EmbeddingStep implements PipelineStep {
             throw new PipelineException(getName(), context.getFileId(), "chunks 为空，无法向量化");
         }
 
-        List<List<Float>> vectors = embeddingService.embedBatch(chunks);
+        KnowledgeBase kb = knowledgeBaseRepository.selectOne(
+                new LambdaQueryWrapper<KnowledgeBase>().eq(KnowledgeBase::getCode, context.getKnowledgeBaseCode()));
+        if (kb == null || kb.getEmbeddingModelInstanceId() == null || kb.getEmbeddingModelInstanceId().isBlank()) {
+            throw new PipelineException(getName(), context.getFileId(), "embeddingModelInstanceId is required");
+        }
+
+        List<List<Float>> vectors = embeddingService.embedBatch(kb.getEmbeddingModelInstanceId(), chunks);
 
         if (vectors.size() != chunks.size()) {
             throw new PipelineException(getName(), context.getFileId(),

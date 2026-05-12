@@ -117,6 +117,16 @@
             placeholder='JSON 格式，如：{"fields":[{"name":"name","label":"物资名称","type":"string","required":true,"indexed":true}]}'
           />
         </el-form-item>
+        <el-form-item label="Embedding 实例" prop="embeddingModelInstanceId">
+          <el-select v-model="form.embeddingModelInstanceId" placeholder="请选择 Embedding 模型实例" style="width: 100%">
+            <el-option
+              v-for="item in embeddingInstances"
+              :key="item.id"
+              :label="`${item.name} / ${item.modelName}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="附件切分策略">
           <el-select v-model="form.splitType" style="width: 200px">
             <el-option label="固定长度" value="FIXED" />
@@ -164,7 +174,9 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useBizIndexStore } from '@/store/bizIndex'
 import { createBizIndex, updateBizIndex, deleteBizIndex } from '@/api/bizIndex'
+import { getModelInstances } from '@/api/model'
 import type { BizIndex, BizIndexForm } from '@/types/bizIndex'
+import type { ModelInstance } from '@/types/model'
 
 const router = useRouter()
 const bizIndexStore = useBizIndexStore()
@@ -173,6 +185,7 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitLoading = ref(false)
 const formRef = ref<FormInstance>()
+const embeddingInstances = ref<ModelInstance[]>([])
 
 const form = reactive<BizIndexForm>({
   indexCode: '',
@@ -180,6 +193,7 @@ const form = reactive<BizIndexForm>({
   sourceSystem: '',
   textTemplate: '',
   fieldSchema: '',
+  embeddingModelInstanceId: '',
   chunkSize: 500,
   chunkOverlap: 50,
   splitType: 'FIXED',
@@ -207,6 +221,7 @@ function resetForm() {
   form.sourceSystem = ''
   form.textTemplate = ''
   form.fieldSchema = ''
+  form.embeddingModelInstanceId = ''
   form.chunkSize = 500
   form.chunkOverlap = 50
   form.splitType = 'FIXED'
@@ -226,6 +241,7 @@ function openEditDialog(row: BizIndex) {
   form.sourceSystem = row.sourceSystem
   form.textTemplate = row.textTemplate
   form.fieldSchema = row.fieldSchema
+  form.embeddingModelInstanceId = row.embeddingModelInstanceId || ''
   form.chunkSize = row.chunkSize
   form.chunkOverlap = row.chunkOverlap
   form.splitType = row.splitType
@@ -263,8 +279,14 @@ async function handleDelete(indexCode: string) {
   }
 }
 
+async function fetchEmbeddingInstances() {
+  const { data } = await getModelInstances({ modelType: 'EMBEDDING' })
+  embeddingInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+}
+
 onMounted(() => {
   bizIndexStore.fetchList()
+  fetchEmbeddingInstances()
 })
 </script>
 

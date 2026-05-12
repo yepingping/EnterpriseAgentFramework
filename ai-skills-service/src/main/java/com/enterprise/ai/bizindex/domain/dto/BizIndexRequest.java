@@ -31,6 +31,8 @@ public class BizIndexRequest {
     /** Embedding 模型标识（留空则使用系统默认） */
     private String embeddingModel;
 
+    private String embeddingModelInstanceId;
+
     /** 向量维度（留空则使用系统默认） */
     private Integer dimension;
 

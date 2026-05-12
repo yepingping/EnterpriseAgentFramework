@@ -42,13 +42,13 @@ public class TongyiEmbeddingService implements EmbeddingService {
     }
 
     @Override
-    public List<Float> embed(String text) {
-        List<List<Float>> results = embedBatch(List.of(text));
+    public List<Float> embed(String modelInstanceId, String text) {
+        List<List<Float>> results = embedBatch(modelInstanceId, List.of(text));
         return results.get(0);
     }
 
     @Override
-    public List<List<Float>> embedBatch(List<String> texts) {
+    public List<List<Float>> embedBatch(String modelInstanceId, List<String> texts) {
         List<List<Float>> allEmbeddings = new ArrayList<>();
 
         for (int i = 0; i < texts.size(); i += batchSize) {

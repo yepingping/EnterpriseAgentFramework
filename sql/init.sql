@@ -20,6 +20,7 @@
 --   ai-agent-service/sql/skill_draft_tool_definition.sql Skill 草稿：tool_definition.draft（kind=SKILL 时暂存）
 --   ai-agent-service/sql/skill_interaction_phase2_x.sql Phase 2.x InteractiveFormSkill 挂起/恢复表 skill_interaction
 --   ai-agent-service/sql/ai_capability_metadata.sql @AiCapability 能力声明元数据
+--   ai-skills-service/sql/model_instance_binding_v11.sql  v11（知识库 / 业务索引绑定模型实例）
 --
 -- 幂等设计：
 --   - 建库 / 建表统一 IF NOT EXISTS；
@@ -1226,6 +1227,22 @@ SELECT * FROM (
     SELECT '合同知识库',         'kb_contract',          '合同相关文档',                   'text-embedding-v2',                   1536,                1
 ) AS seed
 WHERE NOT EXISTS (SELECT 1 FROM `knowledge_base` WHERE `code` = seed.code);
+
+
+-- ============================================================================
+-- 九、模型实例绑定（历史 v11，ai-skills-service/sql/model_instance_binding_v11.sql）
+-- ============================================================================
+
+CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id',
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id',
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
+CALL add_col_if_absent('business_index', 'embedding_model_instance_id',
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+
+CALL add_idx_if_absent('knowledge_base', 'idx_kb_embedding_instance', '`embedding_model_instance_id`');
+CALL add_idx_if_absent('knowledge_base', 'idx_kb_rerank_instance', '`rerank_model_instance_id`');
+CALL add_idx_if_absent('business_index', 'idx_biz_embedding_instance', '`embedding_model_instance_id`');
 
 
 -- ============================================================================

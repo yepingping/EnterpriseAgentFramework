@@ -1,84 +1,106 @@
 package com.enterprise.ai.model.controller;
 
+import com.enterprise.ai.common.exception.BizException;
+import com.enterprise.ai.model.instance.EndpointType;
+import com.enterprise.ai.model.instance.ModelInstanceEntity;
+import com.enterprise.ai.model.instance.ModelInstanceRuntime;
+import com.enterprise.ai.model.instance.ModelInstanceService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
-/**
- * OpenAI 兼容格式代理端点。
- * <p>
- * 将 OpenAI 格式的请求透传到 DashScope 的 OpenAI 兼容 API，
- * 使得 AgentScope 的 OpenAIChatModel 可以通过 model-service 间接调用 DashScope。
- * <p>
- * 架构收益：
- * - AgentScope Agent 路径的所有 LLM 调用统一经过 model-service
- * - API Key 集中管理在 model-service，agent-service 无需持有
- * - 后续可在此层增加限流、日志、路由等能力
- */
 @Slf4j
 @RestController
 @RequestMapping("/model/openai-proxy")
+@RequiredArgsConstructor
 public class OpenAIProxyController {
 
-    private static final String DASHSCOPE_COMPATIBLE_BASE = "https://dashscope.aliyuncs.com/compatible-mode";
-
-    /** DEBUG 下请求/响应 JSON 预览最大字符数 */
     private static final int DEBUG_BODY_PREVIEW_MAX = 1200;
 
-    @Value("${model.tongyi.api-key:${spring.ai.dashscope.api-key:}}")
-    private String apiKey;
-
+    private final ModelInstanceService modelInstanceService;
+    private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate = new RestTemplate();
 
-    /**
-     * 透传 OpenAI 格式请求到 DashScope 兼容端点（同步）。
-     * <p>
-     * AgentScope OpenAIChatModel 会调用 baseUrl + /chat/completions，
-     * 因此这里匹配 /v1/chat/completions 路径。
-     */
     @PostMapping("/v1/chat/completions")
-    public ResponseEntity<String> proxyChatCompletions(
-            @RequestBody String body,
-            HttpServletRequest servletRequest) {
-
-        log.debug("[OpenAI Proxy] 收到代理请求, bodyLength={}", body.length());
+    public ResponseEntity<String> proxyChatCompletions(@RequestBody String body,
+                                                       HttpServletRequest servletRequest) {
+        log.debug("[OpenAI Proxy] request bodyLength={}", body.length());
         if (log.isDebugEnabled()) {
-            log.debug("[OpenAI Proxy] 请求体预览: {}", previewJson(body));
+            log.debug("[OpenAI Proxy] request preview: {}", previewJson(body));
         }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Authorization", "Bearer " + apiKey);
-
-        String targetUrl = DASHSCOPE_COMPATIBLE_BASE + "/v1/chat/completions";
-
         try {
+            JsonNode root = objectMapper.readTree(body);
+            String modelInstanceId = root.path("model").asText("");
+            if (modelInstanceId.isBlank()) {
+                throw new BizException(400, "model field must be modelInstanceId for openai-proxy");
+            }
+
+            ModelInstanceEntity entity = modelInstanceService.getActiveEntity(modelInstanceId);
+            ModelInstanceRuntime runtime = modelInstanceService.toRuntime(entity);
+            if (!EndpointType.OPENAI_COMPATIBLE.name().equals(runtime.getEndpointType())) {
+                throw new BizException(400, "openai-proxy only supports OPENAI_COMPATIBLE model instances");
+            }
+
+            ObjectNode rewrittenBody = root.deepCopy();
+            rewrittenBody.put("model", runtime.getModelName());
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            String apiKey = stringCredential(runtime, "apiKey", "token");
+            String authHeader = stringCredential(runtime, "authHeader");
+            String authPrefix = stringCredential(runtime, "authPrefix");
+            if (apiKey != null && !apiKey.isBlank()) {
+                headers.set(authHeader == null || authHeader.isBlank() ? "Authorization" : authHeader,
+                        authPrefix == null ? "Bearer " + apiKey : authPrefix + apiKey);
+            }
+
             ResponseEntity<String> response = restTemplate.exchange(
-                    targetUrl,
+                    resolveUrl(stringCredential(runtime, "baseUrl", "apiBase", "endpoint"), "/v1/chat/completions"),
                     HttpMethod.POST,
-                    new HttpEntity<>(body, headers),
+                    new HttpEntity<>(objectMapper.writeValueAsString(rewrittenBody), headers),
                     String.class
             );
-
-            log.debug("[OpenAI Proxy] DashScope 响应 status={}", response.getStatusCode());
-            if (log.isDebugEnabled()) {
-                String respBody = response.getBody();
-                int len = respBody == null ? 0 : respBody.length();
-                log.debug("[OpenAI Proxy] DashScope 响应体长度={}", len);
-                log.debug("[OpenAI Proxy] DashScope 响应体预览: {}", previewJson(respBody));
-            }
             return ResponseEntity.status(response.getStatusCode())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(response.getBody());
-
+        } catch (BizException e) {
+            return ResponseEntity.status(e.getCode()).body(errorBody(e.getMessage()));
         } catch (Exception e) {
-            log.error("[OpenAI Proxy] DashScope 调用失败", e);
+            log.error("[OpenAI Proxy] model call failed", e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("{\"error\":{\"message\":\"Model service proxy error: " + e.getMessage() + "\"}}");
+                    .body(errorBody("Model service proxy error: " + e.getMessage()));
         }
+    }
+
+    private String stringCredential(ModelInstanceRuntime runtime, String... keys) {
+        if (runtime.getCredential() == null) return null;
+        for (String key : keys) {
+            Object value = runtime.getCredential().get(key);
+            if (value != null) return String.valueOf(value);
+        }
+        return null;
+    }
+
+    private String resolveUrl(String baseUrl, String defaultPath) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new BizException(400, "OpenAI-compatible model requires credential.baseUrl");
+        }
+        String value = baseUrl.trim();
+        if (value.endsWith("/chat/completions")) return value;
+        while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        return value + defaultPath;
+    }
+
+    private String errorBody(String message) {
+        String escaped = message == null ? "" : message.replace("\\", "\\\\").replace("\"", "\\\"");
+        return "{\"error\":{\"message\":\"" + escaped + "\"}}";
     }
 
     private static String previewJson(String raw) {
@@ -88,7 +110,6 @@ public class OpenAIProxyController {
         if (raw.length() <= DEBUG_BODY_PREVIEW_MAX) {
             return raw;
         }
-        return raw.substring(0, DEBUG_BODY_PREVIEW_MAX)
-                + "... (已截断预览，总长=" + raw.length() + ")";
+        return raw.substring(0, DEBUG_BODY_PREVIEW_MAX) + "...";
     }
 }

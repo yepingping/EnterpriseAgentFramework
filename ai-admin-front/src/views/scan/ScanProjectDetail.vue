@@ -251,24 +251,18 @@
         <el-button :loading="batchStarting" @click="startBatchGenerate(true)">强制重生成（覆盖已编辑）</el-button>
         <el-button @click="reloadSemanticUi">刷新</el-button>
         <el-select
-          v-model="semanticProvider"
-          placeholder="Provider"
-          clearable
-          filterable
-          class="semantic-llm-select"
-          @change="onSemanticProviderChange"
-        >
-          <el-option v-for="p in semanticProviders" :key="p.name" :label="p.name" :value="p.name" />
-        </el-select>
-        <el-select
-          v-model="semanticModel"
-          placeholder="模型"
+          v-model="semanticModelInstanceId"
+          placeholder="LLM 模型实例"
           clearable
           filterable
           class="semantic-llm-select semantic-model-select"
-          :disabled="!semanticProvider"
         >
-          <el-option v-for="m in semanticModelsForSelect" :key="m" :label="m" :value="m" />
+          <el-option
+            v-for="item in semanticModelInstances"
+            :key="item.id"
+            :label="`${item.name} (${item.provider}/${item.modelName})`"
+            :value="item.id"
+          />
         </el-select>
         <el-tag v-if="task" :type="taskTagType(task.stage)" style="margin-left: 12px">
           {{ task.stage }} · {{ task.completedSteps }}/{{ task.totalSteps }}
@@ -864,7 +858,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 
 const ApiGraphCanvas = defineAsyncComponent(() => import('./ApiGraphCanvas.vue'))
-import type { ProviderInfo } from '@/types/model'
+import type { ModelInstance } from '@/types/model'
 import type { DescriptionSource, ParamDescriptionSource, ProjectToolInfo, ScanProject, ScanSettings, SensitiveScanTask } from '@/types/scanProject'
 import { getDefaultScanSettings } from '@/types/scanProject'
 import type { ToolParameter, ToolTestResult, ToolUpsertRequest } from '@/types/tool'
@@ -913,7 +907,7 @@ import {
   startProjectBatchGenerate,
   type SemanticLlmParams,
 } from '@/api/semanticDoc'
-import { getProviders } from '@/api/model'
+import { getModelInstances } from '@/api/model'
 
 const route = useRoute()
 const router = useRouter()
@@ -1661,13 +1655,8 @@ const task = ref<SemanticTask | null>(null)
 const projectGenLoading = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const semanticProviders = ref<ProviderInfo[]>([])
-const semanticProvider = ref('')
-const semanticModel = ref('')
-const semanticModelsForSelect = computed(() => {
-  const p = semanticProviders.value.find((x) => x.name === semanticProvider.value)
-  return p?.models ?? []
-})
+const semanticModelInstances = ref<ModelInstance[]>([])
+const semanticModelInstanceId = ref('')
 
 const docEditVisible = ref(false)
 const docEditContent = ref('')
@@ -1728,52 +1717,29 @@ function taskTagType(stage: SemanticTask['stage']) {
   }
 }
 
-function syncSemanticModelToProvider() {
-  const models = semanticModelsForSelect.value
-  if (models.length === 0) {
-    semanticModel.value = ''
-    return
-  }
-  if (!semanticModel.value || !models.includes(semanticModel.value)) {
-    semanticModel.value = models[0]
-  }
-}
-
-function onSemanticProviderChange() {
-  if (!semanticProvider.value) {
-    semanticModel.value = ''
-    return
-  }
-  syncSemanticModelToProvider()
-}
-
-/** 传给语义生成接口；未选 Provider/模型时由后端走默认网关配置 */
+/** 传给语义生成接口；未选模型实例时由后端走默认模型实例配置 */
 function semanticLlmParams(): SemanticLlmParams | undefined {
-  const p = semanticProvider.value?.trim()
-  const m = semanticModel.value?.trim()
-  if (!p && !m) return undefined
+  const id = semanticModelInstanceId.value?.trim()
+  if (!id) return undefined
   return {
-    ...(p ? { provider: p } : {}),
-    ...(m ? { model: m } : {}),
+    modelInstanceId: id,
   }
 }
 
-async function loadSemanticProviders() {
+async function loadSemanticModelInstances() {
   try {
-    const { data } = await getProviders()
-    const list = (data?.data ?? (Array.isArray(data) ? data : [])) as ProviderInfo[]
-    semanticProviders.value = list
+    const { data } = await getModelInstances({ modelType: 'LLM' })
+    const list = (data?.data ?? []) as ModelInstance[]
+    semanticModelInstances.value = list
     if (list.length === 0) {
-      semanticProvider.value = ''
-      semanticModel.value = ''
+      semanticModelInstanceId.value = ''
       return
     }
-    if (!semanticProvider.value || !list.some((x) => x.name === semanticProvider.value)) {
-      semanticProvider.value = list[0].name
+    if (semanticModelInstanceId.value && !list.some((x) => x.id === semanticModelInstanceId.value)) {
+      semanticModelInstanceId.value = ''
     }
-    syncSemanticModelToProvider()
   } catch {
-    semanticProviders.value = []
+    semanticModelInstances.value = []
   }
 }
 
@@ -2061,7 +2027,7 @@ async function submitRename() {
 
 onMounted(() => {
   void refreshAll()
-  void loadSemanticProviders()
+  void loadSemanticModelInstances()
   void resumeBatchTaskIfAny()
   void resumeSensitiveTaskIfAny()
 })

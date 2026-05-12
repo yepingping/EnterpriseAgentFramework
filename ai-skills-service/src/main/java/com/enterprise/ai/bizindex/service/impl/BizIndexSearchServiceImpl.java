@@ -52,7 +52,7 @@ public class BizIndexSearchServiceImpl implements BizIndexSearchService {
         boolean includeAttachment = request.getIncludeAttachmentMatch() == null || request.getIncludeAttachmentMatch();
 
         // 1. 查询文本向量化
-        List<Float> queryVector = embeddingService.embed(request.getQuery());
+        List<Float> queryVector = embeddingService.embed(requireEmbeddingModelInstanceId(index), request.getQuery());
 
         // 2. 构建过滤表达式
         String filterExpr = buildFilterExpression(request.getFilters(), includeAttachment);
@@ -190,5 +190,12 @@ public class BizIndexSearchServiceImpl implements BizIndexSearchService {
         if (obj == null) return null;
         String s = String.valueOf(obj);
         return s.isBlank() || "null".equals(s) ? null : s;
+    }
+
+    private String requireEmbeddingModelInstanceId(BusinessIndex index) {
+        if (index == null || index.getEmbeddingModelInstanceId() == null || index.getEmbeddingModelInstanceId().isBlank()) {
+            throw new IllegalArgumentException("embeddingModelInstanceId is required for business index");
+        }
+        return index.getEmbeddingModelInstanceId().trim();
     }
 }

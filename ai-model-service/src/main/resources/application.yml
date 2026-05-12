@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: ai-model-service
+  datasource:
+    url: ${AI_MYSQL_URL:jdbc:mysql://127.0.0.1:3306/ai_text_service?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai}
+    username: ${AI_MYSQL_USER:root}
+    password: ${AI_MYSQL_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:your-api-key}
@@ -24,6 +29,7 @@ spring:
 # 模型网关配置
 model:
   default-provider: tongyi
+  credential-secret: ${MODEL_CREDENTIAL_SECRET:dev-only-change-me-please-32-bytes}
   # 小米 MiMo（OpenAI 兼容，请求头 api-key）。配置非空 api-key 后自动注册 provider「mimo」
   mimo:
     api-key: ${MIMO_API_KEY:your-api-key}
@@ -53,3 +59,7 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
