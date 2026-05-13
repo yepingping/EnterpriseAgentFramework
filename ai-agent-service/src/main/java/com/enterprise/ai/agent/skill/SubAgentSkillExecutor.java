@@ -64,6 +64,7 @@ public class SubAgentSkillExecutor {
                     .name("skill:" + skill.name())
                     .systemPrompt(spec.systemPrompt())
                     .tools(spec.toolWhitelist())
+                    .modelInstanceId(spec.modelInstanceId())
                     .maxSteps(spec.maxSteps())
                     .useMultiAgentModel(spec.useMultiAgentModel())
                     .type("single")

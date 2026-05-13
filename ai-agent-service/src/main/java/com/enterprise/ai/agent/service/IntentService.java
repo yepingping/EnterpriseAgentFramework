@@ -34,8 +34,9 @@ public class IntentService {
         log.debug("开始意图识别: {}", userMessage);
 
         try {
-            String systemPrompt = buildIntentPrompt();
-            String result = llmService.chat(systemPrompt, userMessage);
+            List<AgentDefinition> enabledAgents = enabledIntentAgents();
+            String systemPrompt = buildIntentPrompt(enabledAgents);
+            String result = llmService.chat(systemPrompt, userMessage, requireIntentModelInstanceId(enabledAgents));
 
             String intent = normalizeIntent(result);
             log.info("意图识别结果: {} -> {}", userMessage, intent);
@@ -53,12 +54,7 @@ public class IntentService {
      * 只列出已启用的 AgentDefinition 的 intentType 和 description，
      * 新增领域 Agent 后自动出现在候选列表中。
      */
-    private String buildIntentPrompt() {
-        List<AgentDefinition> enabledAgents = agentDefinitionService.list().stream()
-                .filter(AgentDefinition::isEnabled)
-                .filter(d -> d.getIntentType() != null && !d.getIntentType().isBlank())
-                .toList();
-
+    private String buildIntentPrompt(List<AgentDefinition> enabledAgents) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个意图识别专家。请分析用户的输入，判断用户意图属于以下哪个类别：\n\n");
 
@@ -98,5 +94,21 @@ public class IntentService {
         }
 
         return FALLBACK_INTENT;
+    }
+
+    private List<AgentDefinition> enabledIntentAgents() {
+        return agentDefinitionService.list().stream()
+                .filter(AgentDefinition::isEnabled)
+                .filter(d -> d.getIntentType() != null && !d.getIntentType().isBlank())
+                .toList();
+    }
+
+    private String requireIntentModelInstanceId(List<AgentDefinition> enabledAgents) {
+        return enabledAgents.stream()
+                .map(AgentDefinition::getModelInstanceId)
+                .filter(id -> id != null && !id.isBlank())
+                .findFirst()
+                .map(String::trim)
+                .orElseThrow(() -> new IllegalStateException("modelInstanceId is required for intent recognition"));
     }
 }

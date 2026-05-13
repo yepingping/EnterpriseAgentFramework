@@ -80,7 +80,9 @@ public class OpenAiCompatibleRuntimeClient {
                 HttpResponse<java.io.InputStream> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                    sink.error(new BizException(response.statusCode(), errorBody));
+                    log.warn("Model instance {} stream call failed: HTTP {} body={}",
+                            runtime.getId(), response.statusCode(), truncate(errorBody));
+                    sink.error(new BizException(response.statusCode(), providerErrorMessage(response.statusCode(), errorBody)));
                     return;
                 }
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
@@ -267,6 +269,9 @@ public class OpenAiCompatibleRuntimeClient {
         String value = baseUrl.trim();
         if (value.endsWith("/chat/completions") || value.endsWith("/embeddings") || value.endsWith("/rerank")) return value;
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        if (value.endsWith("/v1") && defaultPath.startsWith("/v1/")) {
+            return value + defaultPath.substring("/v1".length());
+        }
         return value + defaultPath;
     }
 
@@ -305,8 +310,16 @@ public class OpenAiCompatibleRuntimeClient {
     private void ensureSuccess(int status, String body, ModelInstanceRuntime runtime) {
         if (status < 200 || status >= 300) {
             log.warn("Model instance {} call failed: HTTP {} body={}", runtime.getId(), status, truncate(body));
-            throw new BizException(status, "Model provider API error: " + truncate(body));
+            throw new BizException(status, providerErrorMessage(status, body));
         }
+    }
+
+    private String providerErrorMessage(int status, String body) {
+        String detail = truncate(body);
+        if (detail == null || detail.isBlank()) {
+            return "Model provider API error: HTTP " + status;
+        }
+        return "Model provider API error: HTTP " + status + " " + detail;
     }
 
     private String toJson(Object value) {

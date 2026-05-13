@@ -45,7 +45,7 @@ public class SemanticDocController {
     @PostMapping("/scan-projects/{id}/semantic/generate")
     public ResponseEntity<?> batchGenerate(@PathVariable("id") Long id,
                                            @RequestParam(value = "force", defaultValue = "false") boolean force,
-                                           @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                           @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         try {
             String taskId = orchestrator.startProjectBatch(id, force, modelInstanceId);
             return ResponseEntity.accepted().body(new BatchStartResponse(taskId));
@@ -71,7 +71,7 @@ public class SemanticDocController {
     @PostMapping("/scan-projects/{id}/semantic/generate-project")
     public ResponseEntity<?> generateProject(@PathVariable("id") Long id,
                                              @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                             @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                             @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         try {
             SemanticDocEntity doc = orchestrator.generateForProject(id, force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
@@ -83,7 +83,7 @@ public class SemanticDocController {
     @PostMapping("/scan-modules/{id}/semantic/generate")
     public ResponseEntity<?> generateModule(@PathVariable("id") Long id,
                                             @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                            @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                            @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         try {
             SemanticDocEntity doc = orchestrator.generateForModule(id, force, modelInstanceId);
             return ResponseEntity.ok(SemanticDocDTO.from(doc));
@@ -95,7 +95,7 @@ public class SemanticDocController {
     @PostMapping("/tools/{name}/semantic/generate")
     public ResponseEntity<?> generateTool(@PathVariable("name") String name,
                                           @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                          @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                          @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         ToolDefinitionEntity tool = toolDefinitionService.findByName(name).orElse(null);
         if (tool == null) {
             return ResponseEntity.notFound().build();
@@ -112,7 +112,7 @@ public class SemanticDocController {
     public ResponseEntity<?> generateScanProjectTool(@PathVariable("projectId") Long projectId,
                                                      @PathVariable("scanToolId") Long scanToolId,
                                                      @RequestParam(value = "force", defaultValue = "true") boolean force,
-                                                     @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                                     @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         if (scanProjectToolService.findByProjectAndId(projectId, scanToolId).isEmpty()) {
             return ResponseEntity.notFound().build();
         }

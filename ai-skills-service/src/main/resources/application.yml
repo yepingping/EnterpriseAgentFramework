@@ -49,7 +49,6 @@ embedding:
 
 # ---- RAG 配置 ----
 rag:
-  model-instance-id: ${RAG_MODEL_INSTANCE_ID:}
   default-top-k: 5
   score-threshold: 0.5
 

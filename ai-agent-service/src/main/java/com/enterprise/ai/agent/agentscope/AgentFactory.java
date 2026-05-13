@@ -26,7 +26,6 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -54,8 +53,7 @@ import java.util.stream.Collectors;
 @Component
 public class AgentFactory {
 
-    private final Model singleAgentModel;
-    private final Model multiAgentModel;
+    private final AgentScopeConfig agentScopeConfig;
     private final ToolRegistry toolRegistry;
     private final ToolDefinitionService toolDefinitionService;
     private final ToolDefinitionMapper toolDefinitionMapper;
@@ -72,8 +70,7 @@ public class AgentFactory {
     private DomainTagger domainTagger;
 
     public AgentFactory(
-            @Qualifier("agentScopeChatModel") Model singleAgentModel,
-            @Qualifier("agentScopeMultiAgentModel") Model multiAgentModel,
+            AgentScopeConfig agentScopeConfig,
             ToolRegistry toolRegistry,
             ToolDefinitionService toolDefinitionService,
             ToolDefinitionMapper toolDefinitionMapper,
@@ -84,8 +81,7 @@ public class AgentFactory {
             ToolAclService toolAclService,
             ToolRateLimiter toolRateLimiter,
             LLMConfig llmConfig) {
-        this.singleAgentModel = singleAgentModel;
-        this.multiAgentModel = multiAgentModel;
+        this.agentScopeConfig = agentScopeConfig;
         this.toolRegistry = toolRegistry;
         this.toolDefinitionService = toolDefinitionService;
         this.toolDefinitionMapper = toolDefinitionMapper;
@@ -118,7 +114,10 @@ public class AgentFactory {
     public ReActAgent buildFromDefinition(AgentDefinition definition,
                                           String userMessage,
                                           ToolExecutionContext context) {
-        Model model = definition.isUseMultiAgentModel() ? multiAgentModel : singleAgentModel;
+        String modelInstanceId = requireModelInstanceId(definition);
+        Model model = definition.isUseMultiAgentModel()
+                ? agentScopeConfig.createMultiAgentModel(modelInstanceId)
+                : agentScopeConfig.createChatModel(modelInstanceId);
         int maxSteps = definition.getMaxSteps() > 0 ? definition.getMaxSteps() : defaultMaxSteps;
 
         List<String> whitelist = mergeToolSkillWhitelist(definition.getTools(), definition.getSkills());
@@ -137,10 +136,17 @@ public class AgentFactory {
         log.debug("[AgentFactory] 构建 Agent: name={}, tools={}, model={}, maxSteps={}",
                 definition.getName(),
                 finalTools == null || finalTools.isEmpty() ? "none" : finalTools,
-                definition.isUseMultiAgentModel() ? "multi-agent" : "single-agent",
+                modelInstanceId,
                 maxSteps);
 
         return builder.build();
+    }
+
+    private String requireModelInstanceId(AgentDefinition definition) {
+        if (definition == null || definition.getModelInstanceId() == null || definition.getModelInstanceId().isBlank()) {
+            throw new IllegalStateException("modelInstanceId is required for agent definition");
+        }
+        return definition.getModelInstanceId().trim();
     }
 
     /**

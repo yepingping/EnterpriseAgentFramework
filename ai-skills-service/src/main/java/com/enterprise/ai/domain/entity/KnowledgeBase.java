@@ -26,6 +26,8 @@ public class KnowledgeBase {
 
     private String rerankModelInstanceId;
 
+    private String llmModelInstanceId;
+
     private String workspaceId;
 
     private String projectCode;

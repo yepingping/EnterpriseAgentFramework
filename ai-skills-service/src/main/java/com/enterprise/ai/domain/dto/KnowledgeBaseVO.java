@@ -15,6 +15,7 @@ public class KnowledgeBaseVO {
     private String description;
     private String embeddingModelInstanceId;
     private String rerankModelInstanceId;
+    private String llmModelInstanceId;
     private String workspaceId;
     private String projectCode;
     private String scope;

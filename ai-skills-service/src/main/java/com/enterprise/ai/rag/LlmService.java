@@ -9,10 +9,10 @@ public interface LlmService {
     /**
      * 根据 prompt 调用大模型并返回生成文本
      */
-    String chat(String prompt);
+    String chat(String prompt, String modelInstanceId);
 
     /**
      * 返回当前模型标识
      */
-    String getModelName();
+    String getModelName(String modelInstanceId);
 }

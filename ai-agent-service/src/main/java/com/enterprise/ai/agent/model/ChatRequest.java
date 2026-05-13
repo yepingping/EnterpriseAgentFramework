@@ -26,6 +26,8 @@ public class ChatRequest {
 
     private String userId;
 
+    private String modelInstanceId;
+
     /** 前端可选传入的意图提示，为空时由系统自动识别 */
     private String intentHint;
 

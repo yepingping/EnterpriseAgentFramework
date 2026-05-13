@@ -189,6 +189,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         String embeddingModelInstanceId = requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), request.getCode());
         kb.setEmbeddingModelInstanceId(embeddingModelInstanceId);
         kb.setRerankModelInstanceId(trimToNull(request.getRerankModelInstanceId()));
+        kb.setLlmModelInstanceId(requireLlmModelInstanceId(request.getLlmModelInstanceId(), request.getCode()));
         kb.setWorkspaceId(defaultString(request.getWorkspaceId(), "default"));
         kb.setProjectCode(request.getProjectCode());
         kb.setScope(defaultString(request.getScope(), "WORKSPACE"));
@@ -222,6 +223,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         kb.setDescription(request.getDescription());
         if (request.getEmbeddingModelInstanceId() != null) {
             kb.setEmbeddingModelInstanceId(requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), kb.getCode()));
+        }
+        if (request.getLlmModelInstanceId() != null) {
+            kb.setLlmModelInstanceId(requireLlmModelInstanceId(request.getLlmModelInstanceId(), kb.getCode()));
         }
         if (request.getRerankModelInstanceId() != null) {
             kb.setRerankModelInstanceId(trimToNull(request.getRerankModelInstanceId()));
@@ -1311,6 +1315,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String requireEmbeddingModelInstanceId(String modelInstanceId, String owner) {
         if (modelInstanceId == null || modelInstanceId.isBlank()) {
             throw new IllegalArgumentException("embeddingModelInstanceId is required for " + owner);
+        }
+        return modelInstanceId.trim();
+    }
+
+    private String requireLlmModelInstanceId(String modelInstanceId, String owner) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalArgumentException("llmModelInstanceId is required for " + owner);
         }
         return modelInstanceId.trim();
     }

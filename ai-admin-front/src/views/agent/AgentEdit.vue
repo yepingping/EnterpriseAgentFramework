@@ -110,8 +110,8 @@
         <template #header>模型与执行</template>
         <el-row :gutter="24">
           <el-col :span="6">
-            <el-form-item label="模型实例">
-              <el-select v-model="form.modelInstanceId" clearable filterable placeholder="留空使用全局实例" style="width: 100%">
+            <el-form-item label="模型实例" prop="modelInstanceId">
+              <el-select v-model="form.modelInstanceId" filterable placeholder="请选择模型实例" style="width: 100%">
                 <el-option
                   v-for="item in llmModelInstances"
                   :key="item.id"
@@ -362,6 +362,7 @@ const form = reactive<AgentForm>({
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入 Agent 名称', trigger: 'blur' }],
+  modelInstanceId: [{ required: true, message: '请选择模型实例', trigger: 'change' }],
 }
 
 const availableTools = computed(() =>
@@ -514,7 +515,8 @@ async function loadCapabilityOptions() {
 async function loadModelInstances() {
   try {
     const { data } = await getModelInstances({ modelType: 'LLM' })
-    llmModelInstances.value = Array.isArray(data) ? data.filter((item) => item.enabled) : []
+    const list = data?.data ?? (Array.isArray(data) ? data : [])
+    llmModelInstances.value = list.filter((item) => item.status === 'ACTIVE')
   } catch {
     llmModelInstances.value = []
     ElMessage.error('加载模型实例失败')

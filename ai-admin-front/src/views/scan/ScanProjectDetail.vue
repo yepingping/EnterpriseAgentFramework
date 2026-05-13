@@ -253,7 +253,6 @@
         <el-select
           v-model="semanticModelInstanceId"
           placeholder="LLM 模型实例"
-          clearable
           filterable
           class="semantic-llm-select semantic-model-select"
         >
@@ -1717,10 +1716,13 @@ function taskTagType(stage: SemanticTask['stage']) {
   }
 }
 
-/** 传给语义生成接口；未选模型实例时由后端走默认模型实例配置 */
-function semanticLlmParams(): SemanticLlmParams | undefined {
+/** 传给语义生成接口；语义生成必须显式选择模型实例 */
+function semanticLlmParams(): SemanticLlmParams {
   const id = semanticModelInstanceId.value?.trim()
-  if (!id) return undefined
+  if (!id) {
+    ElMessage.warning('请先选择 LLM 模型实例')
+    throw new Error('modelInstanceId is required')
+  }
   return {
     modelInstanceId: id,
   }

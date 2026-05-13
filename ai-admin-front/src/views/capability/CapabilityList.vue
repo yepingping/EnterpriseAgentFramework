@@ -353,7 +353,7 @@
                   </el-col>
                   <el-col :span="16">
                     <el-form-item label="模型实例">
-                      <el-select v-model="form.spec.modelInstanceId" clearable filterable placeholder="留空继承父 Agent" style="width: 100%">
+                      <el-select v-model="form.spec.modelInstanceId" filterable placeholder="请选择模型实例" style="width: 100%">
                         <el-option
                           v-for="item in llmInstances"
                           :key="item.id"

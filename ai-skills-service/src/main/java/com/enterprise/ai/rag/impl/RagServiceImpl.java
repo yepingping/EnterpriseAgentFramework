@@ -60,6 +60,8 @@ public class RagServiceImpl implements RagService {
 
         // 3. 确定要检索的知识库
         List<KnowledgeBase> knowledgeBases = knowledgeService.resolveKnowledgeBases(request.getKnowledgeBaseCodes());
+        Map<String, KnowledgeBase> kbByCode = knowledgeBases.stream()
+                .collect(Collectors.toMap(KnowledgeBase::getCode, kb -> kb, (a, b) -> a));
 
         // 4. 多库并行检索 + 权限过滤
         List<SimilarItem> allResults = new ArrayList<>();
@@ -101,7 +103,7 @@ public class RagServiceImpl implements RagService {
             response.setAnswer("未找到与您问题相关的知识库内容。");
         } else {
             String prompt = promptBuilder.build(request.getQuestion(), topResults);
-            String answer = llmService.chat(prompt);
+            String answer = llmService.chat(prompt, resolveAnswerModelInstanceId(topResults, kbByCode));
             response.setAnswer(answer);
         }
         response.setReferences(topResults);
@@ -114,5 +116,17 @@ public class RagServiceImpl implements RagService {
             throw new IllegalArgumentException("embeddingModelInstanceId is required for knowledge base");
         }
         return kb.getEmbeddingModelInstanceId().trim();
+    }
+
+    private String resolveAnswerModelInstanceId(List<SimilarItem> results, Map<String, KnowledgeBase> kbByCode) {
+        if (results == null || results.isEmpty()) {
+            throw new IllegalArgumentException("llmModelInstanceId is required for RAG generation");
+        }
+        String code = results.get(0).getKnowledgeBaseCode();
+        KnowledgeBase kb = kbByCode.get(code);
+        if (kb == null || kb.getLlmModelInstanceId() == null || kb.getLlmModelInstanceId().isBlank()) {
+            throw new IllegalArgumentException("llmModelInstanceId is required for knowledge base: " + code);
+        }
+        return kb.getLlmModelInstanceId().trim();
     }
 }

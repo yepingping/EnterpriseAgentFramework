@@ -8,72 +8,55 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.model.OpenAIChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 
-/**
- * AgentScope 框架配置
- * <p>
- * 所有 LLM 调用统一通过 ai-model-service 的 OpenAI 兼容代理端点。
- * agent-service 不再直接持有 DashScope API Key。
- * <p>
- * 提供两种模型 Bean：
- * - agentScopeChatModel：单 Agent 场景
- * - agentScopeMultiAgentModel：Pipeline / MsgHub 多 Agent 协作场景
- */
 @Slf4j
-@Configuration
+@Component
 public class AgentScopeConfig {
 
     @Value("${services.model-service.url:http://localhost:18601}")
     private String modelServiceUrl;
 
-    @Value("${agentscope.model.instance-id:${agent.model-instance-id:}}")
-    private String modelInstanceId;
+    private final ToolCallLogService toolCallLogService;
+    private final ToolCallLogProperties toolCallLogProperties;
+    private final ObjectMapper objectMapper;
 
-    /**
-     * 单 Agent 场景模型（默认 Formatter）
-     * <p>
-     * 通过 OpenAIChatModel 指向 model-service 的 OpenAI 兼容代理，
-     * model-service 再转发到 DashScope，实现 API Key 集中管理。
-     */
-    @Bean
-    public Model agentScopeChatModel(ToolCallLogService toolCallLogService,
-                                     ToolCallLogProperties toolCallLogProperties,
-                                     ObjectMapper objectMapper) {
+    public AgentScopeConfig(ToolCallLogService toolCallLogService,
+                            ToolCallLogProperties toolCallLogProperties,
+                            ObjectMapper objectMapper) {
+        this.toolCallLogService = toolCallLogService;
+        this.toolCallLogProperties = toolCallLogProperties;
+        this.objectMapper = objectMapper;
+    }
+
+    public Model createChatModel(String modelInstanceId) {
+        String required = requireModelInstanceId(modelInstanceId);
         String baseUrl = modelServiceUrl + "/model/openai-proxy/v1";
-        log.info("[AgentScope] 初始化模型: baseUrl={}, modelInstanceId={}", baseUrl, requireModelInstanceId());
+        log.debug("[AgentScope] create chat model: baseUrl={}, modelInstanceId={}", baseUrl, required);
         Model inner = OpenAIChatModel.builder()
                 .apiKey("proxy-via-model-service")
                 .baseUrl(baseUrl)
-                .modelName(requireModelInstanceId())
+                .modelName(required)
                 .build();
         return new TracingModel(inner, toolCallLogService, toolCallLogProperties, objectMapper);
     }
 
-    /**
-     * 多 Agent 协作场景模型（MultiAgentFormatter）
-     * <p>
-     * 用于 SequentialPipeline / FanoutPipeline / MsgHub，
-     * 会在历史消息中用 XML 标签区分不同 Agent 的发言。
-     */
-    @Bean
-    public Model agentScopeMultiAgentModel(ToolCallLogService toolCallLogService,
-                                           ToolCallLogProperties toolCallLogProperties,
-                                           ObjectMapper objectMapper) {
+    public Model createMultiAgentModel(String modelInstanceId) {
+        String required = requireModelInstanceId(modelInstanceId);
         String baseUrl = modelServiceUrl + "/model/openai-proxy/v1";
+        log.debug("[AgentScope] create multi-agent model: baseUrl={}, modelInstanceId={}", baseUrl, required);
         Model inner = OpenAIChatModel.builder()
                 .apiKey("proxy-via-model-service")
                 .baseUrl(baseUrl)
-                .modelName(requireModelInstanceId())
+                .modelName(required)
                 .formatter(new OpenAIMultiAgentFormatter())
                 .build();
         return new TracingModel(inner, toolCallLogService, toolCallLogProperties, objectMapper);
     }
 
-    private String requireModelInstanceId() {
+    private String requireModelInstanceId(String modelInstanceId) {
         if (modelInstanceId == null || modelInstanceId.isBlank()) {
-            throw new IllegalStateException("agentscope.model.instance-id or agent.model-instance-id is required");
+            throw new IllegalStateException("modelInstanceId is required for agent execution");
         }
         return modelInstanceId.trim();
     }

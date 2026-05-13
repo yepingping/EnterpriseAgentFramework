@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_base` (
     `description`     VARCHAR(512) DEFAULT NULL            COMMENT '描述',
     `embedding_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Embedding model instance id',
     `rerank_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Rerank model instance id',
+    `llm_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'LLM model instance id for answer generation',
     `dimension`       INT          DEFAULT 1536            COMMENT '向量维度',
     `chunk_size`      INT          DEFAULT 500             COMMENT 'chunk 切分大小（字符数）',
     `chunk_overlap`   INT          DEFAULT 50              COMMENT 'chunk 重叠大小（字符数）',
@@ -1222,14 +1223,6 @@ CREATE TABLE IF NOT EXISTS `market_item` (
 -- 八、初始化示例数据（可选；同名再跑不会插入重复行）
 -- ============================================================================
 
-INSERT INTO `knowledge_base` (`name`, `code`, `description`, `dimension`, `status`)
-SELECT * FROM (
-    SELECT '通用知识库' AS name, 'kb_general'  AS code, '通用文档知识库' AS description, 1536 AS dimension, 1 AS status UNION ALL
-    SELECT '合同知识库',         'kb_contract',          '合同相关文档',                   1536,                1
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM `knowledge_base` WHERE `code` = seed.code);
-
-
 -- ============================================================================
 -- 九、模型实例绑定（历史 v11，ai-skills-service/sql/model_instance_binding_v11.sql）
 -- ============================================================================
@@ -1238,11 +1231,14 @@ CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
+CALL add_col_if_absent('knowledge_base', 'llm_model_instance_id',
+    'VARCHAR(64) DEFAULT NULL COMMENT ''LLM model instance id for answer generation'' AFTER `rerank_model_instance_id`');
 CALL add_col_if_absent('business_index', 'embedding_model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `field_schema`');
 
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_embedding_instance', '`embedding_model_instance_id`');
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_rerank_instance', '`rerank_model_instance_id`');
+CALL add_idx_if_absent('knowledge_base', 'idx_kb_llm_instance', '`llm_model_instance_id`');
 CALL add_idx_if_absent('business_index', 'idx_biz_embedding_instance', '`embedding_model_instance_id`');
 
 

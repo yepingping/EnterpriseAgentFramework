@@ -4,15 +4,12 @@ import com.enterprise.ai.client.ModelServiceClient;
 import com.enterprise.ai.common.dto.ApiResult;
 import com.enterprise.ai.rag.LlmService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 
-@Slf4j
 @Service
 @Primary
 @RequiredArgsConstructor
@@ -20,16 +17,11 @@ public class ModelServiceLlmService implements LlmService {
 
     private final ModelServiceClient modelServiceClient;
 
-    @Value("${rag.model-instance-id:}")
-    private String modelInstanceId;
-
     @Override
-    public String chat(String prompt) {
-        if (modelInstanceId == null || modelInstanceId.isBlank()) {
-            throw new IllegalStateException("rag.model-instance-id is required");
-        }
+    public String chat(String prompt, String modelInstanceId) {
+        String required = requireModelInstanceId(modelInstanceId);
         Map<String, Object> request = Map.of(
-                "modelInstanceId", modelInstanceId.trim(),
+                "modelInstanceId", required,
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
         ApiResult<Map<String, Object>> result = modelServiceClient.chat(request);
@@ -40,7 +32,14 @@ public class ModelServiceLlmService implements LlmService {
     }
 
     @Override
-    public String getModelName() {
-        return modelInstanceId;
+    public String getModelName(String modelInstanceId) {
+        return requireModelInstanceId(modelInstanceId);
+    }
+
+    private String requireModelInstanceId(String modelInstanceId) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalStateException("modelInstanceId is required for RAG generation");
+        }
+        return modelInstanceId.trim();
     }
 }

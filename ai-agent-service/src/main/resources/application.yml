@@ -45,9 +45,9 @@ spring:
 # ==================== 服务间调用 ====================
 services:
   model-service:
-    url: ${MODEL_SERVICE_URL:http://localhost:8601}
+    url: ${MODEL_SERVICE_URL:http://localhost:18601}
   skills-service:
-    url: ${SKILLS_SERVICE_URL:http://localhost:8602}
+    url: ${SKILLS_SERVICE_URL:http://localhost:18602}
 
 # ==================== 极视角平台 ====================
 jishi:
@@ -61,15 +61,8 @@ jishi:
         name: 默认对话智能体
         description: 极视角业务工具（会话管理、文件上传、工作流交互）
 
-# ==================== AgentScope ====================
-# Agent 的 LLM 调用统一通过 model-service 的 OpenAI 兼容代理端点
-agentscope:
-  model:
-    instance-id: ${AGENTSCOPE_MODEL_INSTANCE_ID:1}
-
 # ==================== Agent 配置 ====================
 agent:
-  model-instance-id: ${AGENT_MODEL_INSTANCE_ID:1}
   max-steps: 5
   default-timeout: 60000
   definitions:

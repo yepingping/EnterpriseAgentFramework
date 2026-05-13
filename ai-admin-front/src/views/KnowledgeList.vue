@@ -166,6 +166,16 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="LLM 实例" prop="llmModelInstanceId">
+          <el-select v-model="form.llmModelInstanceId" placeholder="请选择回答生成模型实例" style="width: 100%">
+            <el-option
+              v-for="item in llmInstances"
+              :key="item.id"
+              :label="`${item.name} / ${item.modelName}`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="描述" prop="description">
           <el-input
             v-model="form.description"
@@ -209,6 +219,7 @@ const submitLoading = ref(false)
 const formRef = ref<FormInstance>()
 const embeddingInstances = ref<ModelInstance[]>([])
 const rerankInstances = ref<ModelInstance[]>([])
+const llmInstances = ref<ModelInstance[]>([])
 
 const form = reactive<KnowledgeBaseForm>({
   name: '',
@@ -216,6 +227,7 @@ const form = reactive<KnowledgeBaseForm>({
   description: '',
   embeddingModelInstanceId: '',
   rerankModelInstanceId: '',
+  llmModelInstanceId: '',
 })
 
 const formRules: FormRules = {
@@ -224,6 +236,8 @@ const formRules: FormRules = {
     { required: true, message: '请输入知识库编码', trigger: 'blur' },
     { pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: '编码只能包含字母、数字和下划线，且以字母开头', trigger: 'blur' },
   ],
+  embeddingModelInstanceId: [{ required: true, message: '请选择 Embedding 模型实例', trigger: 'change' }],
+  llmModelInstanceId: [{ required: true, message: '请选择 LLM 模型实例', trigger: 'change' }],
 }
 
 function resetForm() {
@@ -232,6 +246,7 @@ function resetForm() {
   form.description = ''
   form.embeddingModelInstanceId = ''
   form.rerankModelInstanceId = ''
+  form.llmModelInstanceId = ''
 }
 
 function openCreateDialog() {
@@ -247,6 +262,7 @@ function openEditDialog(row: KnowledgeBase) {
   form.description = row.description || ''
   form.embeddingModelInstanceId = row.embeddingModelInstanceId || ''
   form.rerankModelInstanceId = row.rerankModelInstanceId || ''
+  form.llmModelInstanceId = row.llmModelInstanceId || ''
   dialogVisible.value = true
 }
 
@@ -258,6 +274,11 @@ async function fetchEmbeddingInstances() {
 async function fetchRerankInstances() {
   const { data } = await getModelInstances({ modelType: 'RERANKER' })
   rerankInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+}
+
+async function fetchLlmInstances() {
+  const { data } = await getModelInstances({ modelType: 'LLM' })
+  llmInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
 }
 
 async function handleSubmit() {
@@ -294,6 +315,7 @@ onMounted(() => {
   knowledgeStore.fetchList()
   fetchEmbeddingInstances()
   fetchRerankInstances()
+  fetchLlmInstances()
 })
 </script>
 

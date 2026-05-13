@@ -17,9 +17,13 @@ public class KnowledgeBaseRequest {
 
     private String description;
 
+    @NotBlank(message = "embeddingModelInstanceId cannot be empty")
     private String embeddingModelInstanceId;
 
     private String rerankModelInstanceId;
+
+    @NotBlank(message = "llmModelInstanceId cannot be empty")
+    private String llmModelInstanceId;
 
     private String workspaceId;
 

@@ -6,6 +6,7 @@ export interface KnowledgeBase {
   description: string
   embeddingModelInstanceId: string
   rerankModelInstanceId?: string
+  llmModelInstanceId: string
   workspaceId: string
   projectCode: string
   scope: string
@@ -38,6 +39,7 @@ export interface KnowledgeBaseForm {
   description: string
   embeddingModelInstanceId: string
   rerankModelInstanceId?: string
+  llmModelInstanceId: string
   workspaceId?: string
   projectCode?: string
   scope?: string

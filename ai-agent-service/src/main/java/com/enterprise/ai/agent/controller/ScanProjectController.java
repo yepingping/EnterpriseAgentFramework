@@ -221,7 +221,7 @@ public class ScanProjectController {
 
     @PostMapping("/{id}/sensitive-data/scan")
     public ResponseEntity<?> startSensitiveDataScan(@PathVariable Long id,
-                                                    @RequestParam(value = "modelInstanceId", required = false) String modelInstanceId) {
+                                                    @RequestParam(value = "modelInstanceId") String modelInstanceId) {
         try {
             String taskId = sensitiveDataScanOrchestrator.startProjectScan(id, modelInstanceId);
             return ResponseEntity.accepted().body(new SensitiveScanStartResponse(taskId));

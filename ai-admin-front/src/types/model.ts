@@ -41,7 +41,7 @@ export type ModelType =
   | 'IMAGE_GENERATION'
   | 'VIDEO'
 
-export type EndpointType = 'OPENAI_COMPATIBLE'
+export type EndpointType = 'BUILT_IN' | 'OPENAI_COMPATIBLE'
 export type ModelInstanceStatus = 'ACTIVE' | 'DISABLED' | 'ERROR'
 
 export interface ModelInstance {

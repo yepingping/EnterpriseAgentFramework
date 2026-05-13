@@ -48,7 +48,8 @@ public class ChatService {
             List<MemoryMessage> history = memoryService.getHistory(sessionId);
             String systemPrompt = LlmService.DEFAULT_SYSTEM_PROMPT + toolCaller.buildToolDescriptions();
 
-            String firstResponse = llmService.chatWithHistory(systemPrompt, history, request.getMessage());
+            String firstResponse = llmService.chatWithHistory(systemPrompt, history, request.getMessage(),
+                    request.getModelInstanceId());
 
             Optional<ToolCallResult> toolResult = toolCaller.parseAndExecute(firstResponse);
             List<String> toolCalls = new ArrayList<>();
@@ -63,7 +64,8 @@ public class ChatService {
                         + tc.result() + "\n\n请根据以上信息回答用户的问题。";
                 answer = llmService.chatWithHistory(
                         LlmService.DEFAULT_SYSTEM_PROMPT, history,
-                        contextPrompt + "\n\n用户原始问题：" + request.getMessage());
+                        contextPrompt + "\n\n用户原始问题：" + request.getMessage(),
+                        request.getModelInstanceId());
             } else {
                 answer = firstResponse;
             }
@@ -106,7 +108,7 @@ public class ChatService {
 
         List<MemoryMessage> history = memoryService.getHistory(sessionId);
         Flux<String> stream = llmService.chatStreamWithHistory(
-                LlmService.DEFAULT_SYSTEM_PROMPT, history, request.getMessage());
+                LlmService.DEFAULT_SYSTEM_PROMPT, history, request.getMessage(), request.getModelInstanceId());
 
         stream.subscribe(
                 chunk -> {

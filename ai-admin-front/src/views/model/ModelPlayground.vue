@@ -13,7 +13,7 @@
             <el-form-item label="实例">
               <el-select v-model="config.modelInstanceId" placeholder="请选择模型实例" style="width: 100%" @change="onInstanceChange">
                 <el-option
-                  v-for="item in llmInstances"
+                  v-for="item in selectableLlmInstances"
                   :key="item.id"
                   :label="`${item.name} / ${item.modelName}`"
                   :value="item.id"
@@ -100,6 +100,10 @@ import { getModelInstances, modelChat } from '@/api/model'
 import { useSSE } from '@/composables/useSSE'
 
 const llmInstances = ref<ModelInstance[]>([])
+/** 调试台仅允许选择状态为「可用」的实例，停用/异常不可选 */
+const selectableLlmInstances = computed(() =>
+  llmInstances.value.filter((item) => item.status === 'ACTIVE'),
+)
 const config = reactive({
   modelInstanceId: '',
   provider: '',
@@ -118,7 +122,7 @@ const { content: sseContent, isStreaming: streaming, start: startSSE, stop: stop
 const streamingContent = computed(() => streaming.value ? sseContent.value : '')
 
 function onInstanceChange() {
-  const selected = llmInstances.value.find((item) => item.id === config.modelInstanceId)
+  const selected = selectableLlmInstances.value.find((item) => item.id === config.modelInstanceId)
   if (selected) {
     config.provider = selected.provider
     config.model = selected.modelName
@@ -210,8 +214,17 @@ async function fetchInstances() {
   try {
     const { data } = await getModelInstances({ modelType: 'LLM' })
     llmInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+    const allowed = new Set(selectableLlmInstances.value.map((i) => i.id))
+    if (config.modelInstanceId && !allowed.has(config.modelInstanceId)) {
+      config.modelInstanceId = ''
+      config.provider = ''
+      config.model = ''
+    }
   } catch {
     llmInstances.value = []
+    config.modelInstanceId = ''
+    config.provider = ''
+    config.model = ''
   }
 }
 

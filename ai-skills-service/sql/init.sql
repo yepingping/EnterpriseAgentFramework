@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_base` (
     `description`     VARCHAR(512) DEFAULT NULL            COMMENT '描述',
     `embedding_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Embedding model instance id',
     `rerank_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Rerank model instance id',
+    `llm_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'LLM model instance id for answer generation',
     `dimension`       INT          DEFAULT 1536            COMMENT '向量维度',
     `status`          TINYINT      DEFAULT 1               COMMENT '状态: 0-禁用 1-启用',
     `create_time`     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -124,6 +125,7 @@ CALL add_col_if_absent('knowledge_base', 'vector_weight', 'FLOAT NOT NULL DEFAUL
 CALL add_col_if_absent('knowledge_base', 'keyword_weight', 'FLOAT NOT NULL DEFAULT 0.3 COMMENT ''hybrid keyword weight'' AFTER `vector_weight`');
 CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id', 'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id', 'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
+CALL add_col_if_absent('knowledge_base', 'llm_model_instance_id', 'VARCHAR(64) DEFAULT NULL COMMENT ''LLM model instance id for answer generation'' AFTER `rerank_model_instance_id`');
 CALL add_col_if_absent('file_info', 'file_size', 'BIGINT DEFAULT 0 COMMENT ''file size'' AFTER `file_type`');
 CALL add_col_if_absent('file_info', 'raw_text', 'LONGTEXT DEFAULT NULL COMMENT ''parsed raw text'' AFTER `status`');
 CALL add_col_if_absent('chunk', 'title', 'VARCHAR(256) DEFAULT NULL COMMENT ''paragraph title'' AFTER `content`');
@@ -134,6 +136,7 @@ CALL add_idx_if_absent('knowledge_base', 'idx_kb_workspace_scope', '`workspace_i
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_project_code', '`project_code`');
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_embedding_instance', '`embedding_model_instance_id`');
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_rerank_instance', '`rerank_model_instance_id`');
+CALL add_idx_if_absent('knowledge_base', 'idx_kb_llm_instance', '`llm_model_instance_id`');
 CALL add_idx_if_absent('chunk', 'idx_kb_enabled', '`knowledge_base_id`, `enabled`');
 CALL add_idx_if_absent('chunk', 'idx_kb_hit_count', '`knowledge_base_id`, `hit_count`');
 CALL add_idx_if_absent('chunk', 'idx_file_chunk_index', '`file_id`, `chunk_index`');

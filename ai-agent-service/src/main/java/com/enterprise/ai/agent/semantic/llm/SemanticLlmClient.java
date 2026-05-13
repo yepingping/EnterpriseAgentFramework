@@ -6,7 +6,6 @@ import com.enterprise.ai.agent.client.ModelServiceClient.ModelChatRequest;
 import com.enterprise.ai.agent.client.ModelServiceClient.ModelChatResult;
 import com.enterprise.ai.agent.client.ModelServiceClient.ModelUsage;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -25,9 +24,6 @@ public class SemanticLlmClient {
             不要输出 Markdown、不要代码围栏、不要 JSON 以外的任何字符。""";
 
     private final ModelServiceClient modelServiceClient;
-
-    @Value("${agent.semantic-model-instance-id:${agent.model-instance-id:}}")
-    private String defaultModelInstanceId;
 
     public SemanticLlmClient(ModelServiceClient modelServiceClient) {
         this.modelServiceClient = modelServiceClient;
@@ -95,12 +91,9 @@ public class SemanticLlmClient {
     }
 
     private String resolveModelInstanceId(String modelInstanceId) {
-        String resolved = modelInstanceId != null && !modelInstanceId.isBlank()
-                ? modelInstanceId.trim()
-                : defaultModelInstanceId;
-        if (resolved == null || resolved.isBlank()) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
             throw new IllegalStateException("modelInstanceId is required for semantic LLM generation");
         }
-        return resolved.trim();
+        return modelInstanceId.trim();
     }
 }

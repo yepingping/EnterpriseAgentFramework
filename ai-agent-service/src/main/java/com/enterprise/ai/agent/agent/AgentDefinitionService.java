@@ -66,7 +66,7 @@ public class AgentDefinitionService {
         if (dbCount == 0) {
             int imported = importFromJsonFileIfExists();
             if (imported == 0) {
-                seedDefaults();
+                log.info("[AgentDef] DB 为空且无可导入定义；不再自动创建未绑定模型的默认 Agent");
             }
         }
         log.info("[AgentDef] 启动加载：DB 共 {} 个 Agent 定义", mapper.selectCount(null));
@@ -120,6 +120,7 @@ public class AgentDefinitionService {
 
     @Transactional
     public AgentDefinition create(AgentDefinition def) {
+        def.setModelInstanceId(requireModelInstanceId(def.getModelInstanceId()));
         if (def.getId() == null || def.getId().isBlank()) {
             def.setId(UUID.randomUUID().toString().replace("-", "").substring(0, 12));
         }
@@ -181,6 +182,7 @@ public class AgentDefinitionService {
         }
 
         current.setUpdatedAt(LocalDateTime.now());
+        current.setModelInstanceId(requireModelInstanceId(current.getModelInstanceId()));
         mapper.updateById(toEntity(current));
         log.info("[AgentDef] 更新: id={}, name={}", id, current.getName());
         return current;
@@ -294,6 +296,13 @@ public class AgentDefinitionService {
                 .build());
 
         log.info("[AgentDef] 已生成 {} 个默认 Agent 定义（最小安全集合）", mapper.selectCount(null));
+    }
+
+    private String requireModelInstanceId(String modelInstanceId) {
+        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            throw new IllegalArgumentException("modelInstanceId is required for agent definition");
+        }
+        return modelInstanceId.trim();
     }
 
     // ------------------------------------------------------------ mapping
