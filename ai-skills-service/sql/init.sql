@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS `knowledge_base` (
     `name`            VARCHAR(128) NOT NULL                COMMENT '知识库名称',
     `code`            VARCHAR(64)  NOT NULL                COMMENT '知识库编码（对应 Milvus collection 名称）',
     `description`     VARCHAR(512) DEFAULT NULL            COMMENT '描述',
-    `embedding_model` VARCHAR(64)  DEFAULT 'text-embedding-v2' COMMENT 'Embedding 模型标识',
+    `embedding_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Embedding model instance id',
+    `rerank_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Rerank model instance id',
     `dimension`       INT          DEFAULT 1536            COMMENT '向量维度',
     `status`          TINYINT      DEFAULT 1               COMMENT '状态: 0-禁用 1-启用',
     `create_time`     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -107,7 +108,7 @@ CREATE TABLE IF NOT EXISTS `chunk` (
 -- 4. 用户文件权限表
 -- -----------------------------------------------------------
 -- Knowledge operations upgrade: enterprise scope, retrieval policy, paragraph operations and hit analysis.
-CALL add_col_if_absent('knowledge_base', 'workspace_id', 'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `embedding_model`');
+CALL add_col_if_absent('knowledge_base', 'workspace_id', 'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'project_code', 'VARCHAR(64) DEFAULT NULL COMMENT ''owning EAF project code'' AFTER `workspace_id`');
 CALL add_col_if_absent('knowledge_base', 'scope', 'VARCHAR(20) NOT NULL DEFAULT ''WORKSPACE'' COMMENT ''SHARED / WORKSPACE / PROJECT'' AFTER `project_code`');
 CALL add_col_if_absent('knowledge_base', 'chunk_size', 'INT DEFAULT 500 COMMENT ''chunk size'' AFTER `dimension`');
@@ -121,6 +122,8 @@ CALL add_col_if_absent('knowledge_base', 'direct_return_threshold', 'FLOAT NOT N
 CALL add_col_if_absent('knowledge_base', 'rerank_enabled', 'TINYINT(1) NOT NULL DEFAULT 1 COMMENT ''enable rerank'' AFTER `direct_return_threshold`');
 CALL add_col_if_absent('knowledge_base', 'vector_weight', 'FLOAT NOT NULL DEFAULT 0.7 COMMENT ''hybrid vector weight'' AFTER `rerank_enabled`');
 CALL add_col_if_absent('knowledge_base', 'keyword_weight', 'FLOAT NOT NULL DEFAULT 0.3 COMMENT ''hybrid keyword weight'' AFTER `vector_weight`');
+CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id', 'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `description`');
+CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id', 'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
 CALL add_col_if_absent('file_info', 'file_size', 'BIGINT DEFAULT 0 COMMENT ''file size'' AFTER `file_type`');
 CALL add_col_if_absent('file_info', 'raw_text', 'LONGTEXT DEFAULT NULL COMMENT ''parsed raw text'' AFTER `status`');
 CALL add_col_if_absent('chunk', 'title', 'VARCHAR(256) DEFAULT NULL COMMENT ''paragraph title'' AFTER `content`');
@@ -266,10 +269,10 @@ CREATE TABLE IF NOT EXISTS `scan_project` (
 -- -----------------------------------------------------------
 -- 7. 初始化示例数据
 -- -----------------------------------------------------------
-INSERT INTO `knowledge_base` (`name`, `code`, `description`, `embedding_model`, `dimension`, `status`)
+INSERT INTO `knowledge_base` (`name`, `code`, `description`, `dimension`, `status`)
 VALUES
-    ('通用知识库', 'kb_general', '通用文档知识库', 'text-embedding-v2', 1536, 1),
-    ('合同知识库', 'kb_contract', '合同相关文档', 'text-embedding-v2', 1536, 1);
+    ('通用知识库', 'kb_general', '通用文档知识库', 1536, 1),
+    ('合同知识库', 'kb_contract', '合同相关文档', 1536, 1);
 
 DROP PROCEDURE IF EXISTS add_col_if_absent;
 DROP PROCEDURE IF EXISTS add_idx_if_absent;

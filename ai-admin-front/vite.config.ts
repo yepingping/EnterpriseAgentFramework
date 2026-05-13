@@ -22,7 +22,7 @@ export default defineConfig({
         target: 'http://localhost:18603',
         changeOrigin: true,
       },
-      '^/model/(providers|chat)(/.*)?$': {
+      '^/model/(providers|instances|chat)(/.*)?(\\?.*)?$': {
         target: 'http://localhost:18601',
         changeOrigin: true,
       },

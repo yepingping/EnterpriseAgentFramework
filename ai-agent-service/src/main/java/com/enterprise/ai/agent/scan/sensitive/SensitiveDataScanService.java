@@ -33,7 +33,7 @@ public class SensitiveDataScanService {
     public int scanAndPersist(ScanProjectToolEntity tool, String modelInstanceId) {
         String toolSpec = buildToolSpecJson(tool);
         String userPrompt = promptLoader.renderUserPrompt(toolSpec);
-        SemanticGenerationResult result = llmClient.generateSensitiveScan(userPrompt, modelInstanceId, null);
+        SemanticGenerationResult result = llmClient.generateSensitiveScan(userPrompt, modelInstanceId);
         parseAndStore(result.content(), result.modelName(), tool.getId());
         return result.tokenUsage();
     }

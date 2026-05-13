@@ -3,17 +3,15 @@
     <div class="page-header">
       <div>
         <h2>模型实例</h2>
-        <p class="page-subtitle">把 Provider、模型名、凭证和默认参数沉淀为可复用的数据库资源。</p>
+        <p class="page-subtitle">统一用 modelInstanceId 消费模型，Provider 只作为实例元数据和运行时路由信息。</p>
       </div>
       <div class="header-actions">
         <el-select v-model="filters.modelType" clearable placeholder="类型" style="width: 150px" @change="fetchInstances">
           <el-option v-for="item in modelTypes" :key="item" :label="item" :value="item" />
         </el-select>
-        <el-select v-model="filters.provider" clearable placeholder="Provider" style="width: 160px" @change="fetchInstances">
-          <el-option v-for="item in providers" :key="item.name" :label="item.name" :value="item.name" />
-        </el-select>
-        <el-button :icon="Refresh" @click="fetchInstances" :loading="loading">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreate">新增模型</el-button>
+        <el-input v-model="filters.provider" clearable placeholder="Provider" style="width: 160px" @change="fetchInstances" />
+        <el-button :icon="Refresh" :loading="loading" @click="fetchInstances">刷新</el-button>
+        <el-button type="primary" :icon="Plus" @click.stop.prevent="openCreate">新增模型</el-button>
       </div>
     </div>
 
@@ -28,9 +26,7 @@
       <el-table-column prop="modelName" label="模型名" min-width="160" />
       <el-table-column prop="endpointType" label="接入方式" width="170">
         <template #default="{ row }">
-          <el-tag :type="row.endpointType === 'OPENAI_COMPATIBLE' ? 'success' : 'info'">
-            {{ row.endpointType }}
-          </el-tag>
+          <el-tag type="success">{{ row.endpointType }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="workspaceId" label="工作空间" width="120" />
@@ -54,18 +50,19 @@
       </el-table-column>
     </el-table>
 
-    <el-drawer v-model="drawerVisible" :title="editingId ? '编辑模型实例' : '新增模型实例'" size="520px">
+    <el-dialog
+      v-model="drawerVisible"
+      :title="editingId ? '编辑模型实例' : '新增模型实例'"
+      width="560px"
+      destroy-on-close
+      append-to-body
+    >
       <el-form label-width="96px" class="instance-form">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="例如：默认通义 Max" />
         </el-form-item>
         <el-form-item label="Provider" required>
-          <el-select v-model="form.provider" allow-create filterable default-first-option placeholder="选择或输入 Provider">
-            <el-option v-for="item in providers" :key="item.name" :label="item.name" :value="item.name" />
-            <el-option label="openai" value="openai" />
-            <el-option label="ollama" value="ollama" />
-            <el-option label="vllm" value="vllm" />
-          </el-select>
+          <el-input v-model="form.provider" placeholder="openai / tongyi / ollama / vllm" />
         </el-form-item>
         <el-form-item label="类型" required>
           <el-select v-model="form.modelType">
@@ -73,13 +70,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="模型名" required>
-          <el-input v-model="form.modelName" placeholder="qwen-max / gpt-4.1 / bge-reranker 等" />
+          <el-input v-model="form.modelName" placeholder="qwen-max / gpt-4.1 / bge-reranker" />
         </el-form-item>
         <el-form-item label="接入方式">
-          <el-radio-group v-model="form.endpointType">
-            <el-radio-button label="BUILT_IN">内置适配</el-radio-button>
-            <el-radio-button label="OPENAI_COMPATIBLE">OpenAI 兼容</el-radio-button>
-          </el-radio-group>
+          <el-tag type="success">OPENAI_COMPATIBLE</el-tag>
         </el-form-item>
         <el-form-item label="工作空间">
           <el-input v-model="form.workspaceId" placeholder="default" />
@@ -115,7 +109,7 @@
         <el-button @click="drawerVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </template>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
@@ -123,18 +117,16 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
-import type { ModelInstance, ModelInstanceRequest, ModelType, ProviderInfo } from '@/types/model'
+import type { ModelInstance, ModelInstanceRequest, ModelType } from '@/types/model'
 import {
   createModelInstance,
   deleteModelInstance,
   getModelInstances,
-  getProviders,
   testModelInstance,
   updateModelInstance,
 } from '@/api/model'
 
 const modelTypes: ModelType[] = ['LLM', 'EMBEDDING', 'RERANKER', 'STT', 'TTS', 'IMAGE', 'IMAGE_GENERATION', 'VIDEO']
-const providers = ref<ProviderInfo[]>([])
 const instances = ref<ModelInstance[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -151,10 +143,10 @@ const filters = reactive({
 
 const form = reactive<ModelInstanceRequest>({
   name: '',
-  provider: 'tongyi',
+  provider: 'openai',
   modelType: 'LLM',
   modelName: '',
-  endpointType: 'BUILT_IN',
+  endpointType: 'OPENAI_COMPATIBLE',
   workspaceId: 'default',
   status: 'ACTIVE',
   credential: {},
@@ -162,14 +154,21 @@ const form = reactive<ModelInstanceRequest>({
   remark: '',
 })
 
+function unwrapApiData<T>(data: T | { data?: T } | undefined): T | undefined {
+  if (data && typeof data === 'object' && 'data' in data) {
+    return (data as { data?: T }).data
+  }
+  return data as T | undefined
+}
+
 function resetForm() {
   editingId.value = ''
   Object.assign(form, {
     name: '',
-    provider: 'tongyi',
+    provider: 'openai',
     modelType: 'LLM',
     modelName: '',
-    endpointType: 'BUILT_IN',
+    endpointType: 'OPENAI_COMPATIBLE',
     workspaceId: 'default',
     status: 'ACTIVE',
     credential: {},
@@ -180,11 +179,6 @@ function resetForm() {
   optionsText.value = '{}'
 }
 
-async function fetchProviders() {
-  const { data } = await getProviders()
-  providers.value = data?.data ?? (Array.isArray(data) ? data : [])
-}
-
 async function fetchInstances() {
   loading.value = true
   try {
@@ -192,7 +186,8 @@ async function fetchInstances() {
       modelType: filters.modelType || undefined,
       provider: filters.provider || undefined,
     })
-    instances.value = data?.data ?? (Array.isArray(data) ? data : [])
+    const list = unwrapApiData<ModelInstance[]>(data)
+    instances.value = Array.isArray(list) ? list : []
   } finally {
     loading.value = false
   }
@@ -210,7 +205,7 @@ function openEdit(row: ModelInstance) {
     provider: row.provider,
     modelType: row.modelType,
     modelName: row.modelName,
-    endpointType: row.endpointType,
+    endpointType: 'OPENAI_COMPATIBLE',
     workspaceId: row.workspaceId,
     status: row.status,
     remark: row.remark,
@@ -237,6 +232,7 @@ async function handleSave() {
   try {
     const payload: ModelInstanceRequest = {
       ...form,
+      endpointType: 'OPENAI_COMPATIBLE',
       credential: parseJsonObject(credentialText.value, '凭证 JSON'),
       defaultOptions: parseJsonObject(optionsText.value, '默认参数'),
     }
@@ -265,52 +261,42 @@ async function handleTest(id: string) {
   testingId.value = id
   try {
     const { data } = await testModelInstance(id)
-    const result = data?.data ?? data
+    const result = unwrapApiData(data)
     if (result?.success) {
-      ElMessage.success(`测试通过 ${result.latencyMs}ms`)
+      ElMessage.success(result.message || '测试通过')
     } else {
       ElMessage.error(result?.message || '测试失败')
     }
+  } catch (err) {
+    ElMessage.error((err as Error).message || '测试失败')
   } finally {
     testingId.value = ''
   }
 }
 
-onMounted(async () => {
-  await fetchProviders()
-  await fetchInstances()
-})
+onMounted(fetchInstances)
 </script>
 
-<style scoped lang="scss">
-.model-instances {
-  .page-header {
-    align-items: flex-start;
-  }
+<style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .page-subtitle {
+  color: var(--el-text-color-secondary);
   margin: 6px 0 0;
-  color: #64748b;
-  font-size: 13px;
 }
 
 .header-actions {
   display: flex;
-  align-items: center;
   gap: 8px;
 }
 
 .instance-form {
-  :deep(.el-select),
-  :deep(.el-input),
-  :deep(.el-textarea) {
-    width: 100%;
-  }
-
-  :deep(textarea) {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
-    font-size: 12px;
-  }
+  padding-right: 8px;
 }
 </style>

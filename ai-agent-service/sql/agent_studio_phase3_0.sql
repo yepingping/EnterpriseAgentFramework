@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
     `intent_type`             VARCHAR(64)  DEFAULT NULL                 COMMENT '意图类型（KNOWLEDGE_QA / GENERAL_CHAT / 自定义）',
     `system_prompt`           TEXT         DEFAULT NULL                 COMMENT 'Agent 的 System Prompt',
     `tools_json`              TEXT         DEFAULT NULL                 COMMENT 'tools 白名单 JSON（List<String>）',
-    `model_name`              VARCHAR(64)  DEFAULT NULL,
+    `model_instance_id`       VARCHAR(64)  DEFAULT NULL,
     `max_steps`               INT          NOT NULL DEFAULT 5,
     `type`                    VARCHAR(32)  NOT NULL DEFAULT 'single'    COMMENT 'single / pipeline',
     `pipeline_agent_ids_json` TEXT         DEFAULT NULL                 COMMENT 'Pipeline 子 Agent ID JSON 数组',

@@ -15,7 +15,6 @@ export interface BizIndex {
   sourceSystem: string
   textTemplate: string
   fieldSchema: string
-  embeddingModel: string
   embeddingModelInstanceId: string
   dimension: number
   chunkSize: number
@@ -36,7 +35,6 @@ export interface BizIndexForm {
   sourceSystem: string
   textTemplate: string
   fieldSchema: string
-  embeddingModel?: string
   embeddingModelInstanceId?: string
   dimension?: number
   chunkSize?: number

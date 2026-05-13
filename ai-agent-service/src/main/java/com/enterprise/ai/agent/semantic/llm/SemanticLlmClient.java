@@ -34,10 +34,8 @@ public class SemanticLlmClient {
     }
 
     /**
-     * @param provider 非空时传给模型网关；为空则走网关默认 Provider
-     * @param model    非空时使用该模型；为空则使用 {@code agentscope.model.name}
      */
-    public SemanticGenerationResult generate(String userPrompt, String modelInstanceId, String ignoredModel) {
+    public SemanticGenerationResult generate(String userPrompt, String modelInstanceId) {
         String modelToUse = resolveModelInstanceId(modelInstanceId);
         ModelChatRequest.ModelChatRequestBuilder b = ModelChatRequest.builder()
                 .modelInstanceId(modelToUse)
@@ -67,7 +65,7 @@ public class SemanticLlmClient {
     /**
      * 敏感数据扫描：要求模型只输出 JSON（与 AI 理解使用相同的模型实例语义）。
      */
-    public SemanticGenerationResult generateSensitiveScan(String userPrompt, String modelInstanceId, String ignoredModel) {
+    public SemanticGenerationResult generateSensitiveScan(String userPrompt, String modelInstanceId) {
         String modelToUse = resolveModelInstanceId(modelInstanceId);
         ModelChatRequest.ModelChatRequestBuilder b = ModelChatRequest.builder()
                 .modelInstanceId(modelToUse)

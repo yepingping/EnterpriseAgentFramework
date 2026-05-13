@@ -26,10 +26,9 @@ public final class ChatDebugLogs {
             log.debug("{} request=null", prefix);
             return;
         }
-        log.debug("{} provider={}, model={}, tools={}, toolChoice={}, optionsKeys={}",
+        log.debug("{} modelInstanceId={}, tools={}, toolChoice={}, optionsKeys={}",
                 prefix,
-                request.getProvider(),
-                request.getModel(),
+                request.getModelInstanceId(),
                 jsonPreview(request.getTools()),
                 jsonPreview(request.getToolChoice()),
                 optionsKeys(request.getOptions()));

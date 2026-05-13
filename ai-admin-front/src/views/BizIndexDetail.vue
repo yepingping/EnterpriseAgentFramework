@@ -24,7 +24,7 @@
               <el-tag effect="plain">{{ indexDetail?.indexCode }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="来源系统">{{ indexDetail?.sourceSystem }}</el-descriptions-item>
-            <el-descriptions-item label="Embedding 模型">{{ indexDetail?.embeddingModel }}</el-descriptions-item>
+            <el-descriptions-item label="Embedding 实例">{{ indexDetail?.embeddingModelInstanceId }}</el-descriptions-item>
             <el-descriptions-item label="向量维度">{{ indexDetail?.dimension }}</el-descriptions-item>
             <el-descriptions-item label="切分策略">{{ indexDetail?.splitType }}</el-descriptions-item>
             <el-descriptions-item label="切分大小 / 重叠">

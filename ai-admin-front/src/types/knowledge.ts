@@ -4,7 +4,6 @@ export interface KnowledgeBase {
   name: string
   code: string
   description: string
-  embeddingModel: string
   embeddingModelInstanceId: string
   rerankModelInstanceId?: string
   workspaceId: string
@@ -37,7 +36,6 @@ export interface KnowledgeBaseForm {
   name: string
   code: string
   description: string
-  embeddingModel: string
   embeddingModelInstanceId: string
   rerankModelInstanceId?: string
   workspaceId?: string

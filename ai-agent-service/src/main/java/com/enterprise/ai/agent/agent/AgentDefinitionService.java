@@ -157,7 +157,7 @@ public class AgentDefinitionService {
         if (update.getToolRefs() != null) current.setToolRefs(update.getToolRefs());
         if (update.getSkills() != null) current.setSkills(update.getSkills());
         if (update.getSkillRefs() != null) current.setSkillRefs(update.getSkillRefs());
-        if (update.getModelName() != null) current.setModelName(update.getModelName());
+        if (update.getModelInstanceId() != null) current.setModelInstanceId(update.getModelInstanceId());
         if (update.getMaxSteps() > 0) current.setMaxSteps(update.getMaxSteps());
         if (update.getType() != null) current.setType(update.getType());
         if (update.getPipelineAgentIds() != null) current.setPipelineAgentIds(update.getPipelineAgentIds());
@@ -316,7 +316,7 @@ public class AgentDefinitionService {
                 .toolRefs(parseCapabilityRefs(e.getToolRefsJson(), e.getToolsJson(), "TOOL"))
                 .skills(parseList(e.getSkillsJson()))
                 .skillRefs(parseCapabilityRefs(e.getSkillRefsJson(), e.getSkillsJson(), "SKILL"))
-                .modelName(e.getModelName())
+                .modelInstanceId(e.getModelInstanceId())
                 .maxSteps(e.getMaxSteps() == null ? 5 : e.getMaxSteps())
                 .type(e.getType() == null ? "single" : e.getType())
                 .pipelineAgentIds(parseList(e.getPipelineAgentIdsJson()))
@@ -351,7 +351,7 @@ public class AgentDefinitionService {
         e.setToolRefsJson(writeCapabilityRefs(toolRefs));
         e.setSkillsJson(writeList(namesFromRefs(skillRefs, d.getSkills())));
         e.setSkillRefsJson(writeCapabilityRefs(skillRefs));
-        e.setModelName(d.getModelName());
+        e.setModelInstanceId(d.getModelInstanceId());
         e.setMaxSteps(d.getMaxSteps() > 0 ? d.getMaxSteps() : 5);
         e.setType(d.getType() == null ? "single" : d.getType());
         e.setPipelineAgentIdsJson(writeList(d.getPipelineAgentIds()));

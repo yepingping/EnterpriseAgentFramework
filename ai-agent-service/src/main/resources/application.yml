@@ -65,11 +65,11 @@ jishi:
 # Agent 的 LLM 调用统一通过 model-service 的 OpenAI 兼容代理端点
 agentscope:
   model:
-    instance-id: ${AGENTSCOPE_MODEL_INSTANCE_ID:}
+    instance-id: ${AGENTSCOPE_MODEL_INSTANCE_ID:1}
 
 # ==================== Agent 配置 ====================
 agent:
-  model-instance-id: ${AGENT_MODEL_INSTANCE_ID:}
+  model-instance-id: ${AGENT_MODEL_INSTANCE_ID:1}
   max-steps: 5
   default-timeout: 60000
   definitions:
@@ -115,7 +115,7 @@ ai:
     fallback-on-error: true
     collection-name: tool_embeddings
     embedding-dim: 1536
-    embedding-model-instance-id: ${TOOL_EMBEDDING_MODEL_INSTANCE_ID:}
+    embedding-model-instance-id: ${TOOL_EMBEDDING_MODEL_INSTANCE_ID:1}
   tool-call-log:
     enabled: ${TOOL_CALL_LOG_ENABLED:true}
     async: true

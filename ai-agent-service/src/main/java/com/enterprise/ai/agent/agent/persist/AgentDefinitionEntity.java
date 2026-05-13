@@ -51,7 +51,7 @@ public class AgentDefinitionEntity {
     /** Skill 稳定引用 JSON 数组，兼容 skillsJson 裸名称。 */
     private String skillRefsJson;
 
-    private String modelName;
+    private String modelInstanceId;
 
     private Integer maxSteps;
 

@@ -22,8 +22,6 @@ public class KnowledgeBase {
     private String description;
 
     /** Embedding 模型标识 */
-    private String embeddingModel;
-
     private String embeddingModelInstanceId;
 
     private String rerankModelInstanceId;

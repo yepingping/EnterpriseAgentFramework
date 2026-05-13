@@ -177,12 +177,6 @@
                 <span class="menu-en">Models</span>
               </span>
             </template>
-            <el-menu-item index="/model">
-              <span class="menu-label leaf">
-                <span class="menu-cn">提供方管理</span>
-                <span class="menu-en">Providers</span>
-              </span>
-            </el-menu-item>
             <el-menu-item index="/model/instances">
               <span class="menu-label leaf">
                 <span class="menu-cn">模型实例</span>

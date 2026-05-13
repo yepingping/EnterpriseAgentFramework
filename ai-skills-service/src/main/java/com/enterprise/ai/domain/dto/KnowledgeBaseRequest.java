@@ -17,8 +17,6 @@ public class KnowledgeBaseRequest {
 
     private String description;
 
-    private String embeddingModel;
-
     private String embeddingModelInstanceId;
 
     private String rerankModelInstanceId;

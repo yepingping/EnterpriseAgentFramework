@@ -63,7 +63,7 @@ DELIMITER ;
 -- knowledge_base: enterprise scope and retrieval strategy
 -- ----------------------------------------------------------------------------
 CALL add_col_if_absent('knowledge_base', 'workspace_id',
-    'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `embedding_model`');
+    'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'project_code',
     'VARCHAR(64) DEFAULT NULL COMMENT ''owning EAF project code'' AFTER `workspace_id`');
 CALL add_col_if_absent('knowledge_base', 'scope',

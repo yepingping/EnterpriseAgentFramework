@@ -9,13 +9,6 @@ spring:
     username: ${AI_MYSQL_USER:root}
     password: ${AI_MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
-  ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY:your-api-key}
-      chat:
-        options:
-          model: qwen-max
-          temperature: 0.7
   cloud:
     nacos:
       discovery:
@@ -26,29 +19,8 @@ spring:
         enabled: ${NACOS_ENABLED:false}
         file-extension: yml
 
-# 模型网关配置
 model:
-  default-provider: tongyi
   credential-secret: ${MODEL_CREDENTIAL_SECRET:dev-only-change-me-please-32-bytes}
-  # 小米 MiMo（OpenAI 兼容，请求头 api-key）。配置非空 api-key 后自动注册 provider「mimo」
-  mimo:
-    api-key: ${MIMO_API_KEY:your-api-key}
-    base-url: https://api.xiaomimimo.com
-    default-model: mimo-v2.5-pro
-    models:
-      - mimo-v2.5-pro
-    max-completion-tokens: 1024
-    temperature: 1.0
-    top-p: 0.95
-    frequency-penalty: 0
-    presence-penalty: 0
-  tongyi:
-    api-key: ${DASHSCOPE_API_KEY:your-api-key}
-    embedding:
-      model: text-embedding-v2
-      endpoint: https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding
-      batch-size: 25
-      dimension: 1536
 
 logging:
   level:

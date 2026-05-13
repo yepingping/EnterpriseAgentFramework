@@ -125,7 +125,7 @@
             <div class="agent-meta-grid">
               <div>
                 <span>模型</span>
-                <strong>{{ agent.modelName || '-' }}</strong>
+                <strong>{{ agent.modelInstanceId || '-' }}</strong>
               </div>
               <div>
                 <span>项目</span>
@@ -207,7 +207,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="modelName" label="模型" width="140" show-overflow-tooltip />
+          <el-table-column prop="modelInstanceId" label="模型实例" width="160" show-overflow-tooltip />
           <el-table-column label="项目" min-width="150" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.projectCode || projectCodeById(row.projectId) || '-' }}

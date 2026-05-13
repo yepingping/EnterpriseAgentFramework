@@ -24,7 +24,7 @@ export interface AgentDefinition {
   /** 可调用的粗粒度能力名（后端字段 skills / skillsJson），与 tools 合并为运行时白名单 */
   skills?: string[]
   skillRefs?: CapabilityReference[]
-  modelName: string
+  modelInstanceId?: string
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'
@@ -57,7 +57,7 @@ export interface AgentForm {
   toolRefs?: CapabilityReference[]
   skills: string[]
   skillRefs?: CapabilityReference[]
-  modelName: string
+  modelInstanceId?: string
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="page-container">
     <div class="page-header">
       <div class="header-left">
@@ -110,8 +110,15 @@
         <template #header>模型与执行</template>
         <el-row :gutter="24">
           <el-col :span="6">
-            <el-form-item label="模型">
-              <el-input v-model="form.modelName" placeholder="留空用默认" />
+            <el-form-item label="模型实例">
+              <el-select v-model="form.modelInstanceId" clearable filterable placeholder="留空使用全局实例" style="width: 100%">
+                <el-option
+                  v-for="item in llmModelInstances"
+                  :key="item.id"
+                  :label="`${item.name} (${item.modelName})`"
+                  :value="item.id"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="6">
@@ -306,9 +313,11 @@ import { getAgent, createAgent, updateAgent } from '@/api/agent'
 import { getTools } from '@/api/tool'
 import { listCapabilities } from '@/api/capability'
 import { getScanProjects } from '@/api/scanProject'
+import { getModelInstances } from '@/api/model'
 import type { ToolInfo } from '@/types/tool'
 import type { CapabilityInfo } from '@/types/capability'
 import type { ScanProject } from '@/types/scanProject'
+import type { ModelInstance } from '@/types/model'
 import { useProjectStore } from '@/store/project'
 
 const route = useRoute()
@@ -323,6 +332,7 @@ const saving = ref(false)
 const toolOptions = ref<ToolInfo[]>([])
 const capabilityOptions = ref<CapabilityInfo[]>([])
 const scanProjects = ref<ScanProject[]>([])
+const llmModelInstances = ref<ModelInstance[]>([])
 const previousProjectId = ref<number | null>(null)
 
 const form = reactive<AgentForm>({
@@ -336,7 +346,7 @@ const form = reactive<AgentForm>({
   systemPrompt: '',
   tools: [],
   skills: [],
-  modelName: '',
+  modelInstanceId: '',
   maxSteps: 5,
   enabled: true,
   type: 'single',
@@ -452,7 +462,7 @@ async function loadAgent() {
       systemPrompt: data.systemPrompt || '',
       tools: data.tools || [],
       skills: data.skills || [],
-      modelName: data.modelName || '',
+      modelInstanceId: data.modelInstanceId || '',
       maxSteps: data.maxSteps || 5,
       enabled: data.enabled ?? true,
       type: data.type || 'single',
@@ -501,6 +511,16 @@ async function loadCapabilityOptions() {
   }
 }
 
+async function loadModelInstances() {
+  try {
+    const { data } = await getModelInstances({ modelType: 'LLM' })
+    llmModelInstances.value = Array.isArray(data) ? data.filter((item) => item.enabled) : []
+  } catch {
+    llmModelInstances.value = []
+    ElMessage.error('加载模型实例失败')
+  }
+}
+
 async function handleSave() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -529,7 +549,7 @@ onMounted(async () => {
   if (!previousProjectId.value) {
     previousProjectId.value = form.projectId ?? null
   }
-  await Promise.all([loadToolOptions(), loadCapabilityOptions()])
+  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadModelInstances()])
 })
 </script>
 

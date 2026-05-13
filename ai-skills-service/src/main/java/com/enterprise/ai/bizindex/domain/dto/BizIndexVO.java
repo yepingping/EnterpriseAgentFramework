@@ -16,7 +16,6 @@ public class BizIndexVO {
     private String sourceSystem;
     private String textTemplate;
     private String fieldSchema;
-    private String embeddingModel;
     private String embeddingModelInstanceId;
     private Integer dimension;
     private Integer chunkSize;

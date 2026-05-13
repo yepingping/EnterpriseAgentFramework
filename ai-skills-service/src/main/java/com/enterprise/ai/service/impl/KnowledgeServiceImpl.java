@@ -188,7 +188,6 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         kb.setDescription(request.getDescription());
         String embeddingModelInstanceId = requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), request.getCode());
         kb.setEmbeddingModelInstanceId(embeddingModelInstanceId);
-        kb.setEmbeddingModel(defaultString(request.getEmbeddingModel(), embeddingModelInstanceId));
         kb.setRerankModelInstanceId(trimToNull(request.getRerankModelInstanceId()));
         kb.setWorkspaceId(defaultString(request.getWorkspaceId(), "default"));
         kb.setProjectCode(request.getProjectCode());
@@ -221,9 +220,6 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         kb.setName(request.getName());
         kb.setDescription(request.getDescription());
-        if (request.getEmbeddingModel() != null) {
-            kb.setEmbeddingModel(request.getEmbeddingModel());
-        }
         if (request.getEmbeddingModelInstanceId() != null) {
             kb.setEmbeddingModelInstanceId(requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), kb.getCode()));
         }

@@ -32,8 +32,6 @@ public class BusinessIndex {
     private String fieldSchema;
 
     /** 使用的 Embedding 模型标识 */
-    private String embeddingModel;
-
     private String embeddingModelInstanceId;
 
     /** 向量维度 */

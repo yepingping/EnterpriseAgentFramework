@@ -41,7 +41,7 @@
           </span>
           <span class="kb-meta-item">
             <el-icon><Coin /></el-icon>
-            {{ kb.embeddingModel || '未配置模型' }}
+            {{ kb.embeddingModelInstanceId || '未配置模型实例' }}
           </span>
         </div>
         <div class="kb-card-footer">
@@ -79,9 +79,9 @@
             <el-tag effect="plain" size="small">{{ row.code }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="embeddingModel" label="Embedding 模型" min-width="160">
+        <el-table-column prop="embeddingModelInstanceId" label="Embedding 实例" min-width="160">
           <template #default="{ row }">
-            {{ row.embeddingModel || '-' }}
+            {{ row.embeddingModelInstanceId || '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="fileCount" label="文件数" width="90" align="center">
@@ -214,7 +214,6 @@ const form = reactive<KnowledgeBaseForm>({
   name: '',
   code: '',
   description: '',
-  embeddingModel: '',
   embeddingModelInstanceId: '',
   rerankModelInstanceId: '',
 })
@@ -231,7 +230,6 @@ function resetForm() {
   form.name = ''
   form.code = ''
   form.description = ''
-  form.embeddingModel = ''
   form.embeddingModelInstanceId = ''
   form.rerankModelInstanceId = ''
 }
@@ -247,7 +245,6 @@ function openEditDialog(row: KnowledgeBase) {
   form.name = row.name
   form.code = row.code
   form.description = row.description || ''
-  form.embeddingModel = row.embeddingModel || ''
   form.embeddingModelInstanceId = row.embeddingModelInstanceId || ''
   form.rerankModelInstanceId = row.rerankModelInstanceId || ''
   dialogVisible.value = true

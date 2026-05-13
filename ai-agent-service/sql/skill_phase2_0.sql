@@ -1,4 +1,4 @@
--- Phase 2.0 SubAgentSkill MVP — tool_definition 升级为统一的"能力表"
+﻿-- Phase 2.0 SubAgentSkill MVP — tool_definition 升级为统一的"能力表"
 -- 作用：Tool 与 Skill 共用同一张表，通过 kind 区分；Skill 专属参数走 spec_json。
 -- 兼容：旧数据默认 kind='TOOL'、side_effect='WRITE'、skill_kind=NULL。
 -- 可重复执行：CHANGE TABLE 前用 INFORMATION_SCHEMA 判空。
@@ -16,7 +16,7 @@ SET @sql := (SELECT IF(
 ));
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- spec_json: Skill 专属 spec（SubAgent: {systemPrompt, toolWhitelist, llmProvider, llmModel, maxSteps}）
+-- spec_json: Skill 专属 spec（SubAgent: {systemPrompt, toolWhitelist, modelInstanceId, maxSteps}）
 SET @sql := (SELECT IF(
     (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE()

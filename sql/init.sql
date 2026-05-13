@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 -- Enterprise Agent Framework — 首次上线统一初始化脚本
 -- 数据库：ai_text_service（ai-skills-service / ai-agent-service 共用同一库）
 --
@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS `knowledge_base` (
     `name`            VARCHAR(128) NOT NULL                COMMENT '知识库名称',
     `code`            VARCHAR(64)  NOT NULL                COMMENT '知识库编码（对应 Milvus collection 名称）',
     `description`     VARCHAR(512) DEFAULT NULL            COMMENT '描述',
-    `embedding_model` VARCHAR(64)  DEFAULT 'text-embedding-v2' COMMENT 'Embedding 模型标识',
+    `embedding_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Embedding model instance id',
+    `rerank_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Rerank model instance id',
     `dimension`       INT          DEFAULT 1536            COMMENT '向量维度',
     `chunk_size`      INT          DEFAULT 500             COMMENT 'chunk 切分大小（字符数）',
     `chunk_overlap`   INT          DEFAULT 50              COMMENT 'chunk 重叠大小（字符数）',
@@ -155,7 +156,7 @@ CREATE TABLE IF NOT EXISTS `user_file_permission` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户文件权限';
 
 -- Knowledge operations upgrade: enterprise scope, retrieval policy, direct return and rerank switches.
-CALL add_col_if_absent('knowledge_base', 'workspace_id', 'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `embedding_model`');
+CALL add_col_if_absent('knowledge_base', 'workspace_id', 'VARCHAR(64) NOT NULL DEFAULT ''default'' COMMENT ''workspace isolation key'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'project_code', 'VARCHAR(64) DEFAULT NULL COMMENT ''owning EAF project code'' AFTER `workspace_id`');
 CALL add_col_if_absent('knowledge_base', 'scope', 'VARCHAR(20) NOT NULL DEFAULT ''WORKSPACE'' COMMENT ''SHARED / WORKSPACE / PROJECT'' AFTER `project_code`');
 CALL add_col_if_absent('knowledge_base', 'search_mode', 'VARCHAR(20) NOT NULL DEFAULT ''hybrid'' COMMENT ''vector / keyword / hybrid'' AFTER `split_type`');
@@ -252,7 +253,7 @@ CREATE TABLE IF NOT EXISTS `business_index` (
     `source_system`   VARCHAR(64)  NOT NULL COMMENT '来源系统标识，如 material_system、contract_system',
     `text_template`   TEXT         NOT NULL COMMENT '文本拼接模板，如：物资名称：{name}，规格：{spec}',
     `field_schema`    JSON         NOT NULL COMMENT '字段定义 JSON，描述模板中各占位符对应的字段名、标签、类型、是否必填等',
-    `embedding_model` VARCHAR(64)  NOT NULL COMMENT '使用的 Embedding 模型标识',
+    `embedding_model_instance_id` VARCHAR(64) DEFAULT NULL COMMENT 'Embedding model instance id',
     `dimension`       INT          NOT NULL DEFAULT 1536 COMMENT '向量维度，需与 Embedding 模型输出一致',
     `chunk_size`      INT          NOT NULL DEFAULT 500 COMMENT '附件切分大小（字符数）',
     `chunk_overlap`   INT          NOT NULL DEFAULT 50 COMMENT '附件切分重叠（字符数）',
@@ -418,7 +419,7 @@ CREATE TABLE IF NOT EXISTS `tool_definition` (
     `ai_description`      MEDIUMTEXT    DEFAULT NULL            COMMENT 'LLM 生成的业务语义描述（Agent 运行时优先使用）',
     `capability_metadata_json` MEDIUMTEXT DEFAULT NULL          COMMENT '@AiCapability 能力声明元数据 JSON',
     `parameters_json`     TEXT          DEFAULT NULL            COMMENT '参数定义 JSON',
-    `spec_json`           MEDIUMTEXT    DEFAULT NULL            COMMENT 'Skill 专属 spec JSON（SubAgent: systemPrompt/toolWhitelist/llmProvider/llmModel/maxSteps）',
+    `spec_json`           MEDIUMTEXT    DEFAULT NULL            COMMENT 'Skill 专属 spec JSON（SubAgent: systemPrompt/toolWhitelist/modelInstanceId/maxSteps）',
     `source`              VARCHAR(32)   NOT NULL DEFAULT 'manual' COMMENT '来源: code/scanner/manual',
     `source_location`     VARCHAR(512)  DEFAULT NULL            COMMENT '来源详情',
     `http_method`         VARCHAR(8)    DEFAULT NULL            COMMENT 'HTTP 方法',
@@ -599,7 +600,7 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
     `intent_type`             VARCHAR(64)  DEFAULT NULL                 COMMENT '意图类型',
     `system_prompt`           TEXT         DEFAULT NULL,
     `tools_json`              TEXT         DEFAULT NULL                 COMMENT 'tools 白名单 JSON',
-    `model_name`              VARCHAR(64)  DEFAULT NULL,
+    `model_instance_id`       VARCHAR(64)  DEFAULT NULL,
     `max_steps`               INT          NOT NULL DEFAULT 5,
     `type`                    VARCHAR(32)  NOT NULL DEFAULT 'single',
     `pipeline_agent_ids_json` TEXT         DEFAULT NULL,
@@ -1221,10 +1222,10 @@ CREATE TABLE IF NOT EXISTS `market_item` (
 -- 八、初始化示例数据（可选；同名再跑不会插入重复行）
 -- ============================================================================
 
-INSERT INTO `knowledge_base` (`name`, `code`, `description`, `embedding_model`, `dimension`, `status`)
+INSERT INTO `knowledge_base` (`name`, `code`, `description`, `dimension`, `status`)
 SELECT * FROM (
-    SELECT '通用知识库' AS name, 'kb_general'  AS code, '通用文档知识库' AS description, 'text-embedding-v2' AS embedding_model, 1536 AS dimension, 1 AS status UNION ALL
-    SELECT '合同知识库',         'kb_contract',          '合同相关文档',                   'text-embedding-v2',                   1536,                1
+    SELECT '通用知识库' AS name, 'kb_general'  AS code, '通用文档知识库' AS description, 1536 AS dimension, 1 AS status UNION ALL
+    SELECT '合同知识库',         'kb_contract',          '合同相关文档',                   1536,                1
 ) AS seed
 WHERE NOT EXISTS (SELECT 1 FROM `knowledge_base` WHERE `code` = seed.code);
 
@@ -1234,11 +1235,11 @@ WHERE NOT EXISTS (SELECT 1 FROM `knowledge_base` WHERE `code` = seed.code);
 -- ============================================================================
 
 CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id',
-    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
 CALL add_col_if_absent('business_index', 'embedding_model_instance_id',
-    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `field_schema`');
 
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_embedding_instance', '`embedding_model_instance_id`');
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_rerank_instance', '`rerank_model_instance_id`');

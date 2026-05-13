@@ -240,7 +240,7 @@ public class SemanticGenerationOrchestrator {
         }
 
         String prompt = promptRegistry.render(context);
-        SemanticGenerationResult result = llmClient.generate(prompt, modelInstanceId, null);
+        SemanticGenerationResult result = llmClient.generate(prompt, modelInstanceId);
 
         SemanticDocEntity doc = new SemanticDocEntity();
         doc.setLevel(level);

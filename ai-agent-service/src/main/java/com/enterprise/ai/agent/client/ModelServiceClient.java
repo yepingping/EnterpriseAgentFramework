@@ -41,8 +41,6 @@ public interface ModelServiceClient {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     class ModelChatRequest {
         private String modelInstanceId;
-        private String provider;
-        private String model;
         private List<ChatMessage> messages;
         private Map<String, Object> options;
         private JsonNode tools;
@@ -109,8 +107,6 @@ public interface ModelServiceClient {
     @AllArgsConstructor
     class ModelEmbeddingRequest {
         private String modelInstanceId;
-        private String provider;
-        private String model;
         private List<String> texts;
     }
 

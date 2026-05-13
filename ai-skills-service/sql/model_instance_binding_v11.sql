@@ -49,11 +49,11 @@ END$$
 DELIMITER ;
 
 CALL add_col_if_absent('knowledge_base', 'embedding_model_instance_id',
-    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `description`');
 CALL add_col_if_absent('knowledge_base', 'rerank_model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Rerank model instance id'' AFTER `embedding_model_instance_id`');
 CALL add_col_if_absent('business_index', 'embedding_model_instance_id',
-    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `embedding_model`');
+    'VARCHAR(64) DEFAULT NULL COMMENT ''Embedding model instance id'' AFTER `field_schema`');
 
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_embedding_instance', '`embedding_model_instance_id`');
 CALL add_idx_if_absent('knowledge_base', 'idx_kb_rerank_instance', '`rerank_model_instance_id`');

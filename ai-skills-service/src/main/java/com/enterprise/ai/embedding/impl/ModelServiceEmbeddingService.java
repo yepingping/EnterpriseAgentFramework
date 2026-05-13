@@ -5,7 +5,6 @@ import com.enterprise.ai.common.dto.ApiResult;
 import com.enterprise.ai.embedding.EmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -15,7 +14,6 @@ import java.util.List;
 @Slf4j
 @Service
 @Primary
-@ConditionalOnProperty(name = "embedding.provider", havingValue = "model-service", matchIfMissing = false)
 @RequiredArgsConstructor
 public class ModelServiceEmbeddingService implements EmbeddingService {
 

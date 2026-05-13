@@ -55,9 +55,6 @@ public class BizIndexServiceImpl implements BizIndexService {
         index.setEmbeddingModelInstanceId(embeddingModelInstanceId);
 
         // 默认使用系统当前的 Embedding 配置
-        if (index.getEmbeddingModel() == null || index.getEmbeddingModel().isBlank()) {
-            index.setEmbeddingModel(embeddingModelInstanceId);
-        }
         if (index.getDimension() == null || index.getDimension() == 0) {
             index.setDimension(1536);
         }
@@ -97,11 +94,7 @@ public class BizIndexServiceImpl implements BizIndexService {
         if (request.getFieldSchema() != null) index.setFieldSchema(request.getFieldSchema());
         if (request.getEmbeddingModelInstanceId() != null) {
             index.setEmbeddingModelInstanceId(requireEmbeddingModelInstanceId(request.getEmbeddingModelInstanceId(), indexCode));
-            if (request.getEmbeddingModel() == null || request.getEmbeddingModel().isBlank()) {
-                index.setEmbeddingModel(index.getEmbeddingModelInstanceId());
-            }
         }
-        if (request.getEmbeddingModel() != null) index.setEmbeddingModel(request.getEmbeddingModel());
         if (request.getChunkSize() != null) index.setChunkSize(request.getChunkSize());
         if (request.getChunkOverlap() != null) index.setChunkOverlap(request.getChunkOverlap());
         if (request.getSplitType() != null) index.setSplitType(request.getSplitType());

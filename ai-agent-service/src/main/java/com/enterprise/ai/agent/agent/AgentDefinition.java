@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.agent;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +20,7 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class AgentDefinition {
 
     private String id;
@@ -66,8 +68,8 @@ public class AgentDefinition {
     @Builder.Default
     private List<CapabilityReference> skillRefs = List.of();
 
-    /** 使用的模型名称（默认继承全局配置） */
-    private String modelName;
+    /** 使用的模型实例 ID（为空时继承全局模型实例配置） */
+    private String modelInstanceId;
 
     /** Agent 最大推理步数 */
     @Builder.Default

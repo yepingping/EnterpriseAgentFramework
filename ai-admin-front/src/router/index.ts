@@ -93,12 +93,6 @@ const routes: RouteRecordRaw[] = [
 
       // ── 模型管理 ──
       {
-        path: 'model',
-        name: 'ModelProvider',
-        component: () => import('@/views/model/ModelProvider.vue'),
-        meta: { title: 'Provider 管理' },
-      },
-      {
         path: 'model/instances',
         name: 'ModelInstances',
         component: () => import('@/views/model/ModelInstances.vue'),

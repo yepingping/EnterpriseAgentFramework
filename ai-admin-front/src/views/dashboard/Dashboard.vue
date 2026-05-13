@@ -194,7 +194,7 @@ import type { AgentDefinition } from '@/types/agent'
 import type { KnowledgeBase } from '@/types/knowledge'
 import { getAgentList } from '@/api/agent'
 import { getKnowledgeList } from '@/api/knowledge'
-import { getProviders } from '@/api/model'
+import { getModelInstances } from '@/api/model'
 import { getTools } from '@/api/tool'
 
 const loading = ref(false)
@@ -203,7 +203,7 @@ const stats = reactive({
   agentCount: 0,
   knowledgeBaseCount: 0,
   toolCount: 0,
-  providerCount: 0,
+  modelInstanceCount: 0,
 })
 
 const recentAgents = ref<AgentDefinition[]>([])
@@ -273,14 +273,14 @@ const statCards = computed(() => [
     ...generateSparkline([20, 22, 25, 24, 28, 30, 29, 31, 33, stats.toolCount || 34]),
   },
   {
-    label: '模型 Provider',
-    value: stats.providerCount,
+    label: '模型实例',
+    value: stats.modelInstanceCount,
     icon: Coin,
     gradient: 'linear-gradient(135deg, #64748b, #475569)',
     color: '#64748b',
     trend: '',
     trendDir: 'stable',
-    ...generateSparkline([2, 2, 3, 3, 3, 3, 3, 3, 3, stats.providerCount || 3]),
+    ...generateSparkline([2, 2, 3, 3, 3, 3, 3, 3, 3, stats.modelInstanceCount || 3]),
   },
 ])
 
@@ -290,7 +290,7 @@ async function fetchStats() {
     getAgentList(),
     getKnowledgeList(),
     getTools({ current: 1, size: 1 }),
-    getProviders(),
+    getModelInstances(),
   ])
 
   if (results[0].status === 'fulfilled') {
@@ -314,8 +314,8 @@ async function fetchStats() {
 
   if (results[3].status === 'fulfilled') {
     const resp = results[3].value.data
-    const providers = (resp as any)?.data ?? (Array.isArray(resp) ? resp : [])
-    stats.providerCount = providers.length
+    const instances = (resp as any)?.data ?? (Array.isArray(resp) ? resp : [])
+    stats.modelInstanceCount = instances.length
   }
 
   loading.value = false
