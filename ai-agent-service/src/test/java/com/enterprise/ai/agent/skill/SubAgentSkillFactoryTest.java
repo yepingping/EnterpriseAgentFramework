@@ -79,11 +79,12 @@ class SubAgentSkillFactoryTest {
     @Test
     void serializeRoundTrip() throws Exception {
         SubAgentSpec spec = new SubAgentSpec(
-                "prompt", java.util.List.of("a", "b"), "openai", "gpt-4", 10, false);
+                "prompt", java.util.List.of("a", "b"), "model-instance-1", 10, false);
         String json = factory.serializeSpec(spec);
         SubAgentSpec parsed = factory.parseSpec(json);
         assertEquals(spec.systemPrompt(), parsed.systemPrompt());
         assertEquals(spec.toolWhitelist(), parsed.toolWhitelist());
+        assertEquals(spec.modelInstanceId(), parsed.modelInstanceId());
         assertEquals(10, parsed.maxSteps());
     }
 

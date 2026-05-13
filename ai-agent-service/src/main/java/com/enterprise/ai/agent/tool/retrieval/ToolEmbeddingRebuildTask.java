@@ -29,6 +29,9 @@ public class ToolEmbeddingRebuildTask {
 
     private String currentStep;
 
+    /** 本次重建实际使用的模型实例 ID（请求指定或回落到配置） */
+    private String embeddingModelInstanceId;
+
     private String errorMessage;
 
     private Instant startedAt;

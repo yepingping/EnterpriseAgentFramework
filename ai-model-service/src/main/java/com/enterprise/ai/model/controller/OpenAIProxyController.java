@@ -95,6 +95,10 @@ public class OpenAIProxyController {
         String value = baseUrl.trim();
         if (value.endsWith("/chat/completions")) return value;
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        // DashScope 等常见配置为 .../compatible-mode/v1，避免与 defaultPath 的 /v1/... 叠成 /v1/v1/
+        if (value.endsWith("/v1") && defaultPath.startsWith("/v1/")) {
+            return value + defaultPath.substring("/v1".length());
+        }
         return value + defaultPath;
     }
 

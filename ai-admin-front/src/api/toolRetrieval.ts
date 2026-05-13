@@ -2,6 +2,7 @@ import { agentRequest } from './request'
 import type {
   ToolRebuildStartResponse,
   ToolRebuildTask,
+  ToolRetrievalRebuildRequest,
   ToolRetrievalSearchRequest,
   ToolRetrievalSearchResponse,
 } from '@/types/toolRetrieval'
@@ -10,8 +11,8 @@ export function searchToolRetrieval(payload: ToolRetrievalSearchRequest) {
   return agentRequest.post<ToolRetrievalSearchResponse>('/api/tool-retrieval/search', payload)
 }
 
-export function startToolRetrievalRebuild() {
-  return agentRequest.post<ToolRebuildStartResponse>('/api/tool-retrieval/rebuild')
+export function startToolRetrievalRebuild(payload?: ToolRetrievalRebuildRequest) {
+  return agentRequest.post<ToolRebuildStartResponse>('/api/tool-retrieval/rebuild', payload ?? {})
 }
 
 export function getToolRetrievalRebuildStatus(taskId?: string) {

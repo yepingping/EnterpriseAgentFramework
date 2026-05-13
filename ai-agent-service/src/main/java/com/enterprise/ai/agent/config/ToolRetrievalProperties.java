@@ -21,5 +21,9 @@ public class ToolRetrievalProperties {
 
     private int embeddingDim = 1536;
 
+    /**
+     * 可选：运维覆盖用。默认运行时以库表 {@code tool_retrieval_setting}（「重建向量索引」所选）为准，
+     * 此处仅在该表无记录或需临时切模型时使用。
+     */
     private String embeddingModelInstanceId;
 }

@@ -50,10 +50,13 @@ public class ToolRetrievalController {
     }
 
     @PostMapping("/rebuild")
-    public ResponseEntity<?> rebuild() {
+    public ResponseEntity<?> rebuild(@RequestBody(required = false) RebuildRequest request) {
         try {
-            String taskId = rebuildManager.start();
+            String requested = request != null ? request.embeddingModelInstanceId() : null;
+            String taskId = rebuildManager.start(requested);
             return ResponseEntity.accepted().body(new StartResponse(taskId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiError(ex.getMessage()));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(409).body(new ApiError(ex.getMessage()));
         }
@@ -103,6 +106,10 @@ public class ToolRetrievalController {
     public record StartResponse(String taskId) {
     }
 
+    /** 全量重建请求：指定用于生成向量的模型实例（推荐）；缺省时使用库表上次记录或 {@code ai.tool-retrieval.embedding-model-instance-id} */
+    public record RebuildRequest(String embeddingModelInstanceId) {
+    }
+
     public record TaskDTO(
             String taskId,
             String stage,
@@ -112,6 +119,7 @@ public class ToolRetrievalController {
             int skippedCount,
             int failedCount,
             String currentStep,
+            String embeddingModelInstanceId,
             String errorMessage,
             Instant startedAt,
             Instant finishedAt
@@ -126,6 +134,7 @@ public class ToolRetrievalController {
                     t.getSkippedCount(),
                     t.getFailedCount(),
                     t.getCurrentStep(),
+                    t.getEmbeddingModelInstanceId(),
                     t.getErrorMessage(),
                     t.getStartedAt(),
                     t.getFinishedAt()

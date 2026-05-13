@@ -184,6 +184,13 @@ public class ToolEmbeddingService {
      * 文本为空时 → 仅 delete，不插入（避免脏数据）。
      */
     public void upsert(ToolDefinitionEntity tool) {
+        upsert(tool, null);
+    }
+
+    /**
+     * @param embeddingModelInstanceId 非空时用于本次向量化（与配置项二选一逻辑见 {@link EmbeddingClient}）
+     */
+    public void upsert(ToolDefinitionEntity tool, String embeddingModelInstanceId) {
         if (tool == null || tool.getId() == null) {
             return;
         }
@@ -196,7 +203,7 @@ public class ToolEmbeddingService {
             return;
         }
         try {
-            List<Float> vector = embeddingClient.embed(text);
+            List<Float> vector = embeddingClient.embed(text, embeddingModelInstanceId);
             delete(tool.getId());
             insert(tool, text, vector);
         } catch (Exception ex) {

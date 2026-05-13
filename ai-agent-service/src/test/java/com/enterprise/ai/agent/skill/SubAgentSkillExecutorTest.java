@@ -106,7 +106,7 @@ class SubAgentSkillExecutorTest {
 
     @Test
     void resolveRetryLimitUsesMetadataValue() {
-        SubAgentSpec spec = new SubAgentSpec("prompt", List.of("tool_a"), null, null, 5, false);
+        SubAgentSpec spec = new SubAgentSpec("prompt", List.of("tool_a"), null, 5, false);
         SkillMetadata metadata = new SkillMetadata("1.0.0",
                 com.enterprise.ai.skill.SideEffectLevel.READ_ONLY,
                 com.enterprise.ai.skill.HitlPolicy.NEVER,
@@ -141,7 +141,7 @@ class SubAgentSkillExecutorTest {
 
     private SubAgentSkill newDummySkill() {
         SubAgentSpec spec = new SubAgentSpec(
-                "prompt", List.of("tool_a"), null, null, 5, false);
+                "prompt", List.of("tool_a"), null, 5, false);
         return new SubAgentSkill(
                 "skill_x",
                 "does x",

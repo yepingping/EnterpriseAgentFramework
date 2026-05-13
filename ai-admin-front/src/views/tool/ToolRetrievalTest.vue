@@ -3,9 +3,7 @@
     <div class="page-header">
       <h2>Tool 检索测试</h2>
       <div class="header-actions">
-        <el-button :loading="rebuildStarting" type="warning" @click="handleRebuild">
-          重建向量索引
-        </el-button>
+        <el-button type="warning" @click="openRebuildDialog">重建向量索引</el-button>
       </div>
     </div>
 
@@ -80,6 +78,7 @@
         <el-descriptions-item label="成功">{{ task.successCount }}</el-descriptions-item>
         <el-descriptions-item label="跳过">{{ task.skippedCount }}</el-descriptions-item>
         <el-descriptions-item label="失败">{{ task.failedCount }}</el-descriptions-item>
+        <el-descriptions-item label="向量模型实例">{{ task.embeddingModelInstanceId || '-' }}</el-descriptions-item>
         <el-descriptions-item label="当前">{{ task.currentStep || '-' }}</el-descriptions-item>
         <el-descriptions-item label="开始">{{ task.startedAt || '-' }}</el-descriptions-item>
         <el-descriptions-item label="结束">{{ task.finishedAt || '-' }}</el-descriptions-item>
@@ -100,6 +99,41 @@
         show-icon
       />
     </el-card>
+
+    <el-dialog
+      v-model="rebuildDialogVisible"
+      title="选择向量索引模型"
+      width="480px"
+      destroy-on-close
+      @open="loadEmbeddingInstances"
+    >
+      <p class="rebuild-dialog-hint">
+        重建会为每条 Tool 定义调用 Embedding 服务写入 Milvus，请选择与集合维度一致且状态为可用的向量模型实例。
+        所选模型实例 ID 会写入库表 tool_retrieval_setting，供智能体对话时的 Tool 语义召回与用户问题向量化共用；未设置环境变量时不再使用占位默认值。
+      </p>
+      <el-form label-width="120px">
+        <el-form-item label="Embedding 实例" required>
+          <el-select
+            v-model="rebuildModelInstanceId"
+            placeholder="请选择向量模型实例"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in embeddingInstances"
+              :key="item.id"
+              :label="`${item.name} / ${item.modelName}`"
+              :value="item.id"
+              :disabled="item.status !== 'ACTIVE'"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rebuildDialogVisible = false">取消</el-button>
+        <el-button type="warning" :loading="rebuildStarting" @click="confirmRebuild">开始重建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -111,6 +145,8 @@ import {
   searchToolRetrieval,
   startToolRetrievalRebuild,
 } from '@/api/toolRetrieval'
+import { getModelInstances } from '@/api/model'
+import type { ModelInstance } from '@/types/model'
 import type { ToolCandidate, ToolRebuildTask, ToolRetrievalSearchRequest } from '@/types/toolRetrieval'
 
 const form = reactive({
@@ -126,6 +162,9 @@ const searching = ref(false)
 const candidates = ref<ToolCandidate[]>([])
 
 const rebuildStarting = ref(false)
+const rebuildDialogVisible = ref(false)
+const rebuildModelInstanceId = ref('')
+const embeddingInstances = ref<ModelInstance[]>([])
 const task = ref<ToolRebuildTask | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -162,14 +201,38 @@ async function handleSearch() {
   }
 }
 
-async function handleRebuild() {
+function openRebuildDialog() {
+  rebuildModelInstanceId.value = ''
+  rebuildDialogVisible.value = true
+}
+
+async function loadEmbeddingInstances() {
+  try {
+    const { data } = await getModelInstances({ modelType: 'EMBEDDING' })
+    embeddingInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+    if (!embeddingInstances.value.length) {
+      ElMessage.warning('未找到 Embedding 类型模型实例，请先在「模型实例」中配置')
+    }
+  } catch {
+    embeddingInstances.value = []
+  }
+}
+
+async function confirmRebuild() {
+  if (!rebuildModelInstanceId.value) {
+    ElMessage.warning('请选择向量模型实例')
+    return
+  }
   rebuildStarting.value = true
   try {
-    const { data } = await startToolRetrievalRebuild()
+    const { data } = await startToolRetrievalRebuild({
+      embeddingModelInstanceId: rebuildModelInstanceId.value,
+    })
     ElMessage.success('已提交重建任务')
+    rebuildDialogVisible.value = false
     startPolling(data.taskId)
-  } catch (err) {
-    ElMessage.error((err as Error).message || '启动重建失败')
+  } catch {
+    /* 错误提示由 request 拦截器处理 */
   } finally {
     rebuildStarting.value = false
   }
@@ -255,5 +318,11 @@ onUnmounted(stopPolling)
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.rebuild-dialog-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 </style>

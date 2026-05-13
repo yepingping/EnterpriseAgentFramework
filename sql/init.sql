@@ -17,6 +17,7 @@
 --   ai-agent-service/sql/skill_mining_phase2_1.sql Phase 2.1 Skill Mining
 --   ai-agent-service/sql/agent_studio_phase3_0.sql Phase 3.0 Agent Studio（agent_definition / agent_version）
 --   ai-agent-service/sql/scan_project_auth.sql  scan_project HTTP 鉴权列（旧库可单独打补丁，幂等）
+--   ai-agent-service/sql/tool_retrieval_setting.sql  Tool 语义检索：库表持久化 Embedding 实例 ID
 --   ai-agent-service/sql/skill_draft_tool_definition.sql Skill 草稿：tool_definition.draft（kind=SKILL 时暂存）
 --   ai-agent-service/sql/skill_interaction_phase2_x.sql Phase 2.x InteractiveFormSkill 挂起/恢复表 skill_interaction
 --   ai-agent-service/sql/ai_capability_metadata.sql @AiCapability 能力声明元数据
@@ -644,6 +645,21 @@ CREATE TABLE IF NOT EXISTS `agent_version` (
     UNIQUE KEY `uk_agent_version` (`agent_id`, `version`),
     KEY `idx_agent_status` (`agent_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 发布版本快照（Phase 3.0）';
+
+
+-- ============================================================================
+-- 七.六、Tool 语义检索：持久化「重建向量索引」选用的 Embedding 模型实例
+-- （与 ai-agent-service/sql/tool_retrieval_setting.sql 一致）
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `tool_retrieval_setting` (
+    `id`                            CHAR(1)      NOT NULL DEFAULT '1' COMMENT '固定单例行',
+    `embedding_model_instance_id`   VARCHAR(64)  DEFAULT NULL COMMENT '上次重建 Tool 向量索引选用的模型实例；对话侧语义召回与用户问题向量化共用',
+    `updated_at`                    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Tool 语义检索全局运行时设置（单例）';
+
+INSERT IGNORE INTO `tool_retrieval_setting` (`id`, `embedding_model_instance_id`) VALUES ('1', NULL);
 
 
 -- ============================================================================

@@ -35,6 +35,8 @@ export interface ToolRebuildTask {
   skippedCount: number
   failedCount: number
   currentStep?: string | null
+  /** 本次重建使用的模型实例 ID */
+  embeddingModelInstanceId?: string | null
   errorMessage?: string | null
   startedAt?: string
   finishedAt?: string | null
@@ -42,4 +44,9 @@ export interface ToolRebuildTask {
 
 export interface ToolRebuildStartResponse {
   taskId: string
+}
+
+/** POST /api/tool-retrieval/rebuild */
+export interface ToolRetrievalRebuildRequest {
+  embeddingModelInstanceId?: string
 }
