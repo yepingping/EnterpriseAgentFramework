@@ -112,19 +112,35 @@
         所选模型实例 ID 会写入库表 tool_retrieval_setting，供智能体对话时的 Tool 语义召回与用户问题向量化共用；未设置环境变量时不再使用占位默认值。
       </p>
       <el-form label-width="120px">
+        <el-form-item label="模型厂商" required>
+          <el-select
+            v-model="rebuildModelProvider"
+            placeholder="请选择厂商"
+            filterable
+            style="width: 100%"
+            @change="handleRebuildProviderChange"
+          >
+            <el-option
+              v-for="provider in embeddingProviderOptions"
+              :key="provider"
+              :label="provider"
+              :value="provider"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="Embedding 实例" required>
           <el-select
             v-model="rebuildModelInstanceId"
             placeholder="请选择向量模型实例"
             filterable
             style="width: 100%"
+            :disabled="!rebuildModelProvider"
           >
             <el-option
-              v-for="item in embeddingInstances"
+              v-for="item in filteredEmbeddingInstances"
               :key="item.id"
               :label="`${item.name} / ${item.modelName}`"
               :value="item.id"
-              :disabled="item.status !== 'ACTIVE'"
             />
           </el-select>
         </el-form-item>
@@ -163,6 +179,7 @@ const candidates = ref<ToolCandidate[]>([])
 
 const rebuildStarting = ref(false)
 const rebuildDialogVisible = ref(false)
+const rebuildModelProvider = ref('')
 const rebuildModelInstanceId = ref('')
 const embeddingInstances = ref<ModelInstance[]>([])
 const task = ref<ToolRebuildTask | null>(null)
@@ -172,6 +189,12 @@ const taskPercent = computed(() => {
   if (!task.value || !task.value.totalSteps) return 0
   return Math.round((task.value.completedSteps / task.value.totalSteps) * 100)
 })
+const embeddingProviderOptions = computed(() =>
+  Array.from(new Set(embeddingInstances.value.map((item) => item.provider).filter(Boolean))).sort(),
+)
+const filteredEmbeddingInstances = computed(() =>
+  embeddingInstances.value.filter((item) => item.provider === rebuildModelProvider.value),
+)
 
 async function handleSearch() {
   if (!form.query.trim()) {
@@ -202,16 +225,22 @@ async function handleSearch() {
 }
 
 function openRebuildDialog() {
+  rebuildModelProvider.value = ''
   rebuildModelInstanceId.value = ''
   rebuildDialogVisible.value = true
+}
+
+function handleRebuildProviderChange() {
+  rebuildModelInstanceId.value = ''
 }
 
 async function loadEmbeddingInstances() {
   try {
     const { data } = await getModelInstances({ modelType: 'EMBEDDING' })
-    embeddingInstances.value = data?.data ?? (Array.isArray(data) ? data : [])
+    const list = data?.data ?? (Array.isArray(data) ? data : [])
+    embeddingInstances.value = list.filter((item) => item.status === 'ACTIVE')
     if (!embeddingInstances.value.length) {
-      ElMessage.warning('未找到 Embedding 类型模型实例，请先在「模型实例」中配置')
+      ElMessage.warning('未找到已开启的 Embedding 类型模型实例，请先在「模型实例」中配置')
     }
   } catch {
     embeddingInstances.value = []

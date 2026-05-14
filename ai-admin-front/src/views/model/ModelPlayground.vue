@@ -10,10 +10,27 @@
         <el-card shadow="never">
           <template #header>模型配置</template>
           <el-form label-width="80px" size="default">
-            <el-form-item label="实例">
-              <el-select v-model="config.modelInstanceId" placeholder="请选择模型实例" style="width: 100%" @change="onInstanceChange">
+            <el-form-item label="厂商">
+              <el-select v-model="config.provider" placeholder="请选择厂商" filterable style="width: 100%" @change="onProviderChange">
                 <el-option
-                  v-for="item in selectableLlmInstances"
+                  v-for="item in llmProviderOptions"
+                  :key="item"
+                  :label="item"
+                  :value="item"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="实例">
+              <el-select
+                v-model="config.modelInstanceId"
+                placeholder="请选择模型实例"
+                style="width: 100%"
+                filterable
+                :disabled="!config.provider"
+                @change="onInstanceChange"
+              >
+                <el-option
+                  v-for="item in filteredLlmInstances"
                   :key="item.id"
                   :label="`${item.name} / ${item.modelName}`"
                   :value="item.id"
@@ -104,6 +121,12 @@ const llmInstances = ref<ModelInstance[]>([])
 const selectableLlmInstances = computed(() =>
   llmInstances.value.filter((item) => item.status === 'ACTIVE'),
 )
+const llmProviderOptions = computed(() =>
+  Array.from(new Set(selectableLlmInstances.value.map((item) => item.provider).filter(Boolean))).sort(),
+)
+const filteredLlmInstances = computed(() =>
+  selectableLlmInstances.value.filter((item) => item.provider === config.provider),
+)
 const config = reactive({
   modelInstanceId: '',
   provider: '',
@@ -120,6 +143,11 @@ const messagesRef = ref<HTMLElement>()
 
 const { content: sseContent, isStreaming: streaming, start: startSSE, stop: stopSSE } = useSSE()
 const streamingContent = computed(() => streaming.value ? sseContent.value : '')
+
+function onProviderChange() {
+  config.modelInstanceId = ''
+  config.model = ''
+}
 
 function onInstanceChange() {
   const selected = selectableLlmInstances.value.find((item) => item.id === config.modelInstanceId)
@@ -219,6 +247,8 @@ async function fetchInstances() {
       config.modelInstanceId = ''
       config.provider = ''
       config.model = ''
+    } else if (config.modelInstanceId) {
+      onInstanceChange()
     }
   } catch {
     llmInstances.value = []

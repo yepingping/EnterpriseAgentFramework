@@ -110,10 +110,29 @@
         <template #header>模型与执行</template>
         <el-row :gutter="24">
           <el-col :span="6">
-            <el-form-item label="模型实例" prop="modelInstanceId">
-              <el-select v-model="form.modelInstanceId" filterable placeholder="请选择模型实例" style="width: 100%">
+            <el-form-item label="模型厂商">
+              <el-select v-model="selectedLlmProvider" filterable placeholder="请选择模型厂商" style="width: 100%" @change="handleLlmProviderChange">
                 <el-option
-                  v-for="item in llmModelInstances"
+                  v-for="provider in llmProviderOptions"
+                  :key="provider"
+                  :label="provider"
+                  :value="provider"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="模型实例" prop="modelInstanceId">
+              <el-select
+                v-model="form.modelInstanceId"
+                filterable
+                placeholder="请选择模型实例"
+                style="width: 100%"
+                :disabled="!selectedLlmProvider"
+                @change="syncSelectedLlmProvider"
+              >
+                <el-option
+                  v-for="item in filteredLlmModelInstances"
                   :key="item.id"
                   :label="`${item.name} (${item.modelName})`"
                   :value="item.id"
@@ -121,12 +140,12 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <el-form-item label="最大步数">
               <el-input-number v-model="form.maxSteps" :min="1" :max="20" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <el-form-item label="Agent 类型">
               <el-radio-group v-model="form.type">
                 <el-radio value="single">单 Agent</el-radio>
@@ -134,7 +153,7 @@
               </el-radio-group>
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="4">
             <el-form-item label="触发方式">
               <el-select v-model="form.triggerMode" style="width: 100%">
                 <el-option
@@ -333,6 +352,7 @@ const toolOptions = ref<ToolInfo[]>([])
 const capabilityOptions = ref<CapabilityInfo[]>([])
 const scanProjects = ref<ScanProject[]>([])
 const llmModelInstances = ref<ModelInstance[]>([])
+const selectedLlmProvider = ref('')
 const previousProjectId = ref<number | null>(null)
 
 const form = reactive<AgentForm>({
@@ -374,6 +394,12 @@ const availableCapabilities = computed(() =>
     (sk) => sk.enabled && sk.agentVisible && !sk.draft,
   ),
 )
+const llmProviderOptions = computed(() =>
+  Array.from(new Set(llmModelInstances.value.map((item) => item.provider).filter(Boolean))).sort(),
+)
+const filteredLlmModelInstances = computed(() =>
+  llmModelInstances.value.filter((item) => item.provider === selectedLlmProvider.value),
+)
 
 const showPipelineInput = ref(false)
 const newPipelineId = ref('')
@@ -403,6 +429,15 @@ function capabilityLabel(item: ToolInfo | CapabilityInfo) {
   const project = item.projectCode ? ` · ${item.projectCode}` : ''
   const visibility = item.visibility ? ` · ${item.visibility}` : ''
   return `${item.name}${project}${visibility}`
+}
+
+function handleLlmProviderChange() {
+  form.modelInstanceId = ''
+}
+
+function syncSelectedLlmProvider() {
+  const selected = llmModelInstances.value.find((item) => item.id === form.modelInstanceId)
+  selectedLlmProvider.value = selected?.provider || selectedLlmProvider.value
 }
 
 async function loadScanProjects() {
@@ -517,8 +552,16 @@ async function loadModelInstances() {
     const { data } = await getModelInstances({ modelType: 'LLM' })
     const list = data?.data ?? (Array.isArray(data) ? data : [])
     llmModelInstances.value = list.filter((item) => item.status === 'ACTIVE')
+    const activeIds = new Set(llmModelInstances.value.map((item) => item.id))
+    if (form.modelInstanceId && activeIds.has(form.modelInstanceId)) {
+      syncSelectedLlmProvider()
+    } else if (form.modelInstanceId) {
+      form.modelInstanceId = ''
+      selectedLlmProvider.value = ''
+    }
   } catch {
     llmModelInstances.value = []
+    selectedLlmProvider.value = ''
     ElMessage.error('加载模型实例失败')
   }
 }
