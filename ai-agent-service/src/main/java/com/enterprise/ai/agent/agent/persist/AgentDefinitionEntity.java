@@ -53,6 +53,11 @@ public class AgentDefinitionEntity {
 
     private String modelInstanceId;
 
+    private String runtimeType;
+
+    /** Runtime 专属配置 JSON，由具体 Runtime Adapter 解释。 */
+    private String runtimeConfigJson;
+
     private Integer maxSteps;
 
     private String type;

@@ -71,6 +71,14 @@ public class AgentDefinition {
     /** 使用的模型实例 ID（为空时继承全局模型实例配置） */
     private String modelInstanceId;
 
+    /** 默认运行时：AGENTSCOPE / LANGGRAPH4J / OPENAI_AGENTS / CURSOR_CODE_AGENT。 */
+    @Builder.Default
+    private String runtimeType = "AGENTSCOPE";
+
+    /** Runtime 专属配置。由具体 AgentRuntimeAdapter 按 runtimeType 解释。 */
+    @Builder.Default
+    private Map<String, Object> runtimeConfig = Map.of();
+
     /** Agent 最大推理步数 */
     @Builder.Default
     private int maxSteps = 5;

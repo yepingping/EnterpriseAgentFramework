@@ -25,6 +25,8 @@ export interface AgentDefinition {
   skills?: string[]
   skillRefs?: CapabilityReference[]
   modelInstanceId: string
+  runtimeType?: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  runtimeConfig?: Record<string, unknown>
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'
@@ -58,6 +60,8 @@ export interface AgentForm {
   skills: string[]
   skillRefs?: CapabilityReference[]
   modelInstanceId: string
+  runtimeType?: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  runtimeConfig: Record<string, unknown>
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'
@@ -70,6 +74,34 @@ export interface AgentForm {
   extra: Record<string, unknown>
   canvasJson?: string
   allowIrreversible?: boolean
+}
+
+export interface AgentRuntimeCapability {
+  runtimeType: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  displayName: string
+  description?: string
+  available: boolean
+  unavailableReason?: string
+  supportedModelTypes?: string[]
+  supportsStreaming: boolean
+  supportsTools: boolean
+  supportsHandoff: boolean
+  supportsGraph: boolean
+  supportsHumanInterrupt: boolean
+  supportsArtifacts: boolean
+  supportsCodeWorkspace: boolean
+  supportsCloudExecution: boolean
+  securityLevel?: string
+}
+
+export interface AgentRuntimeValidationResult {
+  valid: boolean
+  runtimeType?: string
+  modelInstanceId?: string
+  modelType?: string
+  provider?: string
+  message?: string
+  errorCode?: string
 }
 
 /** Agent 发布版本（对应后端 agent_version 表） */

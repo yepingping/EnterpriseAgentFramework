@@ -109,7 +109,7 @@
       <el-card shadow="never" class="section-card">
         <template #header>模型与执行</template>
         <el-row :gutter="24">
-          <el-col :span="6">
+          <el-col :span="8">
             <el-form-item label="模型厂商">
               <el-select v-model="selectedLlmProvider" filterable placeholder="请选择模型厂商" style="width: 100%" @change="handleLlmProviderChange">
                 <el-option
@@ -121,7 +121,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="8">
             <el-form-item label="模型实例" prop="modelInstanceId">
               <el-select
                 v-model="form.modelInstanceId"
@@ -140,20 +140,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="4">
-            <el-form-item label="最大步数">
-              <el-input-number v-model="form.maxSteps" :min="1" :max="20" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="4">
-            <el-form-item label="Agent 类型">
-              <el-radio-group v-model="form.type">
-                <el-radio value="single">单 Agent</el-radio>
-                <el-radio value="pipeline">Pipeline</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <el-col :span="4">
+          <el-col :span="8">
             <el-form-item label="触发方式">
               <el-select v-model="form.triggerMode" style="width: 100%">
                 <el-option
@@ -167,20 +154,35 @@
           </el-col>
         </el-row>
         <el-row :gutter="24">
-          <el-col :span="6">
+          <el-col :span="8">
+            <el-form-item label="运行时">
+              <el-select v-model="form.runtimeType" style="width: 100%" @change="handleRuntimeTypeChange">
+                <el-option
+                  v-for="runtime in runtimeOptions"
+                  :key="runtime.runtimeType"
+                  :label="runtime.displayName || runtime.runtimeType"
+                  :value="runtime.runtimeType"
+                  :disabled="!runtime.available"
+                >
+                  <div class="runtime-option">
+                    <span>{{ runtime.displayName || runtime.runtimeType }}</span>
+                    <el-tag v-if="runtime.available" size="small" type="success" effect="plain">可用</el-tag>
+                    <el-tooltip v-else :content="runtime.unavailableReason || '当前运行时不可用'" placement="top">
+                      <el-tag size="small" :type="runtimeUnavailableTagType(runtime)" effect="plain">
+                        {{ runtimeUnavailableLabel(runtime) }}
+                      </el-tag>
+                    </el-tooltip>
+                  </div>
+                </el-option>
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
             <el-form-item label="启用">
               <el-switch v-model="form.enabled" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
-            <el-form-item label="多 Agent 模型">
-              <el-switch v-model="form.useMultiAgentModel" />
-              <el-tooltip content="Pipeline 子 Agent 应开启此项，使用 MultiAgentFormatter 模型" placement="top">
-                <el-icon class="tip-icon"><QuestionFilled /></el-icon>
-              </el-tooltip>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
+          <el-col :span="8">
             <el-form-item label="输出 Schema">
               <el-input v-model="form.outputSchemaType" placeholder="如 ReviewResult，留空返回纯文本" />
             </el-form-item>
@@ -224,97 +226,160 @@
         </el-form-item>
       </el-card>
 
-      <!-- Tool 配置 -->
+      <!-- Runtime 专属配置 -->
       <el-card shadow="never" class="section-card">
-        <template #header>Tool 配置</template>
-        <el-form-item label="可用工具" label-width="100px">
-          <div class="tool-select-area">
-            <el-select
-              v-model="form.tools"
-              multiple
-              filterable
-              collapse-tags
-              collapse-tags-tooltip
-              style="width: 100%"
-              placeholder="选择已启用且对 Agent 可见的工具"
-            >
-              <el-option
-                v-for="tool in availableTools"
-                :key="tool.name"
-                :label="capabilityLabel(tool)"
-                :value="tool.name"
-              >
-                <div class="tool-option">
-                  <span>{{ tool.name }}</span>
-                  <span class="tool-option-desc">{{ tool.description }}</span>
-                </div>
-              </el-option>
-            </el-select>
-            <div class="tool-hint">仅展示已启用且设置为 Agent 可见的工具。</div>
+        <template #header>
+          <div class="runtime-config-header">
+            <span>Runtime 配置</span>
+            <el-tag size="small" type="info" effect="plain">{{ selectedRuntime?.displayName || form.runtimeType }}</el-tag>
           </div>
-        </el-form-item>
-      </el-card>
+        </template>
 
-      <!-- 能力配置（后端 Agent 字段仍为 skills） -->
-      <el-card shadow="never" class="section-card">
-        <template #header>能力配置</template>
-        <el-form-item label="可用能力" label-width="100px">
-          <div class="tool-select-area">
-            <el-select
-              v-model="form.skills"
-              multiple
-              filterable
-              collapse-tags
-              collapse-tags-tooltip
-              style="width: 100%"
-              placeholder="选择已启用且对 Agent 可见的粗粒度能力（运行时与 Tool 一并作为可调项）"
-            >
-              <el-option
-                v-for="sk in availableCapabilities"
-                :key="sk.name"
-                :label="capabilityLabel(sk)"
-                :value="sk.name"
+        <div v-if="form.runtimeType === 'AGENTSCOPE'" class="runtime-panel">
+          <el-row :gutter="24">
+            <el-col :span="8">
+              <el-form-item label="最大步数">
+                <el-input-number v-model="form.maxSteps" :min="1" :max="20" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="Agent 类型">
+                <el-radio-group v-model="form.type">
+                  <el-radio value="single">单 Agent</el-radio>
+                  <el-radio value="pipeline">Pipeline</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="多 Agent 模型">
+                <el-switch v-model="form.useMultiAgentModel" />
+                <el-tooltip content="Pipeline 子 Agent 应开启此项，使用 MultiAgentFormatter 模型" placement="top">
+                  <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-form-item label="可用工具" label-width="100px">
+            <div class="tool-select-area">
+              <el-select
+                v-model="form.tools"
+                multiple
+                filterable
+                collapse-tags
+                collapse-tags-tooltip
+                style="width: 100%"
+                placeholder="选择已启用且对 Agent 可见的工具"
               >
-                <div class="tool-option">
-                  <span>{{ sk.name }}</span>
-                  <span class="tool-option-desc">{{ sk.description }}</span>
-                </div>
-              </el-option>
-            </el-select>
-            <div class="tool-hint">
-              仅展示已启用、非草稿且对 Agent 可见的能力；保存后与「Tool 配置」一并注入模型可调用的列表。
+                <el-option
+                  v-for="tool in availableTools"
+                  :key="tool.name"
+                  :label="capabilityLabel(tool)"
+                  :value="tool.name"
+                >
+                  <div class="tool-option">
+                    <span>{{ tool.name }}</span>
+                    <span class="tool-option-desc">{{ tool.description }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="tool-hint">仅展示已启用且设置为 Agent 可见的工具。</div>
             </div>
-          </div>
-        </el-form-item>
-      </el-card>
+          </el-form-item>
 
-      <!-- Pipeline 配置 -->
-      <el-card v-if="form.type === 'pipeline'" shadow="never" class="section-card">
-        <template #header>Pipeline 配置</template>
-        <el-form-item label="子 Agent ID" label-width="120px">
-          <div class="tag-input-area">
-            <el-tag
-              v-for="(aid, idx) in form.pipelineAgentIds"
-              :key="idx"
-              closable
-              type="warning"
-              @close="form.pipelineAgentIds.splice(idx, 1)"
-              class="item-tag"
-            >{{ aid }}</el-tag>
-            <el-input
-              v-if="showPipelineInput"
-              v-model="newPipelineId"
-              size="small"
-              style="width: 200px"
-              @keyup.enter="addPipelineId"
-              @blur="addPipelineId"
-              placeholder="Agent ID"
-            />
-            <el-button v-else size="small" @click="showPipelineInput = true">
-              + 添加子 Agent
-            </el-button>
+          <el-form-item label="可用能力" label-width="100px">
+            <div class="tool-select-area">
+              <el-select
+                v-model="form.skills"
+                multiple
+                filterable
+                collapse-tags
+                collapse-tags-tooltip
+                style="width: 100%"
+                placeholder="选择已启用且对 Agent 可见的粗粒度能力"
+              >
+                <el-option
+                  v-for="sk in availableCapabilities"
+                  :key="sk.name"
+                  :label="capabilityLabel(sk)"
+                  :value="sk.name"
+                >
+                  <div class="tool-option">
+                    <span>{{ sk.name }}</span>
+                    <span class="tool-option-desc">{{ sk.description }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="tool-hint">保存后与 Tool 配置一并注入模型可调用的列表。</div>
+            </div>
+          </el-form-item>
+
+          <el-form-item v-if="form.type === 'pipeline'" label="子 Agent ID" label-width="120px">
+            <div class="tag-input-area">
+              <el-tag
+                v-for="(aid, idx) in form.pipelineAgentIds"
+                :key="idx"
+                closable
+                type="warning"
+                @close="form.pipelineAgentIds.splice(idx, 1)"
+                class="item-tag"
+              >{{ aid }}</el-tag>
+              <el-input
+                v-if="showPipelineInput"
+                v-model="newPipelineId"
+                size="small"
+                style="width: 200px"
+                @keyup.enter="addPipelineId"
+                @blur="addPipelineId"
+                placeholder="Agent ID"
+              />
+              <el-button v-else size="small" @click="showPipelineInput = true">
+                + 添加子 Agent
+              </el-button>
+            </div>
+          </el-form-item>
+        </div>
+
+        <div v-else-if="form.runtimeType === 'LANGGRAPH4J'" class="runtime-panel">
+          <el-alert
+            title="LangGraph4j 当前启用单节点 LLM 图执行"
+            type="success"
+            show-icon
+            :closable="false"
+            class="runtime-alert"
+          />
+          <div class="graph-preview">
+            <div class="graph-node">START</div>
+            <div class="graph-edge">→</div>
+            <div class="graph-node graph-node-primary">{{ langGraph4jNodeId }}</div>
+            <div class="graph-edge">→</div>
+            <div class="graph-node">END</div>
           </div>
-        </el-form-item>
+          <el-row :gutter="24">
+            <el-col :span="8">
+              <el-form-item label="LLM 节点 ID">
+                <el-input v-model="langGraph4jNodeId" placeholder="llm" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="图模式">
+                <el-input :model-value="langGraph4jGraphMode" disabled />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-descriptions :column="3" border size="small">
+            <el-descriptions-item label="图模式">单 Agent LLM 图</el-descriptions-item>
+            <el-descriptions-item label="Tool / 能力">暂不支持</el-descriptions-item>
+            <el-descriptions-item label="Pipeline">暂不支持</el-descriptions-item>
+          </el-descriptions>
+        </div>
+
+        <div v-else class="runtime-panel">
+          <el-empty
+            :description="`${selectedRuntime?.displayName || form.runtimeType} 配置面板尚未接入`"
+            :image-size="80"
+          />
+        </div>
       </el-card>
     </el-form>
   </div>
@@ -327,8 +392,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
 import { INTENT_TYPES, TRIGGER_MODES } from '@/types/agent'
-import type { AgentForm } from '@/types/agent'
-import { getAgent, createAgent, updateAgent } from '@/api/agent'
+import type { AgentForm, AgentRuntimeCapability } from '@/types/agent'
+import { getAgent, createAgent, updateAgent, getAgentRuntimes, validateAgentRuntime } from '@/api/agent'
 import { getTools } from '@/api/tool'
 import { listCapabilities } from '@/api/capability'
 import { getScanProjects } from '@/api/scanProject'
@@ -352,8 +417,16 @@ const toolOptions = ref<ToolInfo[]>([])
 const capabilityOptions = ref<CapabilityInfo[]>([])
 const scanProjects = ref<ScanProject[]>([])
 const llmModelInstances = ref<ModelInstance[]>([])
+const runtimeOptions = ref<AgentRuntimeCapability[]>([])
 const selectedLlmProvider = ref('')
 const previousProjectId = ref<number | null>(null)
+const previousRuntimeType = ref<AgentForm['runtimeType']>('AGENTSCOPE')
+
+type LangGraph4jRuntimeConfig = {
+  graphMode: 'single-llm'
+  nodes: Array<{ id: string; type: 'llm'; label: string }>
+  edges: Array<{ from: string; to: string }>
+}
 
 const form = reactive<AgentForm>({
   keySlug: '',
@@ -365,8 +438,12 @@ const form = reactive<AgentForm>({
   intentType: 'GENERAL_CHAT',
   systemPrompt: '',
   tools: [],
+  toolRefs: [],
   skills: [],
+  skillRefs: [],
   modelInstanceId: '',
+  runtimeType: 'AGENTSCOPE',
+  runtimeConfig: {},
   maxSteps: 5,
   enabled: true,
   type: 'single',
@@ -400,6 +477,23 @@ const llmProviderOptions = computed(() =>
 const filteredLlmModelInstances = computed(() =>
   llmModelInstances.value.filter((item) => item.provider === selectedLlmProvider.value),
 )
+const selectedRuntime = computed(() =>
+  runtimeOptions.value.find((item) => item.runtimeType === form.runtimeType),
+)
+const langGraph4jConfig = computed<LangGraph4jRuntimeConfig>(() => ensureLangGraph4jRuntimeConfig())
+const langGraph4jGraphMode = computed(() => langGraph4jConfig.value.graphMode)
+const langGraph4jNodeId = computed({
+  get: () => langGraph4jConfig.value.nodes[0]?.id || 'llm',
+  set: (value: string) => {
+    const nodeId = normalizeNodeId(value)
+    const config = ensureLangGraph4jRuntimeConfig()
+    config.nodes = [{ id: nodeId, type: 'llm', label: 'LLM' }]
+    config.edges = [
+      { from: 'START', to: nodeId },
+      { from: nodeId, to: 'END' },
+    ]
+  },
+})
 
 const showPipelineInput = ref(false)
 const newPipelineId = ref('')
@@ -429,6 +523,120 @@ function capabilityLabel(item: ToolInfo | CapabilityInfo) {
   const project = item.projectCode ? ` · ${item.projectCode}` : ''
   const visibility = item.visibility ? ` · ${item.visibility}` : ''
   return `${item.name}${project}${visibility}`
+}
+
+function runtimeUnavailableLabel(runtime: AgentRuntimeCapability) {
+  const reason = runtime.unavailableReason || ''
+  if (reason.includes('enabled-runtimes') || reason.includes('未启用')) return '未启用'
+  if (reason.includes('白名单') || reason.includes('未开启')) return '需授权'
+  if (reason.includes('未接入') || reason.includes('尚未接入')) return '未接入'
+  return '不可用'
+}
+
+function runtimeUnavailableTagType(runtime: AgentRuntimeCapability) {
+  return runtimeUnavailableLabel(runtime) === '未接入' ? 'info' : 'warning'
+}
+
+function defaultLangGraph4jRuntimeConfig(): LangGraph4jRuntimeConfig {
+  return {
+    graphMode: 'single-llm',
+    nodes: [{ id: 'llm', type: 'llm', label: 'LLM' }],
+    edges: [
+      { from: 'START', to: 'llm' },
+      { from: 'llm', to: 'END' },
+    ],
+  }
+}
+
+function normalizeNodeId(value: string) {
+  const normalized = value.trim().replace(/\s+/g, '-')
+  return normalized || 'llm'
+}
+
+function ensureLangGraph4jRuntimeConfig() {
+  const runtimeConfig = form.runtimeConfig || {}
+  const existing = runtimeConfig.langGraph4j as Partial<LangGraph4jRuntimeConfig> | undefined
+  const nodeId =
+    existing?.nodes?.[0]?.id && typeof existing.nodes[0].id === 'string'
+      ? normalizeNodeId(existing.nodes[0].id)
+      : 'llm'
+  const config: LangGraph4jRuntimeConfig = {
+    graphMode: 'single-llm',
+    nodes: [{ id: nodeId, type: 'llm', label: existing?.nodes?.[0]?.label || 'LLM' }],
+    edges: [
+      { from: 'START', to: nodeId },
+      { from: nodeId, to: 'END' },
+    ],
+  }
+  form.runtimeConfig = {
+    ...runtimeConfig,
+    langGraph4j: config,
+  }
+  return config
+}
+
+function syncRuntimeConfigForSave() {
+  if (form.runtimeType === 'AGENTSCOPE') {
+    form.runtimeConfig = {
+      ...(form.runtimeConfig || {}),
+      agentScope: {
+        maxSteps: form.maxSteps,
+        type: form.type,
+        useMultiAgentModel: form.useMultiAgentModel,
+        tools: form.tools,
+        toolRefs: form.toolRefs || [],
+        skills: form.skills,
+        skillRefs: form.skillRefs || [],
+        pipelineAgentIds: form.pipelineAgentIds,
+      },
+    }
+    return
+  }
+  if (form.runtimeType === 'LANGGRAPH4J') {
+    ensureLangGraph4jRuntimeConfig()
+    form.tools = []
+    form.toolRefs = []
+    form.skills = []
+    form.skillRefs = []
+    form.type = 'single'
+    form.pipelineAgentIds = []
+    form.useMultiAgentModel = false
+  }
+}
+
+async function handleRuntimeTypeChange(runtimeType: AgentForm['runtimeType']) {
+  const runtime = runtimeOptions.value.find((item) => item.runtimeType === runtimeType)
+  if (!runtime) return
+
+  const hasToolConfig =
+    form.tools.length > 0 ||
+    (form.toolRefs?.length || 0) > 0 ||
+    form.skills.length > 0 ||
+    (form.skillRefs?.length || 0) > 0
+  const hasPipelineConfig = form.type === 'pipeline' || form.pipelineAgentIds.length > 0
+  if (runtime.runtimeType === 'LANGGRAPH4J' && (hasToolConfig || hasPipelineConfig)) {
+    try {
+      await ElMessageBox.confirm(
+        'LangGraph4j 当前仅支持单 Agent LLM 执行，暂不支持 Tool、能力和 Pipeline。切换后将清空这些不兼容配置，是否继续？',
+        '切换运行时',
+        { type: 'warning' },
+      )
+      form.tools = []
+      form.toolRefs = []
+      form.skills = []
+      form.skillRefs = []
+      form.type = 'single'
+      form.pipelineAgentIds = []
+      form.useMultiAgentModel = false
+    } catch {
+      form.runtimeType = previousRuntimeType.value
+      return
+    }
+  }
+  previousRuntimeType.value = runtimeType
+  if (runtimeType === 'LANGGRAPH4J') {
+    ensureLangGraph4jRuntimeConfig()
+  }
 }
 
 function handleLlmProviderChange() {
@@ -497,8 +705,12 @@ async function loadAgent() {
       intentType: data.intentType || '',
       systemPrompt: data.systemPrompt || '',
       tools: data.tools || [],
+      toolRefs: data.toolRefs || [],
       skills: data.skills || [],
+      skillRefs: data.skillRefs || [],
       modelInstanceId: data.modelInstanceId || '',
+      runtimeType: data.runtimeType || 'AGENTSCOPE',
+      runtimeConfig: data.runtimeConfig || {},
       maxSteps: data.maxSteps || 5,
       enabled: data.enabled ?? true,
       type: data.type || 'single',
@@ -512,6 +724,7 @@ async function loadAgent() {
       allowIrreversible: data.allowIrreversible ?? false,
     })
     previousProjectId.value = form.projectId ?? null
+    previousRuntimeType.value = form.runtimeType
   } catch {
     ElMessage.error('加载 Agent 失败')
   } finally {
@@ -566,12 +779,62 @@ async function loadModelInstances() {
   }
 }
 
+async function loadRuntimeOptions() {
+  try {
+    const { data } = await getAgentRuntimes()
+    runtimeOptions.value = Array.isArray(data) ? data : []
+    if (!form.runtimeType || !runtimeOptions.value.some((item) => item.runtimeType === form.runtimeType)) {
+      form.runtimeType = runtimeOptions.value.find((item) => item.available)?.runtimeType || 'AGENTSCOPE'
+    }
+  } catch {
+    runtimeOptions.value = [
+      {
+        runtimeType: 'AGENTSCOPE',
+        displayName: 'AgentScope',
+        available: true,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsHandoff: false,
+        supportsGraph: false,
+        supportsHumanInterrupt: true,
+        supportsArtifacts: false,
+        supportsCodeWorkspace: false,
+        supportsCloudExecution: false,
+      },
+    ]
+  }
+}
+
+async function validateRuntimeBeforeSave() {
+  try {
+    syncRuntimeConfigForSave()
+    const { data } = await validateAgentRuntime(form)
+    if (!data.valid) {
+      ElMessage.error(data.message || '运行时与模型实例校验失败')
+      return false
+    }
+    return true
+  } catch (error) {
+    ElMessage.error(resolveRuntimeValidationError(error))
+    return false
+  }
+}
+
+function resolveRuntimeValidationError(error: unknown) {
+  const response = (error as { response?: { data?: { message?: string; error?: string } } })?.response
+  return response?.data?.message || response?.data?.error || '运行时校验请求失败'
+}
+
 async function handleSave() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
   saving.value = true
   try {
+    syncRuntimeConfigForSave()
+    const runtimeValid = await validateRuntimeBeforeSave()
+    if (!runtimeValid) return
+
     if (isNew) {
       await createAgent(form)
       ElMessage.success('创建成功')
@@ -594,7 +857,7 @@ onMounted(async () => {
   if (!previousProjectId.value) {
     previousProjectId.value = form.projectId ?? null
   }
-  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadModelInstances()])
+  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadModelInstances(), loadRuntimeOptions()])
 })
 </script>
 
@@ -619,6 +882,62 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.runtime-config-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-panel {
+  width: 100%;
+}
+
+.runtime-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.runtime-alert {
+  margin-bottom: 16px;
+}
+
+.graph-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.graph-node {
+  min-width: 88px;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  text-align: center;
+  font-weight: 600;
+}
+
+.graph-node-primary {
+  border-color: #818cf8;
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.graph-edge {
+  color: #64748b;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .prompt-editor {

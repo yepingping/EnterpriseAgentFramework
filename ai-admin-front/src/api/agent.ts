@@ -3,6 +3,8 @@ import type {
   AgentDefinition,
   AgentForm,
   AgentResult,
+  AgentRuntimeCapability,
+  AgentRuntimeValidationResult,
   AgentVersion,
   PublishVersionRequest,
 } from '@/types/agent'
@@ -26,6 +28,14 @@ export function updateAgent(id: string, data: Partial<AgentForm>) {
 
 export function deleteAgent(id: string) {
   return agentRequest.delete(`/api/agent/definitions/${id}`)
+}
+
+export function getAgentRuntimes() {
+  return agentRequest.get<AgentRuntimeCapability[]>('/api/agent/definitions/runtimes')
+}
+
+export function validateAgentRuntime(data: Partial<AgentForm>) {
+  return agentRequest.post<AgentRuntimeValidationResult>('/api/agent/definitions/runtime-validation', data)
 }
 
 export function executeAgent(data: ChatRequest) {

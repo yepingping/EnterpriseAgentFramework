@@ -101,6 +101,13 @@ milvus:
 
 # ==================== Tool Retrieval & Call Log ====================
 ai:
+  agent-runtime:
+    default-runtime-type: ${AGENT_RUNTIME_DEFAULT:AGENTSCOPE}
+    enabled-runtimes: ${AGENT_RUNTIME_ENABLED:AGENTSCOPE,LANGGRAPH4J}
+    allow-cloud-execution: ${AGENT_RUNTIME_ALLOW_CLOUD:false}
+    cloud-allowed-project-codes: ${AGENT_RUNTIME_CLOUD_PROJECTS:}
+    allow-code-workspace: ${AGENT_RUNTIME_ALLOW_CODE_WORKSPACE:false}
+    code-workspace-allowed-project-codes: ${AGENT_RUNTIME_CODE_PROJECTS:}
   tool-retrieval:
     enabled: ${TOOL_RETRIEVAL_ENABLED:true}
     top-k: 15

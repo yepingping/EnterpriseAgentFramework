@@ -119,6 +119,7 @@
               <el-tag size="small" :type="triggerTagType(agent.triggerMode)" effect="plain">
                 {{ triggerLabel(agent.triggerMode) }}
               </el-tag>
+              <el-tag size="small" type="success" effect="plain">{{ agent.runtimeType || 'AGENTSCOPE' }}</el-tag>
               <el-tag size="small" effect="plain">{{ agent.visibility || 'PRIVATE' }}</el-tag>
             </div>
 
@@ -208,6 +209,11 @@
             </template>
           </el-table-column>
           <el-table-column prop="modelInstanceId" label="模型实例" width="160" show-overflow-tooltip />
+          <el-table-column label="运行时" width="130">
+            <template #default="{ row }">
+              <el-tag size="small" type="success" effect="plain">{{ row.runtimeType || 'AGENTSCOPE' }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="项目" min-width="150" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.projectCode || projectCodeById(row.projectId) || '-' }}

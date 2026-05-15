@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
     `system_prompt`           TEXT         DEFAULT NULL                 COMMENT 'Agent 的 System Prompt',
     `tools_json`              TEXT         DEFAULT NULL                 COMMENT 'tools 白名单 JSON（List<String>）',
     `model_instance_id`       VARCHAR(64)  DEFAULT NULL,
+    `runtime_type`            VARCHAR(32)  NOT NULL DEFAULT 'AGENTSCOPE' COMMENT 'Agent Runtime 类型',
+    `runtime_config_json`     MEDIUMTEXT   DEFAULT NULL                 COMMENT 'Runtime 专属配置 JSON',
     `max_steps`               INT          NOT NULL DEFAULT 5,
     `type`                    VARCHAR(32)  NOT NULL DEFAULT 'single'    COMMENT 'single / pipeline',
     `pipeline_agent_ids_json` TEXT         DEFAULT NULL                 COMMENT 'Pipeline 子 Agent ID JSON 数组',
@@ -93,9 +95,12 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
 CALL add_col_if_absent('agent_definition', 'key_slug',           'VARCHAR(64) NOT NULL DEFAULT '''' COMMENT ''人类可读 slug'' AFTER `id`');
 CALL add_col_if_absent('agent_definition', 'canvas_json',        'MEDIUMTEXT DEFAULT NULL COMMENT ''Agent Studio 画布 JSON''');
 CALL add_col_if_absent('agent_definition', 'allow_irreversible', 'TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''允许调用 IRREVERSIBLE 副作用 Tool''');
+CALL add_col_if_absent('agent_definition', 'runtime_type',       'VARCHAR(32) NOT NULL DEFAULT ''AGENTSCOPE'' COMMENT ''Agent Runtime 类型'' AFTER `model_instance_id`');
+CALL add_col_if_absent('agent_definition', 'runtime_config_json','MEDIUMTEXT DEFAULT NULL COMMENT ''Runtime 专属配置 JSON'' AFTER `runtime_type`');
 CALL add_idx_if_absent('agent_definition', 'uk_agent_key_slug',  'key_slug');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_intent',   'intent_type');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_enabled',  'enabled');
+CALL add_idx_if_absent('agent_definition', 'idx_agent_runtime',  'runtime_type, enabled');
 
 
 -- ============================================================================

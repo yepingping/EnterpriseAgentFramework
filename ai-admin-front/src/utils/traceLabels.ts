@@ -5,6 +5,7 @@ export function traceNodeTitle(toolName: string): string {
     const n = toolName.split('#')[1] ?? '?'
     return `大模型调用（ReAct 第 ${n} 轮）`
   }
+  if (toolName === 'runtime.agent.run') return 'Agent Runtime 执行摘要'
   if (toolName === '_trace:agentscope.run') return 'AgentScope 执行摘要'
   if (toolName === '_trace:embedding.encode') return '向量化（Tool 召回用）'
   if (toolName === '_trace:milvus.tool_search') return 'Milvus 向量检索（Tool 候选）'
@@ -14,5 +15,5 @@ export function traceNodeTitle(toolName: string): string {
 }
 
 export function isInternalTraceSpan(toolName: string): boolean {
-  return !!toolName && toolName.startsWith('_trace:')
+  return !!toolName && (toolName.startsWith('_trace:') || toolName.startsWith('runtime.'))
 }

@@ -136,6 +136,7 @@ function argLabel(node: TraceNode): string {
   if (node.toolName === '_trace:embedding.encode') return '向量化请求摘要（query、provider、model）：'
   if (node.toolName.startsWith('_trace:llm.stream#')) return '大模型请求（消息历史摘要、可用 tools、generateOptions）：'
   if (node.toolName === '_trace:milvus.tool_search') return 'Milvus 检索条件：'
+  if (node.toolName === 'runtime.agent.run') return '本次 Runtime 调用输入：'
   if (node.toolName === '_trace:agentscope.run') return '本次 AgentScope 调用输入：'
   return '入参（args）：'
 }
@@ -144,6 +145,7 @@ function resultLabel(node: TraceNode): string {
   if (node.toolName === '_trace:embedding.encode') return '向量化结果（维度、向量预览）：'
   if (node.toolName.startsWith('_trace:llm.stream#')) return '大模型输出（合并流式片段：assistant 文本、toolCalls、finishReason）：'
   if (node.toolName === '_trace:milvus.tool_search') return 'Milvus 命中结果：'
+  if (node.toolName === 'runtime.agent.run') return '最终输出与 Runtime 元数据：'
   if (node.toolName === '_trace:agentscope.run') return '最终输出与元数据：'
   return '出参（result）：'
 }

@@ -8,6 +8,8 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -31,6 +33,9 @@ public interface ModelServiceClient {
 
     @PostMapping("/embedding")
     ModelEmbeddingResult embed(@RequestBody ModelEmbeddingRequest request);
+
+    @GetMapping("/instances/{id}")
+    ModelInstanceResult getModelInstance(@PathVariable("id") String id);
 
     // ==================== Request / Response DTOs ====================
 
@@ -127,5 +132,32 @@ public interface ModelServiceClient {
         private int dimension;
         private String model;
         private String provider;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    class ModelInstanceResult {
+        private int code;
+        private String message;
+        private ModelInstanceData data;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    class ModelInstanceData {
+        private String id;
+        private String name;
+        private String provider;
+        private String modelType;
+        private String modelName;
+        private String endpointType;
+        private String workspaceId;
+        private Map<String, Object> defaultOptions;
+        private Object paramsSchema;
+        private String status;
+        private String remark;
     }
 }
