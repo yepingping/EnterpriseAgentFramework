@@ -1,6 +1,11 @@
 package com.enterprise.ai.agent.controller;
 
 import com.enterprise.ai.agent.agent.AgentVersionService;
+import com.enterprise.ai.agent.agent.AgentDefinitionService;
+import com.enterprise.ai.agent.agent.AgentReleaseEventService;
+import com.enterprise.ai.agent.agent.AgentReleaseValidationResult;
+import com.enterprise.ai.agent.agent.AgentReleaseValidationService;
+import com.enterprise.ai.agent.agent.persist.AgentReleaseEventEntity;
 import com.enterprise.ai.agent.agent.persist.AgentVersionEntity;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -27,10 +32,38 @@ import java.util.List;
 public class AgentVersionController {
 
     private final AgentVersionService versionService;
+    private final AgentDefinitionService definitionService;
+    private final AgentReleaseValidationService releaseValidationService;
+    private final AgentReleaseEventService releaseEventService;
 
     @GetMapping
     public ResponseEntity<List<AgentVersionEntity>> list(@PathVariable String agentId) {
         return ResponseEntity.ok(versionService.listVersions(agentId));
+    }
+
+    @GetMapping("/events")
+    public ResponseEntity<List<AgentReleaseEventEntity>> events(@PathVariable String agentId,
+                                                               @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(releaseEventService.listByAgent(agentId, limit));
+    }
+
+    @PostMapping("/validate")
+    public ResponseEntity<AgentReleaseValidationResult> validate(@PathVariable String agentId,
+                                                                @RequestBody(required = false) ValidateRequest request) {
+        return definitionService.findById(agentId)
+                .map(releaseValidationService::validate)
+                .map(result -> {
+                    String operator = request == null ? null : request.getOperator();
+                    String version = request == null ? null : request.getVersion();
+                    Integer rollout = request == null ? null : request.getRolloutPercent();
+                    releaseEventService.record(agentId, null, version, "VALIDATE",
+                            result.valid() ? "PASSED" : "BLOCKED", rollout, operator,
+                            result.valid() ? "发布前校验通过" : "发布前校验未通过", result,
+                            versionService.describeReleaseTarget(agentId, null));
+                    return result;
+                })
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
@@ -57,6 +90,13 @@ public class AgentVersionController {
         private Integer rolloutPercent;
         private String note;
         private String publishedBy;
+    }
+
+    @Data
+    public static class ValidateRequest {
+        private String version;
+        private Integer rolloutPercent;
+        private String operator;
     }
 
     @Data

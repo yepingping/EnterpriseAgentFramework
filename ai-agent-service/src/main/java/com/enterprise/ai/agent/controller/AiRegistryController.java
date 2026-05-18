@@ -8,9 +8,12 @@ import com.enterprise.ai.agent.registry.RegistryContracts.CapabilityReviewReques
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySnapshotDTO;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySyncRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySyncResponse;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphSyncRequest;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphSyncResponse;
 import com.enterprise.ai.agent.registry.RegistryContracts.InstanceHeartbeatRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.ProjectRegisterRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.RegistryProjectResponse;
+import com.enterprise.ai.agent.registry.RegistryContracts.RuntimeGovernancePolicyUpdateRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.SdkCapabilityDescriptionSettings;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -120,6 +123,23 @@ public class AiRegistryController {
         }
     }
 
+    @PostMapping("/projects/{projectCode}/agent-graphs/sync")
+    public ResponseEntity<?> syncAgentGraphs(@PathVariable String projectCode,
+                                             @RequestBody AgentGraphSyncRequest request,
+                                             @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
+                                             @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
+                                             @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
+                                             @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+        try {
+            securityService.verifyIfConfigured(projectCode,
+                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            AgentGraphSyncResponse response = registryService.syncAgentGraphs(projectCode, request);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
     @PostMapping("/projects/{projectCode}/capabilities/diff")
     public ResponseEntity<?> diffCapabilities(@PathVariable String projectCode,
                                               @RequestBody CapabilitySyncRequest request,
@@ -187,6 +207,34 @@ public class AiRegistryController {
     }
 
     record InstanceOfflineRequest(String instanceId) {
+    }
+
+    @PostMapping("/projects/{projectCode}/instances/status")
+    public ResponseEntity<?> updateInstanceStatus(@PathVariable String projectCode,
+                                                  @RequestBody InstanceStatusRequest request) {
+        try {
+            ProjectInstanceEntity entity = registryService.updateInstanceStatus(
+                    projectCode,
+                    request == null ? null : request.instanceId(),
+                    request == null ? null : request.status());
+            return ResponseEntity.ok(entity);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    record InstanceStatusRequest(String instanceId, String status) {
+    }
+
+    @PostMapping("/projects/{projectCode}/instances/governance-policy")
+    public ResponseEntity<?> updateInstanceGovernancePolicy(@PathVariable String projectCode,
+                                                            @RequestBody RuntimeGovernancePolicyUpdateRequest request) {
+        try {
+            ProjectInstanceEntity entity = registryService.updateInstanceGovernancePolicy(projectCode, request);
+            return ResponseEntity.ok(entity);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
     }
 
     record ApiErrorResponse(String message) {

@@ -2,7 +2,10 @@ package com.enterprise.ai.agent.runtime;
 
 import com.enterprise.ai.agent.agent.AgentDefinition;
 import com.enterprise.ai.agent.client.ModelServiceClient;
+import com.enterprise.ai.agent.graph.AgentGraphSpec;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;
+import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
+import com.enterprise.ai.agent.trace.AgentTraceSpanService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -21,7 +24,7 @@ class LangGraph4jRuntimeAdapterTest {
     @Test
     void executesSingleAgentThroughLangGraph4j() {
         ToolCallLogService logService = mock(ToolCallLogService.class);
-        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(successModelClient(), logService);
+        LangGraph4jRuntimeAdapter adapter = adapter(logService);
 
         AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
                 .traceId("trace-lg")
@@ -36,6 +39,7 @@ class LangGraph4jRuntimeAdapterTest {
                         .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
                         .modelInstanceId("llm-1")
                         .systemPrompt("You are helpful.")
+                        .graphSpec(singleLlmGraph("llm"))
                         .build())
                 .build());
 
@@ -45,7 +49,7 @@ class LangGraph4jRuntimeAdapterTest {
         assertEquals("LangGraph Agent", result.getAgentName());
         assertEquals("qwen-plus", result.getMetadata().get("model"));
         assertEquals("tongyi", result.getMetadata().get("provider"));
-        assertEquals(3, result.getSteps().size());
+        assertEquals(2, result.getSteps().size());
         assertEquals(7, result.getTokenUsage().get("totalTokens"));
 
         verify(logService).record(any(), eq("runtime.langgraph4j.node.llm"),
@@ -56,9 +60,9 @@ class LangGraph4jRuntimeAdapterTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void executesConfiguredLlmNodeFromRuntimeConfig() {
+    void executesConfiguredLlmNodeFromGraphSpec() {
         ToolCallLogService logService = mock(ToolCallLogService.class);
-        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(successModelClient(), logService);
+        LangGraph4jRuntimeAdapter adapter = adapter(logService);
 
         AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
                 .traceId("trace-lg")
@@ -71,44 +75,44 @@ class LangGraph4jRuntimeAdapterTest {
                         .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
                         .modelInstanceId("llm-1")
                         .systemPrompt("You are helpful.")
-                        .runtimeConfig(Map.of("langGraph4j", Map.of(
-                                "graphMode", "single-llm",
-                                "nodes", List.of(Map.of("id", "planner", "type", "llm", "label", "Planner")),
-                                "edges", List.of(
-                                        Map.of("from", "START", "to", "planner"),
-                                        Map.of("from", "planner", "to", "END")))))
+                        .graphSpec(singleLlmGraph("planner"))
                         .build())
                 .build());
 
         assertTrue(result.isSuccess());
         assertTrue(((List<String>) result.getMetadata().get("graphNodes")).contains("planner"));
-        assertTrue(result.getSteps().contains("LangGraph4j 节点: planner"));
+        assertTrue(result.getSteps().contains("Graph node: planner (LLM)"));
         verify(logService).record(any(), eq("runtime.langgraph4j.node.planner"),
                 any(), any(), eq(true), eq(null), any(Long.class), eq(7));
     }
 
     @Test
     void onlySupportsSingleAgentWithoutToolsForMinimumRuntime() {
-        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(successModelClient(), null);
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
 
         assertTrue(adapter.supports(request(AgentDefinition.builder()
                 .type("single")
                 .modelInstanceId("llm-1")
+                .graphSpec(singleLlmGraph("llm"))
                 .build())));
         assertFalse(adapter.supports(request(AgentDefinition.builder()
                 .type("pipeline")
                 .modelInstanceId("llm-1")
+                .graphSpec(singleLlmGraph("llm"))
                 .build())));
-        assertFalse(adapter.supports(request(AgentDefinition.builder()
+        assertTrue(adapter.supports(request(AgentDefinition.builder()
                 .type("single")
                 .modelInstanceId("llm-1")
                 .tools(List.of("query_team"))
+                .graphSpec(singleLlmGraph("llm"))
                 .build())));
         assertFalse(adapter.supports(request(AgentDefinition.builder()
                 .type("single")
                 .modelInstanceId("llm-1")
-                .runtimeConfig(Map.of("langGraph4j", Map.of(
-                        "nodes", List.of(Map.of("id", "not-llm", "type", "tool")))))
+                .graphSpec(AgentGraphSpec.builder()
+                        .entry("not-llm")
+                        .node(AgentGraphSpec.Node.builder().id("not-llm").type("TOOL").build())
+                        .build())
                 .build())));
     }
 
@@ -117,6 +121,32 @@ class LangGraph4jRuntimeAdapterTest {
                 .traceId("trace")
                 .message("hello")
                 .agentDefinition(definition)
+                .build();
+    }
+
+    private LangGraph4jRuntimeAdapter adapter(ToolCallLogService logService) {
+        return new LangGraph4jRuntimeAdapter(
+                successModelClient(),
+                mock(ToolDefinitionService.class),
+                logService,
+                mock(AgentTraceSpanService.class));
+    }
+
+    private AgentGraphSpec singleLlmGraph(String nodeId) {
+        return AgentGraphSpec.builder()
+                .code("test_graph")
+                .name("Test Graph")
+                .runtimeHint(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                .entry(nodeId)
+                .finishNode(nodeId)
+                .node(AgentGraphSpec.Node.builder()
+                        .id(nodeId)
+                        .type("LLM")
+                        .name(nodeId)
+                        .config(Map.of("modelInstanceId", "llm-1"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to(nodeId).condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from(nodeId).to("END").condition("always").build())
                 .build();
     }
 

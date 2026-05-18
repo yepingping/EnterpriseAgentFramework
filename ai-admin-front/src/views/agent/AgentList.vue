@@ -24,8 +24,8 @@
           <strong>{{ projectAgentCount }}</strong>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Pipeline</span>
-          <strong>{{ pipelineCount }}</strong>
+          <span class="stat-label">SDK 同步</span>
+          <strong>{{ sdkAgentCount }}</strong>
         </div>
       </div>
 
@@ -121,6 +121,12 @@
               </el-tag>
               <el-tag size="small" type="success" effect="plain">{{ agent.runtimeType || 'AGENTSCOPE' }}</el-tag>
               <el-tag size="small" effect="plain">{{ agent.visibility || 'PRIVATE' }}</el-tag>
+              <el-tag v-if="isSdkManaged(agent)" size="small" type="warning" effect="plain">SDK 同步</el-tag>
+              <el-tooltip v-if="isSdkManaged(agent)" :content="sdkPublishState(agent).hint" placement="top">
+                <el-tag size="small" :type="sdkPublishState(agent).type" effect="dark">
+                  {{ sdkPublishState(agent).label }}
+                </el-tag>
+              </el-tooltip>
             </div>
 
             <div class="agent-meta-grid">
@@ -139,6 +145,14 @@
               <div>
                 <span>知识库组</span>
                 <strong>{{ agent.knowledgeBaseGroupId || '-' }}</strong>
+              </div>
+              <div v-if="isSdkManaged(agent)">
+                <span>最近同步</span>
+                <strong>{{ formatDateTime(sdkLastSyncedAt(agent)) }}</strong>
+              </div>
+              <div v-if="isSdkManaged(agent)">
+                <span>发布版本</span>
+                <strong>{{ latestPublishedVersion(agent)?.version || '-' }}</strong>
               </div>
             </div>
 
@@ -257,6 +271,17 @@
             </template>
           </el-table-column>
           <el-table-column prop="updatedAt" label="更新时间" width="180" />
+          <el-table-column label="发布状态" width="180">
+            <template #default="{ row }">
+              <div v-if="isSdkManaged(row)" class="publish-state-cell">
+                <el-tag size="small" :type="sdkPublishState(row).type" effect="dark">
+                  {{ sdkPublishState(row).label }}
+                </el-tag>
+                <small>{{ sdkPublishState(row).shortHint }}</small>
+              </div>
+              <span v-else class="meta-empty">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="300" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click.stop="handleEdit(row.id)">编辑</el-button>
@@ -310,9 +335,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Cpu, Plus, Search } from '@element-plus/icons-vue'
-import type { AgentDefinition } from '@/types/agent'
+import type { AgentDefinition, AgentVersion } from '@/types/agent'
 import { INTENT_TYPES, TRIGGER_MODES } from '@/types/agent'
-import { deleteAgent, getAgentList, updateAgent } from '@/api/agent'
+import { deleteAgent, getAgentList, listAgentVersions, updateAgent } from '@/api/agent'
 import { getScanProjects } from '@/api/scanProject'
 import { getRecentTraces } from '@/api/trace'
 import type { TraceSummary } from '@/types/trace'
@@ -324,6 +349,7 @@ const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
 const agents = ref<AgentDefinition[]>([])
+const agentVersions = ref<Record<string, AgentVersion[]>>({})
 const scanProjects = ref<ScanProject[]>([])
 const loading = ref(false)
 const filterIntent = ref<string>('')
@@ -348,7 +374,7 @@ const allIntentTypes = computed(() => {
 
 const enabledCount = computed(() => agents.value.filter((agent) => agent.enabled).length)
 const projectAgentCount = computed(() => agents.value.filter((agent) => agent.projectId || agent.projectCode).length)
-const pipelineCount = computed(() => agents.value.filter((agent) => agent.type === 'pipeline').length)
+const sdkAgentCount = computed(() => agents.value.filter((agent) => isSdkManaged(agent)).length)
 
 const filteredAgents = computed(() => {
   return agents.value.filter((a) => {
@@ -379,6 +405,87 @@ function triggerTagType(mode: string): '' | 'success' | 'warning' | 'info' | 'da
 
 function capabilityNames(agent: AgentDefinition) {
   return [...(agent.tools || []), ...(agent.skills || [])]
+}
+
+function sdkGraphMeta(agent: AgentDefinition): Record<string, unknown> {
+  const raw = agent.extra?.sdkGraph
+  return raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+}
+
+function isSdkManaged(agent: AgentDefinition) {
+  const meta = sdkGraphMeta(agent)
+  return meta.managedBy === 'SDK' || meta.source === 'SDK'
+}
+
+function sdkLastSyncedAt(agent: AgentDefinition) {
+  const value = sdkGraphMeta(agent).lastSyncedAt
+  return typeof value === 'string' ? value : ''
+}
+
+function latestPublishedVersion(agent: AgentDefinition) {
+  const versions = agentVersions.value[agent.id] || []
+  return [...versions]
+    .filter((version) => version.status === 'ACTIVE' || version.status === 'RETIRED')
+    .sort((a, b) => dateMs(b.publishedAt || b.createTime) - dateMs(a.publishedAt || a.createTime))[0] || null
+}
+
+function sdkPublishState(agent: AgentDefinition) {
+  const latest = latestPublishedVersion(agent)
+  const syncAt = sdkLastSyncedAt(agent)
+  if (!latest) {
+    return {
+      type: 'danger' as const,
+      label: '未发布',
+      shortHint: '需要发布',
+      hint: `SDK 草稿已同步${syncAt ? `于 ${syncAt}` : ''}，还没有发布版本。`,
+    }
+  }
+  const currentHash = String(sdkGraphMeta(agent).sourceHash || '')
+  const publishedHash = sdkSourceHashFromVersion(latest)
+  const hashDiffers = currentHash && publishedHash && currentHash !== publishedHash
+  const timeDiffers = !currentHash || !publishedHash
+    ? dateMs(syncAt) > dateMs(latest.publishedAt || latest.createTime) + 1000
+    : false
+  if (hashDiffers || timeDiffers) {
+    return {
+      type: 'warning' as const,
+      label: '草稿待发布',
+      shortHint: latest.version,
+      hint: `SDK 草稿晚于最新发布版本 ${latest.version}，需要重新发布后生产入口才会生效。`,
+    }
+  }
+  return {
+    type: 'success' as const,
+    label: '已发布同步',
+    shortHint: latest.version,
+    hint: `最新发布版本 ${latest.version} 已包含当前 SDK 图。`,
+  }
+}
+
+function sdkSourceHashFromVersion(version: AgentVersion) {
+  const snapshot = parseVersionSnapshot(version)
+  const value = snapshot?.extra?.sdkGraph
+  if (!value || typeof value !== 'object') return ''
+  return String((value as Record<string, unknown>).sourceHash || '')
+}
+
+function parseVersionSnapshot(version: AgentVersion): AgentDefinition | null {
+  if (!version.snapshotJson) return null
+  try {
+    return JSON.parse(version.snapshotJson) as AgentDefinition
+  } catch {
+    return null
+  }
+}
+
+function dateMs(value?: string | null) {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function formatDateTime(value?: string | null) {
+  return value || '-'
 }
 
 function projectOptionLabel(project?: ScanProject | null) {
@@ -419,12 +526,32 @@ async function fetchData() {
     const { data } = await getAgentList(
       filterProjectId.value !== undefined ? { projectId: filterProjectId.value } : undefined,
     )
-    agents.value = Array.isArray(data) ? data : []
+    const list = Array.isArray(data) ? data : []
+    agents.value = list
+    await loadAgentVersions(list)
   } catch {
     agents.value = []
+    agentVersions.value = {}
   } finally {
     loading.value = false
   }
+}
+
+async function loadAgentVersions(list: AgentDefinition[]) {
+  const sdkAgents = list.filter((agent) => isSdkManaged(agent))
+  if (!sdkAgents.length) {
+    agentVersions.value = {}
+    return
+  }
+  const pairs = await Promise.all(sdkAgents.map(async (agent) => {
+    try {
+      const { data } = await listAgentVersions(agent.id)
+      return [agent.id, Array.isArray(data) ? data : []] as const
+    } catch {
+      return [agent.id, []] as const
+    }
+  }))
+  agentVersions.value = Object.fromEntries(pairs)
 }
 
 async function fetchRecentTraces() {
@@ -832,6 +959,22 @@ watch(activeView, (view) => {
 .meta-empty {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.publish-state-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+
+  small {
+    max-width: 140px;
+    color: var(--text-muted);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .success-rate {

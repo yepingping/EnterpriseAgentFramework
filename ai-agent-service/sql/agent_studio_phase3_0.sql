@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
     `tools_json`              TEXT         DEFAULT NULL                 COMMENT 'tools 白名单 JSON（List<String>）',
     `model_instance_id`       VARCHAR(64)  DEFAULT NULL,
     `runtime_type`            VARCHAR(32)  NOT NULL DEFAULT 'AGENTSCOPE' COMMENT 'Agent Runtime 类型',
+    `runtime_placement`       VARCHAR(24)  NOT NULL DEFAULT 'CENTRAL' COMMENT '运行位置: CENTRAL / EMBEDDED / HYBRID',
     `runtime_config_json`     MEDIUMTEXT   DEFAULT NULL                 COMMENT 'Runtime 专属配置 JSON',
+    `graph_spec_json`         MEDIUMTEXT   DEFAULT NULL                 COMMENT 'Platform GraphSpec JSON',
     `max_steps`               INT          NOT NULL DEFAULT 5,
     `type`                    VARCHAR(32)  NOT NULL DEFAULT 'single'    COMMENT 'single / pipeline',
     `pipeline_agent_ids_json` TEXT         DEFAULT NULL                 COMMENT 'Pipeline 子 Agent ID JSON 数组',
@@ -96,11 +98,14 @@ CALL add_col_if_absent('agent_definition', 'key_slug',           'VARCHAR(64) NO
 CALL add_col_if_absent('agent_definition', 'canvas_json',        'MEDIUMTEXT DEFAULT NULL COMMENT ''Agent Studio 画布 JSON''');
 CALL add_col_if_absent('agent_definition', 'allow_irreversible', 'TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''允许调用 IRREVERSIBLE 副作用 Tool''');
 CALL add_col_if_absent('agent_definition', 'runtime_type',       'VARCHAR(32) NOT NULL DEFAULT ''AGENTSCOPE'' COMMENT ''Agent Runtime 类型'' AFTER `model_instance_id`');
-CALL add_col_if_absent('agent_definition', 'runtime_config_json','MEDIUMTEXT DEFAULT NULL COMMENT ''Runtime 专属配置 JSON'' AFTER `runtime_type`');
+CALL add_col_if_absent('agent_definition', 'runtime_placement',  'VARCHAR(24) NOT NULL DEFAULT ''CENTRAL'' COMMENT ''运行位置: CENTRAL / EMBEDDED / HYBRID'' AFTER `runtime_type`');
+CALL add_col_if_absent('agent_definition', 'runtime_config_json','MEDIUMTEXT DEFAULT NULL COMMENT ''Runtime 专属配置 JSON'' AFTER `runtime_placement`');
+CALL add_col_if_absent('agent_definition', 'graph_spec_json',    'MEDIUMTEXT DEFAULT NULL COMMENT ''Platform GraphSpec JSON'' AFTER `runtime_config_json`');
 CALL add_idx_if_absent('agent_definition', 'uk_agent_key_slug',  'key_slug');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_intent',   'intent_type');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_enabled',  'enabled');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_runtime',  'runtime_type, enabled');
+CALL add_idx_if_absent('agent_definition', 'idx_agent_runtime_placement',  'runtime_placement, enabled');
 
 
 -- ============================================================================
@@ -121,6 +126,29 @@ CREATE TABLE IF NOT EXISTS `agent_version` (
     UNIQUE KEY `uk_agent_version` (`agent_id`, `version`),
     KEY `idx_agent_status` (`agent_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 发布版本快照（Phase 3.0）';
+
+
+-- ============================================================================
+-- 三、agent_release_event：发布治理审计事件
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `agent_release_event` (
+    `id`               BIGINT        NOT NULL AUTO_INCREMENT,
+    `agent_id`         VARCHAR(32)   NOT NULL                      COMMENT '关联 agent_definition.id',
+    `version_id`       BIGINT        DEFAULT NULL                  COMMENT '关联 agent_version.id',
+    `version`          VARCHAR(32)   DEFAULT NULL                  COMMENT '发布/回滚涉及的版本号',
+    `action`           VARCHAR(24)   NOT NULL                      COMMENT 'VALIDATE / PUBLISH / ROLLBACK',
+    `decision`         VARCHAR(24)   NOT NULL                      COMMENT 'PASSED / BLOCKED / COMPLETED',
+    `rollout_percent`  INT           DEFAULT NULL                  COMMENT '灰度百分比',
+    `operator`         VARCHAR(64)   DEFAULT NULL                  COMMENT '操作者',
+    `summary`          VARCHAR(512)  DEFAULT NULL,
+    `validation_json`  MEDIUMTEXT    DEFAULT NULL                  COMMENT '发布前校验报告',
+    `metadata_json`    TEXT          DEFAULT NULL                  COMMENT '发布说明等扩展元数据',
+    `created_at`       DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_agent_release_event_agent` (`agent_id`, `id`),
+    KEY `idx_agent_release_event_version` (`version_id`),
+    KEY `idx_agent_release_event_action` (`agent_id`, `action`, `decision`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 发布治理审计事件';
 
 
 -- ============================================================================

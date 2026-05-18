@@ -38,12 +38,18 @@ public class AgentVersionService {
 
     private final AgentVersionMapper versionMapper;
     private final AgentDefinitionService definitionService;
+    private final AgentReleaseValidationService releaseValidationService;
+    private final AgentReleaseEventService releaseEventService;
     private final ObjectMapper objectMapper;
 
     public AgentVersionService(AgentVersionMapper versionMapper,
-                               AgentDefinitionService definitionService) {
+                               AgentDefinitionService definitionService,
+                               AgentReleaseValidationService releaseValidationService,
+                               AgentReleaseEventService releaseEventService) {
         this.versionMapper = versionMapper;
         this.definitionService = definitionService;
+        this.releaseValidationService = releaseValidationService;
+        this.releaseEventService = releaseEventService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
         this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -65,6 +71,15 @@ public class AgentVersionService {
                                       int rolloutPercent, String note, String publishedBy) {
         AgentDefinition def = definitionService.findById(agentId)
                 .orElseThrow(() -> new IllegalArgumentException("Agent 定义不存在: " + agentId));
+        AgentReleaseValidationResult validation = releaseValidationService.validate(def);
+        if (!validation.valid()) {
+            releaseEventService.record(agentId, null, version, "PUBLISH", "BLOCKED", rolloutPercent,
+                    publishedBy, "发布前校验未通过", validation, releaseMetadata(def, note));
+            throw new IllegalArgumentException("发布前校验未通过: " + validation.errors().stream()
+                    .map(AgentReleaseValidationResult.Item::message)
+                    .findFirst()
+                    .orElse("存在阻断项"));
+        }
 
         if (version == null || version.isBlank()) {
             throw new IllegalArgumentException("version 不能为空");
@@ -103,6 +118,8 @@ public class AgentVersionService {
         entity.setPublishedAt(LocalDateTime.now());
         entity.setNote(note);
         versionMapper.insert(entity);
+        releaseEventService.record(agentId, entity.getId(), version, "PUBLISH", "COMPLETED", rolloutPercent,
+                publishedBy, "发布版本 " + version, validation, releaseMetadata(def, note));
         log.info("[AgentVersion] 发布: agentId={}, version={}, rollout={}%, publishedBy={}",
                 agentId, version, rolloutPercent, publishedBy);
         return entity;
@@ -121,6 +138,8 @@ public class AgentVersionService {
         target.setPublishedAt(LocalDateTime.now());
         target.setPublishedBy(operator);
         versionMapper.updateById(target);
+        releaseEventService.record(agentId, target.getId(), target.getVersion(), "ROLLBACK", "COMPLETED", 100,
+                operator, "回滚到版本 " + target.getVersion(), null, snapshotMetadata(target));
         log.info("[AgentVersion] 回滚: agentId={}, version={}, operator={}",
                 agentId, target.getVersion(), operator);
         return target;
@@ -128,6 +147,12 @@ public class AgentVersionService {
 
     public List<AgentVersionEntity> listVersions(String agentId) {
         return versionMapper.listByAgent(agentId);
+    }
+
+    public Map<String, Object> describeReleaseTarget(String agentId, String note) {
+        AgentDefinition def = definitionService.findById(agentId)
+                .orElseThrow(() -> new IllegalArgumentException("Agent 定义不存在: " + agentId));
+        return releaseMetadata(def, note);
     }
 
     /**
@@ -182,6 +207,40 @@ public class AgentVersionService {
     }
 
     /** 兼容 Jackson 反序列化含未知字段的历史快照（防止未来字段增减打破）。 */
+    private Map<String, Object> releaseMetadata(AgentDefinition def, String note) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("note", note == null ? "" : note);
+        metadata.put("agentName", def.getName());
+        metadata.put("keySlug", def.getKeySlug());
+        metadata.put("projectCode", def.getProjectCode());
+        metadata.put("visibility", def.getVisibility());
+        metadata.put("runtimeType", def.getRuntimeType());
+        metadata.put("runtimePlacement", def.getRuntimePlacement());
+        metadata.put("modelInstanceId", def.getModelInstanceId());
+        metadata.put("toolCount", def.getTools() == null ? 0 : def.getTools().size());
+        metadata.put("skillCount", def.getSkills() == null ? 0 : def.getSkills().size());
+        metadata.put("maxSteps", def.getMaxSteps());
+        metadata.put("allowIrreversible", def.isAllowIrreversible());
+        metadata.put("graphMode", def.getGraphSpec() == null ? null : def.getGraphSpec().getMode());
+        metadata.put("graphNodeCount", def.getGraphSpec() == null || def.getGraphSpec().getNodes() == null
+                ? 0 : def.getGraphSpec().getNodes().size());
+        metadata.put("graphEdgeCount", def.getGraphSpec() == null || def.getGraphSpec().getEdges() == null
+                ? 0 : def.getGraphSpec().getEdges().size());
+        metadata.put("runtimeConfig", def.getRuntimeConfig());
+        return metadata;
+    }
+
+    private Map<String, Object> snapshotMetadata(AgentVersionEntity version) {
+        AgentDefinition def = deserializeSnapshot(version);
+        if (def == null) {
+            return Map.of("versionId", version.getId(), "version", version.getVersion());
+        }
+        Map<String, Object> metadata = new HashMap<>(releaseMetadata(def, version.getNote()));
+        metadata.put("versionId", version.getId());
+        metadata.put("version", version.getVersion());
+        return metadata;
+    }
+
     @SuppressWarnings("unused")
     private Map<String, Object> looseRead(String json) throws Exception {
         return objectMapper.readValue(json, new TypeReference<>() {});

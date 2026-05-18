@@ -109,7 +109,9 @@ public class AgentManageController {
                 .skillRefs(current.getSkillRefs())
                 .modelInstanceId(current.getModelInstanceId())
                 .runtimeType(current.getRuntimeType())
+                .runtimePlacement(current.getRuntimePlacement())
                 .runtimeConfig(current.getRuntimeConfig())
+                .graphSpec(current.getGraphSpec())
                 .maxSteps(current.getMaxSteps())
                 .enabled(current.isEnabled())
                 .type(current.getType())
@@ -128,7 +130,9 @@ public class AgentManageController {
         if (update.getProjectCode() != null) merged.setProjectCode(update.getProjectCode());
         if (update.getModelInstanceId() != null) merged.setModelInstanceId(update.getModelInstanceId());
         if (update.getRuntimeType() != null) merged.setRuntimeType(update.getRuntimeType());
+        if (update.getRuntimePlacement() != null) merged.setRuntimePlacement(update.getRuntimePlacement());
         if (update.getRuntimeConfig() != null) merged.setRuntimeConfig(update.getRuntimeConfig());
+        if (update.getGraphSpec() != null) merged.setGraphSpec(update.getGraphSpec());
         if (update.getTools() != null) merged.setTools(update.getTools());
         if (update.getToolRefs() != null) merged.setToolRefs(update.getToolRefs());
         if (update.getSkills() != null) merged.setSkills(update.getSkills());

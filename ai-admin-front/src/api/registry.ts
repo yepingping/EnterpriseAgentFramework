@@ -7,6 +7,7 @@ import type {
   ProjectInstance,
   RegistryProjectRegisterRequest,
   RegistryProjectResponse,
+  RuntimeGovernancePolicyUpdateRequest,
 } from '@/types/registry'
 
 export function registerRegistryProject(data: RegistryProjectRegisterRequest) {
@@ -15,6 +16,17 @@ export function registerRegistryProject(data: RegistryProjectRegisterRequest) {
 
 export function listRegistryProjectInstances(projectCode: string) {
   return agentRequest.get<ProjectInstance[]>(`/api/registry/projects/${projectCode}/instances`)
+}
+
+export function updateRegistryProjectInstanceStatus(projectCode: string, data: { instanceId: string; status: ProjectInstance['status'] }) {
+  return agentRequest.post<ProjectInstance>(`/api/registry/projects/${projectCode}/instances/status`, data)
+}
+
+export function updateRegistryProjectInstanceGovernancePolicy(
+  projectCode: string,
+  data: RuntimeGovernancePolicyUpdateRequest,
+) {
+  return agentRequest.post<ProjectInstance>(`/api/registry/projects/${projectCode}/instances/governance-policy`, data)
 }
 
 export function diffRegistryCapabilities(projectCode: string, data: CapabilitySyncRequest) {

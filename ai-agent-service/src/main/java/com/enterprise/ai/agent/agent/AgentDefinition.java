@@ -1,6 +1,7 @@
 package com.enterprise.ai.agent.agent;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.enterprise.ai.agent.graph.AgentGraphSpec;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -75,9 +76,20 @@ public class AgentDefinition {
     @Builder.Default
     private String runtimeType = "AGENTSCOPE";
 
+    /** 运行位置：CENTRAL / EMBEDDED / HYBRID。 */
+    @Builder.Default
+    private String runtimePlacement = "CENTRAL";
+
     /** Runtime 专属配置。由具体 AgentRuntimeAdapter 按 runtimeType 解释。 */
     @Builder.Default
     private Map<String, Object> runtimeConfig = Map.of();
+
+    /**
+     * Platform graph contract. Agent Studio, SDK graph registration, runtime
+     * adapters, and trace replay should share this contract instead of reading
+     * runtime-specific config or canvas layout.
+     */
+    private AgentGraphSpec graphSpec;
 
     /** Agent 最大推理步数 */
     @Builder.Default

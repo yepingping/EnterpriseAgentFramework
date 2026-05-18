@@ -1,8 +1,14 @@
 export interface TraceNode {
   id: number
+  source?: 'tool_call_log' | 'agent_trace_span' | string
   traceId: string
   agentName?: string
   toolName: string
+  spanType?: string
+  spanId?: string
+  parentSpanId?: string
+  nodeId?: string
+  runtimeType?: string
   argsJson?: string
   resultSummary?: string
   success: boolean

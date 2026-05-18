@@ -4,7 +4,7 @@
     <el-timeline v-else>
       <el-timeline-item
         v-for="group in groupedNodes"
-        :key="group.parent.id"
+        :key="nodeKey(group.parent)"
         :timestamp="group.parent.createdAt || ''"
         placement="top"
       >
@@ -19,6 +19,11 @@
             {{ group.parent.toolName }}
           </el-tag>
           <span class="meta">{{ group.parent.agentName || '-' }}</span>
+          <el-tag v-if="group.parent.spanType" size="small" type="warning" effect="plain">
+            {{ group.parent.spanType }}
+          </el-tag>
+          <span v-if="group.parent.nodeId" class="meta">node: {{ group.parent.nodeId }}</span>
+          <span v-if="group.parent.runtimeType" class="meta">runtime: {{ group.parent.runtimeType }}</span>
           <span class="meta">{{ group.parent.elapsedMs || 0 }}ms</span>
           <span class="meta">token: {{ group.parent.tokenCost || 0 }}</span>
           <el-tag v-if="group.children.length" size="small" type="info">
@@ -46,7 +51,7 @@
           >
             <div
               v-for="child in group.children"
-              :key="child.id"
+              :key="nodeKey(child)"
               class="child-node"
             >
               <div class="node-header">
@@ -56,6 +61,10 @@
                 <el-tag v-if="isInternalTraceSpan(child.toolName)" size="small" type="info" effect="plain">
                   {{ child.toolName }}
                 </el-tag>
+                <el-tag v-if="child.spanType" size="small" type="warning" effect="plain">
+                  {{ child.spanType }}
+                </el-tag>
+                <span v-if="child.nodeId" class="meta">node: {{ child.nodeId }}</span>
                 <span class="meta">{{ child.elapsedMs || 0 }}ms</span>
                 <span class="meta">token: {{ child.tokenCost || 0 }}</span>
                 <span class="meta">{{ child.createdAt }}</span>
@@ -108,7 +117,20 @@ interface NodeGroup {
  */
 const groupedNodes = computed<NodeGroup[]>(() => {
   const groups: NodeGroup[] = []
+  const spanGroupIndex = new Map<string, NodeGroup>()
   for (const node of props.nodes) {
+    if (node.source === 'agent_trace_span') {
+      if (node.parentSpanId && spanGroupIndex.has(node.parentSpanId)) {
+        spanGroupIndex.get(node.parentSpanId)!.children.push(node)
+        continue
+      }
+      const group = { parent: node, children: [] }
+      groups.push(group)
+      if (node.spanId) {
+        spanGroupIndex.set(node.spanId, group)
+      }
+      continue
+    }
     const isChild = (node.agentName || '').startsWith('skill:')
     if (isChild && groups.length > 0) {
       groups[groups.length - 1].children.push(node)
@@ -118,6 +140,10 @@ const groupedNodes = computed<NodeGroup[]>(() => {
   }
   return groups
 })
+
+function nodeKey(node: TraceNode) {
+  return `${node.source || 'tool'}:${node.id}:${node.spanId || ''}`
+}
 
 /**
  * 后端 args_json/result_summary 是紧凑 JSON 字符串或普通文本；

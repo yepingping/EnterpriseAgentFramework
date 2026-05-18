@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS `ai_project_instance` (
     `sdk_version`       VARCHAR(64)  DEFAULT NULL,
     `status`            VARCHAR(24)  NOT NULL DEFAULT 'ONLINE',
     `metadata_json`     JSON         DEFAULT NULL,
+    `governance_policy_json` JSON    DEFAULT NULL,
     `last_heartbeat_at` DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `created_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `updated_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -148,6 +149,8 @@ CREATE TABLE IF NOT EXISTS `ai_project_instance` (
     KEY `idx_project_status` (`project_id`, `status`),
     KEY `idx_heartbeat` (`last_heartbeat_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 注册中心业务系统实例';
+
+CALL add_col_if_absent_registry('ai_project_instance', 'governance_policy_json', 'JSON DEFAULT NULL COMMENT ''Runtime 治理策略'' AFTER `metadata_json`');
 
 CREATE TABLE IF NOT EXISTS `capability_sync_log` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,

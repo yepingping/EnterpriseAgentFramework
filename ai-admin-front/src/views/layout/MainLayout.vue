@@ -44,6 +44,12 @@
                 <span class="menu-en">Capability Review</span>
               </span>
             </el-menu-item>
+            <el-menu-item index="/registry/runtimes">
+              <span class="menu-label leaf">
+                <span class="menu-cn">Runtime 纳管</span>
+                <span class="menu-en">Runtimes</span>
+              </span>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- 3 Agent -->
@@ -255,6 +261,12 @@
                 <span class="menu-en">Domains</span>
               </span>
             </el-menu-item>
+            <el-menu-item index="/runops">
+              <span class="menu-label leaf">
+                <span class="menu-cn">运行中心</span>
+                <span class="menu-en">RunOps</span>
+              </span>
+            </el-menu-item>
             <el-menu-item index="/domain/board">
               <span class="menu-label leaf">
                 <span class="menu-cn">归属画布</span>
@@ -368,8 +380,10 @@ const activeMenu = computed(() => {
   if (path.startsWith('/skill')) return '/capability'
   if (path.startsWith('/tool')) return '/tool'
   if (path.startsWith('/registry/capability-sync')) return '/registry/capability-sync'
+  if (path.startsWith('/registry/runtimes')) return '/registry/runtimes'
   if (path.startsWith('/registry/projects')) return '/registry/projects'
   if (path.startsWith('/scan-project')) return '/registry/projects'
+  if (path.startsWith('/runops')) return '/runops'
   if (path.startsWith('/domain/board')) return '/domain/board'
   if (path.startsWith('/domain/classifier-test')) return '/domain/classifier-test'
   if (path.startsWith('/domain')) return '/domain'
@@ -385,7 +399,9 @@ const activeMenu = computed(() => {
 const currentTitle = computed(() => (route.meta.title as string) || '')
 
 const isProjectManagementPage = computed(() =>
-  route.path.startsWith('/registry/projects') || route.path.startsWith('/scan-project'),
+  route.path.startsWith('/registry/projects') ||
+  route.path.startsWith('/registry/runtimes') ||
+  route.path.startsWith('/scan-project'),
 )
 
 const isRegistryShell = computed(() => isProjectManagementPage.value)

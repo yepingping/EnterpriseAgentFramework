@@ -178,10 +178,46 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
+            <el-form-item label="运行位置">
+              <el-segmented v-model="form.runtimePlacement" :options="runtimePlacementOptions" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
             <el-form-item label="启用">
               <el-switch v-model="form.enabled" />
             </el-form-item>
           </el-col>
+        </el-row>
+        <el-row v-if="form.runtimePlacement !== 'CENTRAL'" :gutter="24">
+          <el-col :span="8">
+            <el-form-item label="纳管实例">
+              <el-select
+                v-model="selectedRuntimeInstanceId"
+                clearable
+                filterable
+                placeholder="选择 Embedded Runtime 实例"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="instance in availableRuntimeInstances"
+                  :key="instance.instanceId"
+                  :label="runtimeInstanceLabel(instance)"
+                  :value="instance.instanceId"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="16">
+            <el-alert
+              title="本地 / 混合运行将按所选实例投递"
+              description="EMBEDDED 会直接投递到业务实例；HYBRID 会优先投递，失败时回落中台运行。"
+              type="info"
+              show-icon
+              :closable="false"
+            />
+          </el-col>
+        </el-row>
+        <el-row :gutter="24">
           <el-col :span="8">
             <el-form-item label="输出 Schema">
               <el-input v-model="form.outputSchemaType" placeholder="如 ReviewResult，留空返回纯文本" />
@@ -342,7 +378,7 @@
 
         <div v-else-if="form.runtimeType === 'LANGGRAPH4J'" class="runtime-panel">
           <el-alert
-            title="LangGraph4j 当前启用单节点 LLM 图执行"
+            title="LangGraph4j 使用 GraphSpec 执行 LLM / Tool / 能力节点"
             type="success"
             show-icon
             :closable="false"
@@ -368,8 +404,8 @@
             </el-col>
           </el-row>
           <el-descriptions :column="3" border size="small">
-            <el-descriptions-item label="图模式">单 Agent LLM 图</el-descriptions-item>
-            <el-descriptions-item label="Tool / 能力">暂不支持</el-descriptions-item>
+            <el-descriptions-item label="图模式">GraphSpec 工作流</el-descriptions-item>
+            <el-descriptions-item label="Tool / 能力">Studio 图节点支持</el-descriptions-item>
             <el-descriptions-item label="Pipeline">暂不支持</el-descriptions-item>
           </el-descriptions>
         </div>
@@ -392,8 +428,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
 import { INTENT_TYPES, TRIGGER_MODES } from '@/types/agent'
-import type { AgentForm, AgentRuntimeCapability } from '@/types/agent'
+import type { AgentForm, AgentGraphSpec, AgentRuntimeCapability } from '@/types/agent'
 import { getAgent, createAgent, updateAgent, getAgentRuntimes, validateAgentRuntime } from '@/api/agent'
+import { listRegistryProjectInstances } from '@/api/registry'
 import { getTools } from '@/api/tool'
 import { listCapabilities } from '@/api/capability'
 import { getScanProjects } from '@/api/scanProject'
@@ -401,6 +438,7 @@ import { getModelInstances } from '@/api/model'
 import type { ToolInfo } from '@/types/tool'
 import type { CapabilityInfo } from '@/types/capability'
 import type { ScanProject } from '@/types/scanProject'
+import type { ProjectInstance } from '@/types/registry'
 import type { ModelInstance } from '@/types/model'
 import { useProjectStore } from '@/store/project'
 
@@ -416,17 +454,12 @@ const saving = ref(false)
 const toolOptions = ref<ToolInfo[]>([])
 const capabilityOptions = ref<CapabilityInfo[]>([])
 const scanProjects = ref<ScanProject[]>([])
+const runtimeInstances = ref<ProjectInstance[]>([])
 const llmModelInstances = ref<ModelInstance[]>([])
 const runtimeOptions = ref<AgentRuntimeCapability[]>([])
 const selectedLlmProvider = ref('')
 const previousProjectId = ref<number | null>(null)
 const previousRuntimeType = ref<AgentForm['runtimeType']>('AGENTSCOPE')
-
-type LangGraph4jRuntimeConfig = {
-  graphMode: 'single-llm'
-  nodes: Array<{ id: string; type: 'llm'; label: string }>
-  edges: Array<{ from: string; to: string }>
-}
 
 const form = reactive<AgentForm>({
   keySlug: '',
@@ -443,7 +476,9 @@ const form = reactive<AgentForm>({
   skillRefs: [],
   modelInstanceId: '',
   runtimeType: 'AGENTSCOPE',
+  runtimePlacement: 'CENTRAL',
   runtimeConfig: {},
+  graphSpec: null,
   maxSteps: 5,
   enabled: true,
   type: 'single',
@@ -480,18 +515,35 @@ const filteredLlmModelInstances = computed(() =>
 const selectedRuntime = computed(() =>
   runtimeOptions.value.find((item) => item.runtimeType === form.runtimeType),
 )
-const langGraph4jConfig = computed<LangGraph4jRuntimeConfig>(() => ensureLangGraph4jRuntimeConfig())
-const langGraph4jGraphMode = computed(() => langGraph4jConfig.value.graphMode)
+const runtimePlacementOptions = [
+  { label: '中台运行', value: 'CENTRAL' },
+  { label: '本地运行', value: 'EMBEDDED' },
+  { label: '混合运行', value: 'HYBRID' },
+]
+const availableRuntimeInstances = computed(() =>
+  runtimeInstances.value.filter((item) => item.status === 'ONLINE'),
+)
+const selectedRuntimeInstanceId = computed({
+  get: () => embeddedRuntimeConfig().instanceId || '',
+  set: (instanceId: string) => {
+    const instance = availableRuntimeInstances.value.find((item) => item.instanceId === instanceId)
+    setEmbeddedRuntimeTarget(instance)
+  },
+})
+const langGraph4jGraphSpec = computed<AgentGraphSpec>(() => ensureLangGraph4jGraphSpec())
+const langGraph4jGraphMode = computed(() => langGraph4jGraphSpec.value.mode || 'WORKFLOW')
 const langGraph4jNodeId = computed({
-  get: () => langGraph4jConfig.value.nodes[0]?.id || 'llm',
+  get: () => langGraph4jGraphSpec.value.nodes[0]?.id || 'llm',
   set: (value: string) => {
     const nodeId = normalizeNodeId(value)
-    const config = ensureLangGraph4jRuntimeConfig()
-    config.nodes = [{ id: nodeId, type: 'llm', label: 'LLM' }]
-    config.edges = [
+    const graphSpec = ensureLangGraph4jGraphSpec()
+    graphSpec.nodes = [{ id: nodeId, type: 'LLM', name: 'LLM', config: { modelInstanceId: form.modelInstanceId } }]
+    graphSpec.edges = [
       { from: 'START', to: nodeId },
       { from: nodeId, to: 'END' },
     ]
+    graphSpec.entry = nodeId
+    graphSpec.finish = [nodeId]
   },
 })
 
@@ -525,6 +577,35 @@ function capabilityLabel(item: ToolInfo | CapabilityInfo) {
   return `${item.name}${project}${visibility}`
 }
 
+function runtimeInstanceLabel(instance: ProjectInstance) {
+  const status = instance.status === 'DISABLED' ? '已禁用' : instance.status
+  const host = instance.host || instance.baseUrl || instance.instanceId
+  return `${host} · ${status} · SDK ${instance.sdkVersion || '-'}`
+}
+
+function embeddedRuntimeConfig() {
+  const config = (form.runtimeConfig?.embeddedRuntime || {}) as {
+    projectCode?: string
+    instanceId?: string
+  }
+  return config
+}
+
+function setEmbeddedRuntimeTarget(instance?: ProjectInstance) {
+  if (!instance) {
+    const { embeddedRuntime: _embeddedRuntime, ...rest } = form.runtimeConfig || {}
+    form.runtimeConfig = rest
+    return
+  }
+  form.runtimeConfig = {
+    ...(form.runtimeConfig || {}),
+    embeddedRuntime: {
+      projectCode: instance.projectCode || form.projectCode,
+      instanceId: instance.instanceId,
+    },
+  }
+}
+
 function runtimeUnavailableLabel(runtime: AgentRuntimeCapability) {
   const reason = runtime.unavailableReason || ''
   if (reason.includes('enabled-runtimes') || reason.includes('未启用')) return '未启用'
@@ -537,14 +618,19 @@ function runtimeUnavailableTagType(runtime: AgentRuntimeCapability) {
   return runtimeUnavailableLabel(runtime) === '未接入' ? 'info' : 'warning'
 }
 
-function defaultLangGraph4jRuntimeConfig(): LangGraph4jRuntimeConfig {
+function defaultLangGraph4jGraphSpec(): AgentGraphSpec {
   return {
-    graphMode: 'single-llm',
-    nodes: [{ id: 'llm', type: 'llm', label: 'LLM' }],
+    code: form.keySlug || form.name || 'agent_graph',
+    name: form.name || 'Agent Graph',
+    mode: 'WORKFLOW',
+    runtimeHint: 'LANGGRAPH4J',
+    nodes: [{ id: 'llm', type: 'LLM', name: 'LLM', config: { modelInstanceId: form.modelInstanceId } }],
     edges: [
       { from: 'START', to: 'llm' },
       { from: 'llm', to: 'END' },
     ],
+    entry: 'llm',
+    finish: ['llm'],
   }
 }
 
@@ -553,30 +639,37 @@ function normalizeNodeId(value: string) {
   return normalized || 'llm'
 }
 
-function ensureLangGraph4jRuntimeConfig() {
-  const runtimeConfig = form.runtimeConfig || {}
-  const existing = runtimeConfig.langGraph4j as Partial<LangGraph4jRuntimeConfig> | undefined
+function ensureLangGraph4jGraphSpec() {
+  const existing = form.graphSpec
   const nodeId =
     existing?.nodes?.[0]?.id && typeof existing.nodes[0].id === 'string'
       ? normalizeNodeId(existing.nodes[0].id)
       : 'llm'
-  const config: LangGraph4jRuntimeConfig = {
-    graphMode: 'single-llm',
-    nodes: [{ id: nodeId, type: 'llm', label: existing?.nodes?.[0]?.label || 'LLM' }],
+  const graphSpec: AgentGraphSpec = {
+    ...(existing || defaultLangGraph4jGraphSpec()),
+    code: existing?.code || form.keySlug || form.name || 'agent_graph',
+    name: existing?.name || form.name || 'Agent Graph',
+    mode: 'WORKFLOW',
+    runtimeHint: 'LANGGRAPH4J',
+    nodes: [{ id: nodeId, type: 'LLM', name: existing?.nodes?.[0]?.name || 'LLM', config: { modelInstanceId: form.modelInstanceId } }],
     edges: [
       { from: 'START', to: nodeId },
       { from: nodeId, to: 'END' },
     ],
+    entry: nodeId,
+    finish: [nodeId],
   }
-  form.runtimeConfig = {
-    ...runtimeConfig,
-    langGraph4j: config,
-  }
-  return config
+  form.graphSpec = graphSpec
+  return graphSpec
 }
 
 function syncRuntimeConfigForSave() {
+  const selectedInstance = availableRuntimeInstances.value.find((item) => item.instanceId === selectedRuntimeInstanceId.value)
+  if (form.runtimePlacement !== 'CENTRAL' && selectedInstance) {
+    setEmbeddedRuntimeTarget(selectedInstance)
+  }
   if (form.runtimeType === 'AGENTSCOPE') {
+    form.graphSpec = null
     form.runtimeConfig = {
       ...(form.runtimeConfig || {}),
       agentScope: {
@@ -593,7 +686,7 @@ function syncRuntimeConfigForSave() {
     return
   }
   if (form.runtimeType === 'LANGGRAPH4J') {
-    ensureLangGraph4jRuntimeConfig()
+    ensureLangGraph4jGraphSpec()
     form.tools = []
     form.toolRefs = []
     form.skills = []
@@ -617,7 +710,7 @@ async function handleRuntimeTypeChange(runtimeType: AgentForm['runtimeType']) {
   if (runtime.runtimeType === 'LANGGRAPH4J' && (hasToolConfig || hasPipelineConfig)) {
     try {
       await ElMessageBox.confirm(
-        'LangGraph4j 当前仅支持单 Agent LLM 执行，暂不支持 Tool、能力和 Pipeline。切换后将清空这些不兼容配置，是否继续？',
+        'LangGraph4j 通过 Studio GraphSpec 编排 Tool / 能力节点；当前表单里的 AgentScope Tool、能力和 Pipeline 配置会被清空，是否继续？',
         '切换运行时',
         { type: 'warning' },
       )
@@ -635,7 +728,7 @@ async function handleRuntimeTypeChange(runtimeType: AgentForm['runtimeType']) {
   }
   previousRuntimeType.value = runtimeType
   if (runtimeType === 'LANGGRAPH4J') {
-    ensureLangGraph4jRuntimeConfig()
+    ensureLangGraph4jGraphSpec()
   }
 }
 
@@ -687,7 +780,7 @@ async function handleProjectChange(projectId: number | null | undefined) {
   }
   form.projectCode = projectCodeById(projectId)
   previousProjectId.value = projectId ?? null
-  await Promise.all([loadToolOptions(), loadCapabilityOptions()])
+  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadRuntimeInstances()])
 }
 
 async function loadAgent() {
@@ -710,7 +803,9 @@ async function loadAgent() {
       skillRefs: data.skillRefs || [],
       modelInstanceId: data.modelInstanceId || '',
       runtimeType: data.runtimeType || 'AGENTSCOPE',
+      runtimePlacement: data.runtimePlacement || 'CENTRAL',
       runtimeConfig: data.runtimeConfig || {},
+      graphSpec: data.graphSpec || null,
       maxSteps: data.maxSteps || 5,
       enabled: data.enabled ?? true,
       type: data.type || 'single',
@@ -725,6 +820,9 @@ async function loadAgent() {
     })
     previousProjectId.value = form.projectId ?? null
     previousRuntimeType.value = form.runtimeType
+    if (form.runtimeType === 'LANGGRAPH4J') {
+      ensureLangGraph4jGraphSpec()
+    }
   } catch {
     ElMessage.error('加载 Agent 失败')
   } finally {
@@ -779,6 +877,19 @@ async function loadModelInstances() {
   }
 }
 
+async function loadRuntimeInstances() {
+  if (!form.projectCode) {
+    runtimeInstances.value = []
+    return
+  }
+  try {
+    const { data } = await listRegistryProjectInstances(form.projectCode)
+    runtimeInstances.value = Array.isArray(data) ? data : []
+  } catch {
+    runtimeInstances.value = []
+  }
+}
+
 async function loadRuntimeOptions() {
   try {
     const { data } = await getAgentRuntimes()
@@ -808,6 +919,13 @@ async function loadRuntimeOptions() {
 async function validateRuntimeBeforeSave() {
   try {
     syncRuntimeConfigForSave()
+    if (
+      form.runtimePlacement !== 'CENTRAL'
+      && !availableRuntimeInstances.value.some((item) => item.instanceId === selectedRuntimeInstanceId.value)
+    ) {
+      ElMessage.error('请选择 Embedded Runtime 纳管实例')
+      return false
+    }
     const { data } = await validateAgentRuntime(form)
     if (!data.valid) {
       ElMessage.error(data.message || '运行时与模型实例校验失败')
@@ -857,7 +975,7 @@ onMounted(async () => {
   if (!previousProjectId.value) {
     previousProjectId.value = form.projectId ?? null
   }
-  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadModelInstances(), loadRuntimeOptions()])
+  await Promise.all([loadToolOptions(), loadCapabilityOptions(), loadRuntimeInstances(), loadModelInstances(), loadRuntimeOptions()])
 })
 </script>
 

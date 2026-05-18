@@ -11,6 +11,8 @@ public class EafRegistryProperties {
 
     private final Capability capability = new Capability();
 
+    private final AgentGraph agentGraph = new AgentGraph();
+
     public Registry getRegistry() {
         return registry;
     }
@@ -21,6 +23,10 @@ public class EafRegistryProperties {
 
     public Capability getCapability() {
         return capability;
+    }
+
+    public AgentGraph getAgentGraph() {
+        return agentGraph;
     }
 
     public static class Registry {
@@ -157,6 +163,18 @@ public class EafRegistryProperties {
         public void setExposeActuatorEndpoint(boolean exposeActuatorEndpoint) {
             this.exposeActuatorEndpoint = exposeActuatorEndpoint;
         }
+
+        public boolean isSyncOnStartup() {
+            return syncOnStartup;
+        }
+
+        public void setSyncOnStartup(boolean syncOnStartup) {
+            this.syncOnStartup = syncOnStartup;
+        }
+    }
+
+    public static class AgentGraph {
+        private boolean syncOnStartup = true;
 
         public boolean isSyncOnStartup() {
             return syncOnStartup;

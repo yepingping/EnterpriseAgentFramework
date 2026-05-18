@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class EafRegistryClient {
 
@@ -25,17 +26,30 @@ public class EafRegistryClient {
 
     private final EafCapabilityScanner scanner;
 
+    private final EafAgentGraphScanner graphScanner;
+
     private final SdkDescriptionSourceSettingsHolder descriptionSettingsHolder;
 
     private final RestClient restClient;
 
     private final String instanceId;
 
+    private final AtomicReference<RuntimeGovernanceState> governanceState =
+            new AtomicReference<>(RuntimeGovernanceState.defaultState());
+
     public EafRegistryClient(EafRegistryProperties properties,
                              EafCapabilityScanner scanner,
                              SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
+        this(properties, scanner, new EafAgentGraphScanner(List.of()), descriptionSettingsHolder);
+    }
+
+    public EafRegistryClient(EafRegistryProperties properties,
+                             EafCapabilityScanner scanner,
+                             EafAgentGraphScanner graphScanner,
+                             SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
         this.properties = properties;
         this.scanner = scanner;
+        this.graphScanner = graphScanner;
         this.descriptionSettingsHolder = descriptionSettingsHolder;
         this.restClient = RestClient.builder().baseUrl(trimTrailingSlash(properties.getRegistry().getUrl())).build();
         this.instanceId = resolveInstanceId();
@@ -74,6 +88,9 @@ public class EafRegistryClient {
             if (properties.getCapability().isSyncOnStartup()) {
                 syncCapabilities(scanner.scan());
             }
+            if (properties.getAgentGraph().isSyncOnStartup()) {
+                syncAgentGraphs(graphScanner.scan());
+            }
         } catch (Exception ex) {
             // Starter 不能因为注册中心临时不可用拖垮业务系统启动；后续心跳会继续重试。
             logFailure("registerAndSync", ex);
@@ -85,16 +102,17 @@ public class EafRegistryClient {
             return;
         }
         refreshDescriptionSettings();
-        Map<String, Object> body = Map.of(
-                "instanceId", instanceId,
-                "baseUrl", defaultString(properties.getProject().getBaseUrl(), ""),
-                "host", hostName(),
-                "sdkVersion", EafRegistryClient.class.getPackage().getImplementationVersion() == null
-                        ? "dev"
-                        : EafRegistryClient.class.getPackage().getImplementationVersion()
-        );
         try {
-            signedPost("/api/registry/projects/{projectCode}/instances/heartbeat", body);
+            InstanceHeartbeatResponse response = signedPost(
+                    "/api/registry/projects/{projectCode}/instances/heartbeat",
+                    buildHeartbeatBody(),
+                    InstanceHeartbeatResponse.class);
+            RuntimeGovernancePolicy policy = response == null ? null : response.policy();
+            RuntimeGovernanceState state = updateGovernanceState(policy);
+            if (!state.localExecutionAllowed()) {
+                log.warn("[EAF Registry] runtime local execution restricted by control plane: status={} minSdkVersion={} sdkVersionSatisfied={} message={}",
+                        state.status(), state.minSdkVersion(), state.sdkVersionSatisfied(), state.message());
+            }
         } catch (Exception ex) {
             // 定时任务上抛异常会刷屏；这里打日志即可，下一轮继续重试。
             logFailure("heartbeat", ex);
@@ -114,6 +132,14 @@ public class EafRegistryClient {
 
     public List<EafCapabilityDescriptor> capabilities() {
         return scanner.scan();
+    }
+
+    public List<EafAgentGraph> agentGraphs() {
+        return graphScanner.scan();
+    }
+
+    public RuntimeGovernanceState governanceState() {
+        return governanceState.get();
     }
 
     private void registerProject() {
@@ -142,6 +168,42 @@ public class EafRegistryClient {
         signedPost("/api/registry/projects/{projectCode}/capabilities/sync", body);
     }
 
+    private void syncAgentGraphs(List<EafAgentGraph> graphs) {
+        if (graphs == null || graphs.isEmpty()) {
+            return;
+        }
+        Map<String, Object> body = Map.of(
+                "syncId", UUID.randomUUID().toString(),
+                "source", "SDK",
+                "apply", true,
+                "graphs", graphs
+        );
+        signedPost("/api/registry/projects/{projectCode}/agent-graphs/sync", body);
+    }
+
+    Map<String, Object> buildHeartbeatBody() {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("runtimePlacement", "EMBEDDED");
+        metadata.put("runtimeTypes", List.of("SPRING_BOOT_EMBEDDED"));
+        int graphCount = graphScanner.scan().size();
+        metadata.put("supportsGraph", graphCount > 0);
+        metadata.put("supportsTools", true);
+        metadata.put("supportsWorkflow", graphCount > 0);
+        metadata.put("supportsAutonomous", false);
+        metadata.put("supportsEmbeddedExecution", true);
+        metadata.put("supportsHybridExecution", false);
+        metadata.put("capabilityCount", scanner.scan().size());
+        metadata.put("agentGraphCount", graphCount);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("instanceId", instanceId);
+        body.put("baseUrl", defaultString(properties.getProject().getBaseUrl(), ""));
+        body.put("host", hostName());
+        body.put("sdkVersion", sdkVersion());
+        body.put("metadata", metadata);
+        return body;
+    }
+
     private boolean isConfigured() {
         return properties.getRegistry().isEnabled()
                 && StringUtils.hasText(properties.getRegistry().getUrl())
@@ -156,8 +218,12 @@ public class EafRegistryClient {
     }
 
     private void signedPost(String uri, Object body) {
+        signedPost(uri, body, Void.class);
+    }
+
+    private <T> T signedPost(String uri, Object body, Class<T> bodyType) {
         SignatureHeaders headers = signatureHeaders();
-        restClient.post()
+        return restClient.post()
                 .uri(uri, properties.getProject().getCode())
                 .header("X-EAF-App-Key", headers.appKey())
                 .header("X-EAF-Timestamp", headers.timestamp())
@@ -165,7 +231,7 @@ public class EafRegistryClient {
                 .header("X-EAF-Signature", headers.signature())
                 .body(body)
                 .retrieve()
-                .toBodilessEntity();
+                .body(bodyType);
     }
 
     private <T> T signedGet(String uriTemplate, Class<T> bodyType) {
@@ -221,6 +287,11 @@ public class EafRegistryClient {
         return hostName() + "-" + ManagementFactory.getRuntimeMXBean().getName();
     }
 
+    private String sdkVersion() {
+        String version = EafRegistryClient.class.getPackage().getImplementationVersion();
+        return version == null ? "dev" : version;
+    }
+
     private String hostName() {
         try {
             return InetAddress.getLocalHost().getHostName();
@@ -233,6 +304,76 @@ public class EafRegistryClient {
         return StringUtils.hasText(value) ? value : fallback;
     }
 
+    RuntimeGovernanceState updateGovernanceState(RuntimeGovernancePolicy policy) {
+        if (policy == null) {
+            return governanceState.get();
+        }
+        String currentSdkVersion = sdkVersion();
+        boolean sdkVersionSatisfied = isSdkVersionSatisfied(currentSdkVersion, policy.minSdkVersion());
+        RuntimeGovernanceState state = new RuntimeGovernanceState(
+                policy.disabled(),
+                defaultString(policy.status(), "UNKNOWN"),
+                blankToNull(policy.minSdkVersion()),
+                sdkVersionSatisfied,
+                policy.allowEmbeddedExecution() == null || policy.allowEmbeddedExecution(),
+                policy.allowHybridExecution() == null || policy.allowHybridExecution(),
+                defaultString(policy.message(), policy.disabled() ? "runtime disabled by control plane" : "ok")
+        );
+        governanceState.set(state);
+        return state;
+    }
+
+    private boolean isSdkVersionSatisfied(String current, String minimum) {
+        if (!StringUtils.hasText(minimum) || !StringUtils.hasText(current) || "dev".equalsIgnoreCase(current)) {
+            return true;
+        }
+        return compareVersions(current, minimum) >= 0;
+    }
+
+    private int compareVersions(String left, String right) {
+        List<Integer> l = versionSegments(left);
+        List<Integer> r = versionSegments(right);
+        int size = Math.max(l.size(), r.size());
+        for (int i = 0; i < size; i++) {
+            int lv = i < l.size() ? l.get(i) : 0;
+            int rv = i < r.size() ? r.get(i) : 0;
+            if (lv != rv) {
+                return Integer.compare(lv, rv);
+            }
+        }
+        return 0;
+    }
+
+    private List<Integer> versionSegments(String version) {
+        String normalized = version == null ? "" : version.trim().replaceFirst("^[vV]", "");
+        String[] parts = normalized.split("[^0-9]+");
+        return java.util.Arrays.stream(parts)
+                .filter(StringUtils::hasText)
+                .map(s -> {
+                    try {
+                        return Integer.parseInt(s);
+                    } catch (NumberFormatException ignored) {
+                        return 0;
+                    }
+                })
+                .toList();
+    }
+
+    private String blankToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
     private record SignatureHeaders(String appKey, String timestamp, String nonce, String signature) {
+    }
+
+    private record InstanceHeartbeatResponse(Object instance, RuntimeGovernancePolicy policy) {
+    }
+
+    record RuntimeGovernancePolicy(boolean disabled,
+                                           String status,
+                                           String minSdkVersion,
+                                           Boolean allowEmbeddedExecution,
+                                           Boolean allowHybridExecution,
+                                           String message) {
     }
 }

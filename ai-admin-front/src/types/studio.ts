@@ -14,7 +14,7 @@
  * - 连线当前只做可视化，不参与执行（执行仍由 ReAct + Tool Retrieval 驱动）。
  */
 
-export type CanvasNodeKind = 'start' | 'end' | 'skill' | 'tool' | 'knowledge'
+export type CanvasNodeKind = 'start' | 'end' | 'llm' | 'skill' | 'tool' | 'knowledge'
 
 export interface CanvasNodeData {
   /** 对 skill / tool 节点：引用的 tool_definition.name */
@@ -59,6 +59,7 @@ export interface CanvasEdge {
   source: string
   target: string
   label?: string
+  condition?: string
 }
 
 export interface CanvasSnapshot {

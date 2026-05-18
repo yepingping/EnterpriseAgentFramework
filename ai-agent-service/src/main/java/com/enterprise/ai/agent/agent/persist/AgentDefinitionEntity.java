@@ -55,8 +55,13 @@ public class AgentDefinitionEntity {
 
     private String runtimeType;
 
+    private String runtimePlacement;
+
     /** Runtime 专属配置 JSON，由具体 Runtime Adapter 解释。 */
     private String runtimeConfigJson;
+
+    /** Platform GraphSpec JSON, independent from runtime config and canvas layout. */
+    private String graphSpecJson;
 
     private Integer maxSteps;
 

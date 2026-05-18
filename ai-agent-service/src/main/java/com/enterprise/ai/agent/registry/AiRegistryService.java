@@ -6,6 +6,9 @@ import com.enterprise.ai.agent.acl.ToolAclEntity;
 import com.enterprise.ai.agent.acl.ToolAclMapper;
 import com.enterprise.ai.agent.agent.AgentDefinition;
 import com.enterprise.ai.agent.agent.AgentDefinitionService;
+import com.enterprise.ai.agent.agent.CapabilityReference;
+import com.enterprise.ai.agent.graph.AgentGraphSpec;
+import com.enterprise.ai.agent.runtime.AgentRuntimeAdapter;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectMapper;
 import com.enterprise.ai.agent.scan.ScanProjectService;
@@ -24,10 +27,17 @@ import com.enterprise.ai.agent.registry.RegistryContracts.CapabilityReviewReques
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySnapshotDTO;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySyncRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilitySyncResponse;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphRegistration;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphSyncItem;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphSyncRequest;
+import com.enterprise.ai.agent.registry.RegistryContracts.AgentGraphSyncResponse;
 import com.enterprise.ai.agent.registry.RegistryContracts.FieldDiff;
 import com.enterprise.ai.agent.registry.RegistryContracts.InstanceHeartbeatRequest;
+import com.enterprise.ai.agent.registry.RegistryContracts.InstanceHeartbeatResponse;
 import com.enterprise.ai.agent.registry.RegistryContracts.ProjectRegisterRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.RegistryProjectResponse;
+import com.enterprise.ai.agent.registry.RegistryContracts.RuntimeGovernancePolicy;
+import com.enterprise.ai.agent.registry.RegistryContracts.RuntimeGovernancePolicyUpdateRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.SdkCapabilityDescriptionSettings;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -162,7 +172,7 @@ public class AiRegistryService {
     }
 
     @Transactional
-    public ProjectInstanceEntity heartbeat(String projectCode, InstanceHeartbeatRequest request) {
+    public InstanceHeartbeatResponse heartbeat(String projectCode, InstanceHeartbeatRequest request) {
         ScanProjectEntity project = getProject(projectCode);
         if (request == null || !StringUtils.hasText(request.instanceId())) {
             throw new IllegalArgumentException("instanceId 不能为空");
@@ -183,7 +193,8 @@ public class AiRegistryService {
         entity.setPort(request.port());
         entity.setAppVersion(request.appVersion());
         entity.setSdkVersion(request.sdkVersion());
-        entity.setStatus("ONLINE");
+        String currentStatus = entity.getStatus();
+        entity.setStatus("DISABLED".equalsIgnoreCase(currentStatus) ? "DISABLED" : "ONLINE");
         entity.setMetadataJson(writeJson(request.metadata()));
         entity.setLastHeartbeatAt(LocalDateTime.now());
         if (entity.getId() == null) {
@@ -191,7 +202,7 @@ public class AiRegistryService {
         } else {
             instanceMapper.updateById(entity);
         }
-        return entity;
+        return new InstanceHeartbeatResponse(entity, governancePolicy(entity));
     }
 
     @Transactional
@@ -342,6 +353,281 @@ public class AiRegistryService {
         return response;
     }
 
+    @Transactional
+    public AgentGraphSyncResponse syncAgentGraphs(String projectCode, AgentGraphSyncRequest request) {
+        ScanProjectEntity project = getProject(projectCode);
+        List<AgentGraphRegistration> graphs = request == null || request.graphs() == null
+                ? List.of()
+                : request.graphs();
+        boolean apply = request == null || request.apply() == null || Boolean.TRUE.equals(request.apply());
+        String syncId = StringUtils.hasText(request == null ? null : request.syncId())
+                ? request.syncId().trim()
+                : UUID.randomUUID().toString();
+
+        int created = 0;
+        int updated = 0;
+        List<AgentGraphSyncItem> items = new ArrayList<>();
+        for (AgentGraphRegistration graph : graphs) {
+            AgentGraphSpec spec = requireGraphSpec(graph);
+            String graphCode = normalizeGraphCode(firstText(graph.code(), spec.getCode()));
+            String keySlug = agentKeySlug(project.getProjectCode(), graphCode);
+            AgentDefinition existing = agentDefinitionService.findByKeySlug(keySlug).orElse(null);
+            String changeType = existing == null ? "CREATED" : "UPDATED";
+            if (apply) {
+                AgentDefinition saved = upsertSdkAgentGraph(project, graph, spec, graphCode, keySlug, syncId, existing);
+                if (existing == null) {
+                    created++;
+                } else {
+                    updated++;
+                }
+                items.add(new AgentGraphSyncItem(graphCode, saved.getId(), saved.getKeySlug(), changeType, "applied"));
+            } else {
+                items.add(new AgentGraphSyncItem(graphCode, existing == null ? null : existing.getId(),
+                        keySlug, "CREATED".equals(changeType) ? "WOULD_CREATE" : "WOULD_UPDATE", "diff only"));
+            }
+        }
+        return new AgentGraphSyncResponse(syncId, project.getId(), project.getProjectCode(),
+                graphs.size(), created, updated, items);
+    }
+
+    private AgentDefinition upsertSdkAgentGraph(ScanProjectEntity project,
+                                                AgentGraphRegistration registration,
+                                                AgentGraphSpec spec,
+                                                String graphCode,
+                                                String keySlug,
+                                                String syncId,
+                                                AgentDefinition existing) {
+        normalizeGraphSpec(registration, spec, graphCode);
+        String modelInstanceId = firstText(
+                registration == null ? null : registration.modelInstanceId(),
+                modelInstanceIdFromGraph(spec));
+        if (!StringUtils.hasText(modelInstanceId)) {
+            throw new IllegalArgumentException("SDK Agent Graph 缺少 modelInstanceId: " + graphCode);
+        }
+
+        Map<String, Object> sdkGraph = new LinkedHashMap<>();
+        sdkGraph.put("managedBy", "SDK");
+        sdkGraph.put("source", "SDK");
+        sdkGraph.put("projectCode", project.getProjectCode());
+        sdkGraph.put("graphCode", graphCode);
+        sdkGraph.put("syncId", syncId);
+        sdkGraph.put("lastSyncedAt", LocalDateTime.now().toString());
+        sdkGraph.put("overwriteMode", "DRAFT_ONLY");
+        sdkGraph.put("sourceHash", Integer.toHexString(Objects.hash(writeJson(spec))));
+        if (registration != null && registration.metadata() != null && !registration.metadata().isEmpty()) {
+            sdkGraph.put("metadata", registration.metadata());
+        }
+
+        Map<String, Object> extra = new LinkedHashMap<>();
+        if (existing != null && existing.getExtra() != null) {
+            extra.putAll(existing.getExtra());
+        }
+        extra.put("sdkGraph", sdkGraph);
+
+        AgentDefinition draft = AgentDefinition.builder()
+                .keySlug(keySlug)
+                .name(firstText(registration == null ? null : registration.name(), spec.getName(), graphCode))
+                .description(registration == null ? null : registration.description())
+                .projectId(project.getId())
+                .projectCode(project.getProjectCode())
+                .visibility(firstText(registration == null ? null : registration.visibility(), project.getVisibility(), "PROJECT"))
+                .intentType(existing == null ? "GENERAL_CHAT" : existing.getIntentType())
+                .systemPrompt(firstText(registration == null ? null : registration.systemPrompt(),
+                        existing == null ? null : existing.getSystemPrompt(), ""))
+                .modelInstanceId(modelInstanceId)
+                .runtimeType(firstText(registration == null ? null : registration.runtimeType(),
+                        spec.getRuntimeHint(), AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE))
+                .runtimePlacement("CENTRAL")
+                .runtimeConfig(Map.of())
+                .graphSpec(spec)
+                .canvasJson(canvasJsonFromGraphSpec(spec))
+                .tools(toolNames(spec, "TOOL"))
+                .toolRefs(capabilityRefs(spec, "TOOL"))
+                .skills(toolNames(spec, "CAPABILITY"))
+                .skillRefs(capabilityRefs(spec, "CAPABILITY"))
+                .maxSteps(existing == null || existing.getMaxSteps() <= 0 ? 5 : existing.getMaxSteps())
+                .enabled(true)
+                .type("single")
+                .pipelineAgentIds(List.of())
+                .triggerMode(existing == null ? "all" : existing.getTriggerMode())
+                .useMultiAgentModel(false)
+                .allowIrreversible(existing != null && existing.isAllowIrreversible())
+                .extra(extra)
+                .build();
+        if (existing == null) {
+            return agentDefinitionService.create(draft);
+        }
+        return agentDefinitionService.update(existing.getId(), draft);
+    }
+
+    private AgentGraphSpec requireGraphSpec(AgentGraphRegistration graph) {
+        if (graph == null || graph.graphSpec() == null) {
+            throw new IllegalArgumentException("SDK Agent Graph 缺少 graphSpec");
+        }
+        AgentGraphSpec spec = graph.graphSpec();
+        if (spec.getNodes() == null || spec.getNodes().isEmpty()) {
+            throw new IllegalArgumentException("SDK Agent Graph 缺少 nodes");
+        }
+        boolean hasLlm = spec.getNodes().stream()
+                .anyMatch(node -> "LLM".equalsIgnoreCase(node.getType()));
+        if (!hasLlm) {
+            throw new IllegalArgumentException("SDK Agent Graph 必须包含 LLM 节点");
+        }
+        return spec;
+    }
+
+    private void normalizeGraphSpec(AgentGraphRegistration registration, AgentGraphSpec spec, String graphCode) {
+        if (!StringUtils.hasText(spec.getCode())) {
+            spec.setCode(graphCode);
+        }
+        if (!StringUtils.hasText(spec.getName())) {
+            spec.setName(firstText(registration == null ? null : registration.name(), graphCode));
+        }
+        if (!StringUtils.hasText(spec.getMode())) {
+            spec.setMode("WORKFLOW");
+        }
+        if (!StringUtils.hasText(spec.getRuntimeHint())) {
+            spec.setRuntimeHint(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE);
+        }
+        if (!StringUtils.hasText(spec.getEntry())) {
+            spec.setEntry(firstExecutableNodeId(spec));
+        }
+        if (spec.getFinish() == null || spec.getFinish().isEmpty()) {
+            spec.setFinish(List.of(lastExecutableNodeId(spec)));
+        }
+    }
+
+    private String canvasJsonFromGraphSpec(AgentGraphSpec spec) {
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+        nodes.add(canvasNode("start", "start", 60, 220, Map.of("label", "开始", "kind", "start")));
+        int index = 0;
+        for (AgentGraphSpec.Node graphNode : spec.getNodes() == null ? List.<AgentGraphSpec.Node>of() : spec.getNodes()) {
+            String kind = canvasKind(graphNode);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("label", firstText(graphNode.getName(), graphNode.getId()));
+            data.put("kind", kind);
+            if (graphNode.getRef() != null) {
+                data.put("ref", firstText(graphNode.getRef().getName(), graphNode.getRef().getQualifiedName()));
+                data.put("qualifiedName", graphNode.getRef().getQualifiedName());
+                data.put("projectCode", graphNode.getRef().getProjectCode());
+            }
+            Map<String, Object> config = graphNode.getConfig() == null ? Map.of() : graphNode.getConfig();
+            if (config.get("outputAlias") != null) {
+                data.put("outputAlias", config.get("outputAlias"));
+            }
+            if (config.get("inputMapping") != null) {
+                data.put("inputMapping", config.get("inputMapping"));
+            }
+            nodes.add(canvasNode(graphNode.getId(), kind, 260 + (index * 220), 220, data));
+            index++;
+        }
+        nodes.add(canvasNode("end", "end", 260 + (Math.max(index, 1) * 220), 220, Map.of("label", "结束", "kind", "end")));
+        int edgeIndex = 0;
+        for (AgentGraphSpec.Edge graphEdge : spec.getEdges() == null ? List.<AgentGraphSpec.Edge>of() : spec.getEdges()) {
+            String source = canvasEndpoint(graphEdge.getFrom());
+            String target = canvasEndpoint(graphEdge.getTo());
+            String condition = firstText(graphEdge.getCondition(), "always");
+            Map<String, Object> edge = new LinkedHashMap<>();
+            edge.put("id", "sdk-e-" + edgeIndex++);
+            edge.put("source", source);
+            edge.put("target", target);
+            edge.put("condition", condition);
+            edge.put("label", condition);
+            edges.add(edge);
+        }
+        return writeJson(Map.of("nodes", nodes, "edges", edges));
+    }
+
+    private Map<String, Object> canvasNode(String id, String type, int x, int y, Map<String, Object> data) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("id", id);
+        node.put("type", type);
+        node.put("position", Map.of("x", x, "y", y));
+        node.put("data", data);
+        return node;
+    }
+
+    private String canvasKind(AgentGraphSpec.Node node) {
+        if (node == null || !StringUtils.hasText(node.getType())) {
+            return "tool";
+        }
+        return switch (node.getType().trim().toUpperCase(Locale.ROOT)) {
+            case "LLM" -> "llm";
+            case "CAPABILITY" -> "skill";
+            default -> "tool";
+        };
+    }
+
+    private String canvasEndpoint(String endpoint) {
+        if ("START".equalsIgnoreCase(endpoint)) {
+            return "start";
+        }
+        if ("END".equalsIgnoreCase(endpoint)) {
+            return "end";
+        }
+        return endpoint;
+    }
+
+    private String modelInstanceIdFromGraph(AgentGraphSpec spec) {
+        if (spec == null || spec.getNodes() == null) {
+            return null;
+        }
+        for (AgentGraphSpec.Node node : spec.getNodes()) {
+            if (!"LLM".equalsIgnoreCase(node.getType()) || node.getConfig() == null) {
+                continue;
+            }
+            Object model = node.getConfig().get("modelInstanceId");
+            if (model != null && StringUtils.hasText(String.valueOf(model))) {
+                return String.valueOf(model);
+            }
+        }
+        return null;
+    }
+
+    private List<String> toolNames(AgentGraphSpec spec, String type) {
+        return spec.getNodes() == null ? List.of() : spec.getNodes().stream()
+                .filter(node -> type.equalsIgnoreCase(node.getType()))
+                .map(node -> node.getRef() == null ? null : firstText(node.getRef().getName(), node.getRef().getQualifiedName()))
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+    }
+
+    private List<CapabilityReference> capabilityRefs(AgentGraphSpec spec, String type) {
+        return spec.getNodes() == null ? List.of() : spec.getNodes().stream()
+                .filter(node -> type.equalsIgnoreCase(node.getType()))
+                .map(AgentGraphSpec.Node::getRef)
+                .filter(Objects::nonNull)
+                .map(ref -> CapabilityReference.builder()
+                        .kind("CAPABILITY".equalsIgnoreCase(type) ? "SKILL" : "TOOL")
+                        .name(firstText(ref.getName(), ref.getQualifiedName()))
+                        .qualifiedName(firstText(ref.getQualifiedName(), ref.getName()))
+                        .projectCode(ref.getProjectCode())
+                        .definitionId(ref.getDefinitionId())
+                        .build())
+                .toList();
+    }
+
+    private String firstExecutableNodeId(AgentGraphSpec spec) {
+        return spec.getNodes().stream()
+                .map(AgentGraphSpec.Node::getId)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("SDK Agent Graph 缺少可执行节点"));
+    }
+
+    private String lastExecutableNodeId(AgentGraphSpec spec) {
+        List<AgentGraphSpec.Node> nodes = spec.getNodes();
+        for (int i = nodes.size() - 1; i >= 0; i--) {
+            String id = nodes.get(i).getId();
+            if (StringUtils.hasText(id)) {
+                return id;
+            }
+        }
+        throw new IllegalArgumentException("SDK Agent Graph 缺少可执行节点");
+    }
+
     public List<CapabilitySnapshotDTO> listSnapshots(String projectCode) {
         ScanProjectEntity project = getProject(projectCode);
         return snapshotMapper.selectList(Wrappers.<CapabilitySnapshotEntity>lambdaQuery()
@@ -412,6 +698,79 @@ public class AiRegistryService {
         return instanceMapper.selectList(Wrappers.<ProjectInstanceEntity>lambdaQuery()
                 .eq(ProjectInstanceEntity::getProjectId, project.getId())
                 .orderByDesc(ProjectInstanceEntity::getLastHeartbeatAt));
+    }
+
+    public List<ProjectInstanceEntity> listAllInstances() {
+        return instanceMapper.selectList(Wrappers.<ProjectInstanceEntity>lambdaQuery()
+                .orderByDesc(ProjectInstanceEntity::getLastHeartbeatAt));
+    }
+
+    public ProjectInstanceEntity findInstance(String projectCode, String instanceId) {
+        ScanProjectEntity project = getProject(projectCode);
+        if (!StringUtils.hasText(instanceId)) {
+            throw new IllegalArgumentException("instanceId 不能为空");
+        }
+        ProjectInstanceEntity entity = instanceMapper.selectOne(new LambdaQueryWrapper<ProjectInstanceEntity>()
+                .eq(ProjectInstanceEntity::getProjectCode, project.getProjectCode())
+                .eq(ProjectInstanceEntity::getInstanceId, instanceId)
+                .last("limit 1"));
+        if (entity == null) {
+            throw new IllegalArgumentException("实例不存在: " + instanceId);
+        }
+        return entity;
+    }
+
+    @Transactional
+    public ProjectInstanceEntity updateInstanceStatus(String projectCode, String instanceId, String status) {
+        ScanProjectEntity project = getProject(projectCode);
+        if (!StringUtils.hasText(instanceId)) {
+            throw new IllegalArgumentException("instanceId 不能为空");
+        }
+        String normalizedStatus = normalizeInstanceStatus(status);
+        ProjectInstanceEntity entity = instanceMapper.selectOne(new LambdaQueryWrapper<ProjectInstanceEntity>()
+                .eq(ProjectInstanceEntity::getProjectCode, project.getProjectCode())
+                .eq(ProjectInstanceEntity::getInstanceId, instanceId)
+                .last("limit 1"));
+        if (entity == null) {
+            throw new IllegalArgumentException("实例不存在: " + instanceId);
+        }
+        entity.setStatus(normalizedStatus);
+        instanceMapper.updateById(entity);
+        return entity;
+    }
+
+    @Transactional
+    public ProjectInstanceEntity updateInstanceGovernancePolicy(String projectCode,
+                                                               RuntimeGovernancePolicyUpdateRequest request) {
+        ScanProjectEntity project = getProject(projectCode);
+        if (request == null || !StringUtils.hasText(request.instanceId())) {
+            throw new IllegalArgumentException("instanceId 不能为空");
+        }
+        ProjectInstanceEntity entity = instanceMapper.selectOne(new LambdaQueryWrapper<ProjectInstanceEntity>()
+                .eq(ProjectInstanceEntity::getProjectCode, project.getProjectCode())
+                .eq(ProjectInstanceEntity::getInstanceId, request.instanceId())
+                .last("limit 1"));
+        if (entity == null) {
+            throw new IllegalArgumentException("实例不存在: " + request.instanceId());
+        }
+        RuntimeGovernancePolicy current = governancePolicy(entity);
+        boolean disabled = request.disabled() == null ? current.disabled() : request.disabled();
+        RuntimeGovernancePolicy merged = new RuntimeGovernancePolicy(
+                disabled,
+                disabled ? "DISABLED" : defaultString(entity.getStatus(), "ONLINE"),
+                blankToNull(firstText(request.minSdkVersion(), current.minSdkVersion())),
+                request.allowEmbeddedExecution() == null ? current.allowEmbeddedExecution() : request.allowEmbeddedExecution(),
+                request.allowHybridExecution() == null ? current.allowHybridExecution() : request.allowHybridExecution(),
+                blankToNull(firstText(request.message(), current.message()))
+        );
+        entity.setGovernancePolicyJson(writeJson(merged));
+        if (disabled) {
+            entity.setStatus("DISABLED");
+        } else if ("DISABLED".equalsIgnoreCase(entity.getStatus())) {
+            entity.setStatus("ONLINE");
+        }
+        instanceMapper.updateById(entity);
+        return entity;
     }
 
     @Transactional
@@ -784,6 +1143,28 @@ public class AiRegistryService {
         return name.trim();
     }
 
+    private String normalizeGraphCode(String code) {
+        if (!StringUtils.hasText(code)) {
+            throw new IllegalArgumentException("graph code 不能为空");
+        }
+        String normalized = code.trim().toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9_-]+", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "");
+        if (!StringUtils.hasText(normalized)) {
+            throw new IllegalArgumentException("graph code 非法: " + code);
+        }
+        return normalized;
+    }
+
+    private String agentKeySlug(String projectCode, String graphCode) {
+        String slug = normalizeGraphCode(projectCode) + "-" + normalizeGraphCode(graphCode);
+        if (slug.length() <= 63) {
+            return slug;
+        }
+        return slug.substring(0, 63).replaceAll("[-_]+$", "");
+    }
+
     private String storageName(String projectCode, String capabilityName) {
         return projectCode + "__" + capabilityName.replaceAll("[^A-Za-z0-9_]+", "_");
     }
@@ -810,5 +1191,48 @@ public class AiRegistryService {
 
     private String defaultString(String value, String fallback) {
         return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    public RuntimeGovernancePolicy governancePolicy(ProjectInstanceEntity entity) {
+        RuntimeGovernancePolicy stored = parseGovernancePolicy(entity == null ? null : entity.getGovernancePolicyJson());
+        boolean disabled = entity != null && "DISABLED".equalsIgnoreCase(entity.getStatus());
+        String status = entity == null ? "UNKNOWN" : defaultString(entity.getStatus(), "UNKNOWN");
+        return new RuntimeGovernancePolicy(
+                disabled || (stored != null && stored.disabled()),
+                status,
+                stored == null ? null : stored.minSdkVersion(),
+                stored == null || stored.allowEmbeddedExecution() == null ? Boolean.TRUE : stored.allowEmbeddedExecution(),
+                stored == null || stored.allowHybridExecution() == null ? Boolean.TRUE : stored.allowHybridExecution(),
+                firstText(
+                        stored == null ? null : stored.message(),
+                        disabled ? "该业务系统 Runtime 已被中台禁用，SDK 应停止接受新的本地 Agent 执行。" : "ok"
+                )
+        );
+    }
+
+    private RuntimeGovernancePolicy parseGovernancePolicy(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, RuntimeGovernancePolicy.class);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String blankToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String normalizeInstanceStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            throw new IllegalArgumentException("status 不能为空");
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "ONLINE", "OFFLINE", "DISABLED", "STALE" -> normalized;
+            default -> throw new IllegalArgumentException("不支持的实例状态: " + status);
+        };
     }
 }

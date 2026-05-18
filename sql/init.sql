@@ -498,6 +498,41 @@ CALL add_idx_if_absent('tool_call_log', 'idx_create_time',      'create_time');
 CALL add_idx_if_absent('tool_call_log', 'idx_user_create_time', 'user_id, create_time');
 CALL add_idx_if_absent('tool_call_log', 'idx_intent_create',    'intent_type, create_time');
 
+CREATE TABLE IF NOT EXISTS `agent_trace_span` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `trace_id`          VARCHAR(64)  NOT NULL                COMMENT '一次 Agent 执行的 trace id',
+    `span_id`           VARCHAR(64)  NOT NULL                COMMENT 'Span ID',
+    `parent_span_id`    VARCHAR(64)  DEFAULT NULL            COMMENT '父 Span ID',
+    `span_type`         VARCHAR(32)  NOT NULL                COMMENT 'AGENT_RUN/LLM_CALL/TOOL_CALL 等',
+    `runtime_type`      VARCHAR(32)  DEFAULT NULL            COMMENT 'Runtime 类型',
+    `agent_id`          VARCHAR(64)  DEFAULT NULL            COMMENT 'Agent ID',
+    `agent_name`        VARCHAR(128) DEFAULT NULL            COMMENT 'Agent 名称',
+    `node_id`           VARCHAR(128) DEFAULT NULL            COMMENT 'GraphSpec 节点 ID',
+    `tool_name`         VARCHAR(256) DEFAULT NULL            COMMENT 'Tool/Skill 名称',
+    `model_instance_id` VARCHAR(64)  DEFAULT NULL            COMMENT '模型实例 ID',
+    `project_code`      VARCHAR(96)  DEFAULT NULL            COMMENT '项目编码',
+    `status`            VARCHAR(16)  NOT NULL DEFAULT 'SUCCESS' COMMENT 'SUCCESS/ERROR',
+    `input_summary`     MEDIUMTEXT   DEFAULT NULL            COMMENT '输入摘要',
+    `output_summary`    MEDIUMTEXT   DEFAULT NULL            COMMENT '输出摘要',
+    `metadata_json`     MEDIUMTEXT   DEFAULT NULL            COMMENT '结构化元数据 JSON',
+    `error_code`        VARCHAR(128) DEFAULT NULL            COMMENT '错误码',
+    `error_message`     TEXT         DEFAULT NULL            COMMENT '错误信息',
+    `latency_ms`        INT          DEFAULT NULL            COMMENT '耗时毫秒',
+    `token_cost`        INT          DEFAULT NULL            COMMENT 'Token 消耗',
+    `started_at`        DATETIME     DEFAULT NULL            COMMENT '开始时间',
+    `ended_at`          DATETIME     DEFAULT NULL            COMMENT '结束时间',
+    `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_trace_span` (`trace_id`, `span_id`),
+    KEY `idx_trace` (`trace_id`, `created_at`),
+    KEY `idx_parent` (`trace_id`, `parent_span_id`),
+    KEY `idx_agent_node` (`agent_id`, `node_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 平台统一执行 Trace Span';
+
+CALL add_idx_if_absent('agent_trace_span', 'idx_trace',      'trace_id, created_at');
+CALL add_idx_if_absent('agent_trace_span', 'idx_parent',     'trace_id, parent_span_id');
+CALL add_idx_if_absent('agent_trace_span', 'idx_agent_node', 'agent_id, node_id, created_at');
+
 
 -- ============================================================================
 -- 六、Skill Mining（Phase 2.1）：草稿 + 评估快照
@@ -603,6 +638,10 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
     `system_prompt`           TEXT         DEFAULT NULL,
     `tools_json`              TEXT         DEFAULT NULL                 COMMENT 'tools 白名单 JSON',
     `model_instance_id`       VARCHAR(64)  DEFAULT NULL,
+    `runtime_type`            VARCHAR(32)  NOT NULL DEFAULT 'AGENTSCOPE' COMMENT 'Agent Runtime 类型',
+    `runtime_placement`       VARCHAR(24)  NOT NULL DEFAULT 'CENTRAL' COMMENT '运行位置: CENTRAL / EMBEDDED / HYBRID',
+    `runtime_config_json`     MEDIUMTEXT   DEFAULT NULL                 COMMENT 'Runtime 专属配置 JSON',
+    `graph_spec_json`         MEDIUMTEXT   DEFAULT NULL                 COMMENT 'Platform GraphSpec JSON',
     `max_steps`               INT          NOT NULL DEFAULT 5,
     `type`                    VARCHAR(32)  NOT NULL DEFAULT 'single',
     `pipeline_agent_ids_json` TEXT         DEFAULT NULL,
@@ -626,9 +665,15 @@ CREATE TABLE IF NOT EXISTS `agent_definition` (
 CALL add_col_if_absent('agent_definition', 'key_slug',           'VARCHAR(64) NOT NULL DEFAULT '''' COMMENT ''人类可读 slug'' AFTER `id`');
 CALL add_col_if_absent('agent_definition', 'canvas_json',        'MEDIUMTEXT DEFAULT NULL COMMENT ''Agent Studio 画布 JSON''');
 CALL add_col_if_absent('agent_definition', 'allow_irreversible', 'TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''允许调用 IRREVERSIBLE 副作用 Tool''');
+CALL add_col_if_absent('agent_definition', 'runtime_type',       'VARCHAR(32) NOT NULL DEFAULT ''AGENTSCOPE'' COMMENT ''Agent Runtime 类型'' AFTER `model_instance_id`');
+CALL add_col_if_absent('agent_definition', 'runtime_placement',  'VARCHAR(24) NOT NULL DEFAULT ''CENTRAL'' COMMENT ''运行位置: CENTRAL / EMBEDDED / HYBRID'' AFTER `runtime_type`');
+CALL add_col_if_absent('agent_definition', 'runtime_config_json','MEDIUMTEXT DEFAULT NULL COMMENT ''Runtime 专属配置 JSON'' AFTER `runtime_placement`');
+CALL add_col_if_absent('agent_definition', 'graph_spec_json',    'MEDIUMTEXT DEFAULT NULL COMMENT ''Platform GraphSpec JSON'' AFTER `runtime_config_json`');
 CALL add_idx_if_absent('agent_definition', 'uk_agent_key_slug',  'key_slug');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_intent',   'intent_type');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_enabled',  'enabled');
+CALL add_idx_if_absent('agent_definition', 'idx_agent_runtime',  '`runtime_type`, `enabled`');
+CALL add_idx_if_absent('agent_definition', 'idx_agent_runtime_placement',  '`runtime_placement`, `enabled`');
 
 CREATE TABLE IF NOT EXISTS `agent_version` (
     `id`               BIGINT        NOT NULL AUTO_INCREMENT,
@@ -645,6 +690,25 @@ CREATE TABLE IF NOT EXISTS `agent_version` (
     UNIQUE KEY `uk_agent_version` (`agent_id`, `version`),
     KEY `idx_agent_status` (`agent_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 发布版本快照（Phase 3.0）';
+
+CREATE TABLE IF NOT EXISTS `agent_release_event` (
+    `id`               BIGINT        NOT NULL AUTO_INCREMENT,
+    `agent_id`         VARCHAR(32)   NOT NULL                      COMMENT '关联 agent_definition.id',
+    `version_id`       BIGINT        DEFAULT NULL                  COMMENT '关联 agent_version.id',
+    `version`          VARCHAR(32)   DEFAULT NULL                  COMMENT '发布/回滚涉及的版本号',
+    `action`           VARCHAR(24)   NOT NULL                      COMMENT 'VALIDATE / PUBLISH / ROLLBACK',
+    `decision`         VARCHAR(24)   NOT NULL                      COMMENT 'PASSED / BLOCKED / COMPLETED',
+    `rollout_percent`  INT           DEFAULT NULL                  COMMENT '灰度百分比',
+    `operator`         VARCHAR(64)   DEFAULT NULL                  COMMENT '操作者',
+    `summary`          VARCHAR(512)  DEFAULT NULL,
+    `validation_json`  MEDIUMTEXT    DEFAULT NULL                  COMMENT '发布前校验报告',
+    `metadata_json`    TEXT          DEFAULT NULL                  COMMENT '发布说明等扩展元数据',
+    `created_at`       DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_agent_release_event_agent` (`agent_id`, `id`),
+    KEY `idx_agent_release_event_version` (`version_id`),
+    KEY `idx_agent_release_event_action` (`agent_id`, `action`, `decision`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent 发布治理审计事件';
 
 
 -- ============================================================================
@@ -1111,6 +1175,7 @@ CREATE TABLE IF NOT EXISTS `ai_project_instance` (
     `sdk_version`       VARCHAR(64)  DEFAULT NULL,
     `status`            VARCHAR(24)  NOT NULL DEFAULT 'ONLINE',
     `metadata_json`     JSON         DEFAULT NULL,
+    `governance_policy_json` JSON    DEFAULT NULL,
     `last_heartbeat_at` DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `created_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP,
     `updated_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1119,6 +1184,8 @@ CREATE TABLE IF NOT EXISTS `ai_project_instance` (
     KEY `idx_project_status` (`project_id`, `status`),
     KEY `idx_heartbeat` (`last_heartbeat_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 注册中心业务系统实例';
+
+CALL add_col_if_absent('ai_project_instance', 'governance_policy_json', 'JSON DEFAULT NULL COMMENT ''Runtime 治理策略'' AFTER `metadata_json`');
 
 CREATE TABLE IF NOT EXISTS `capability_sync_log` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,

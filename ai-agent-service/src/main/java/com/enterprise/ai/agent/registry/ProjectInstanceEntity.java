@@ -34,6 +34,8 @@ public class ProjectInstanceEntity {
 
     private String metadataJson;
 
+    private String governancePolicyJson;
+
     private LocalDateTime lastHeartbeatAt;
 
     private LocalDateTime createdAt;

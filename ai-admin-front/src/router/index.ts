@@ -44,7 +44,19 @@ const routes: RouteRecordRaw[] = [
         path: 'agent/:id/versions',
         name: 'AgentVersions',
         component: () => import('@/views/agent/AgentVersions.vue'),
-        meta: { title: 'Agent 版本管理' },
+        meta: { title: 'AgentOps' },
+      },
+      {
+        path: 'runops',
+        name: 'RunOpsList',
+        component: () => import('@/views/runops/RunOpsList.vue'),
+        meta: { title: 'RunOps 运行中心' },
+      },
+      {
+        path: 'runops/:traceId',
+        name: 'RunOpsDetail',
+        component: () => import('@/views/runops/RunOpsDetail.vue'),
+        meta: { title: 'RunOps 运行详情' },
       },
 
       // ── 知识管理 ──
@@ -177,6 +189,12 @@ const routes: RouteRecordRaw[] = [
         name: 'CapabilitySyncDebug',
         component: () => import('@/views/registry/CapabilitySyncDebug.vue'),
         meta: { title: '能力变更评审' },
+      },
+      {
+        path: 'registry/runtimes',
+        name: 'RuntimeRegistry',
+        component: () => import('@/views/registry/RuntimeRegistry.vue'),
+        meta: { title: 'Runtime 纳管' },
       },
       {
         path: 'scan-project',

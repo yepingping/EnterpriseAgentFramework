@@ -156,10 +156,20 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="150">
           <template #default="{ row }">
-            <span class="status-pill" :class="{ offline: row.status !== 'ONLINE' }">
+            <span class="status-pill" :class="{ offline: row.status !== 'ONLINE', disabled: row.status === 'DISABLED' }">
               <i />
               {{ row.status }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Runtime 能力" min-width="260">
+          <template #default="{ row }">
+            <div class="runtime-tags">
+              <el-tag size="small" effect="plain">{{ runtimePlacement(row) }}</el-tag>
+              <el-tag v-for="rt in runtimeTypes(row)" :key="rt" size="small" type="success" effect="plain">{{ rt }}</el-tag>
+              <el-tag v-if="runtimeMeta(row).supportsTools" size="small" type="info" effect="plain">Tool</el-tag>
+              <el-tag v-if="runtimeMeta(row).supportsGraph" size="small" type="warning" effect="plain">Graph</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="host" label="Host" min-width="160">
@@ -176,6 +186,26 @@
         </el-table-column>
         <el-table-column prop="lastHeartbeatAt" label="最近心跳" min-width="190">
           <template #default="{ row }">{{ formatHeartbeatDisplay(row.lastHeartbeatAt) }}</template>
+        </el-table-column>
+        <el-table-column label="治理" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'DISABLED'"
+              size="small"
+              @click="setInstanceStatus(row, 'OFFLINE')"
+            >
+              解除禁用
+            </el-button>
+            <el-button
+              v-else
+              size="small"
+              type="danger"
+              plain
+              @click="setInstanceStatus(row, 'DISABLED')"
+            >
+              禁用
+            </el-button>
+          </template>
         </el-table-column>
       </el-table>
 
@@ -290,7 +320,7 @@ import {
   getScanProjects,
   updateScanProject,
 } from '@/api/scanProject'
-import { listRegistryProjectInstances } from '@/api/registry'
+import { listRegistryProjectInstances, updateRegistryProjectInstanceStatus } from '@/api/registry'
 import type { ProjectKind, ProjectVisibility } from '@/types/registry'
 import type { ScanProject, ScanProjectUpsertRequest } from '@/types/scanProject'
 import type { ProjectInstance } from '@/types/registry'
@@ -510,6 +540,38 @@ async function loadInstances() {
     instances.value = data
   } finally {
     loadingInstances.value = false
+  }
+}
+
+function runtimeMeta(instance: ProjectInstance): Record<string, any> {
+  if (!instance.metadataJson) return {}
+  try {
+    return JSON.parse(instance.metadataJson)
+  } catch {
+    return {}
+  }
+}
+
+function runtimePlacement(instance: ProjectInstance) {
+  return runtimeMeta(instance).runtimePlacement || 'EMBEDDED'
+}
+
+function runtimeTypes(instance: ProjectInstance): string[] {
+  const raw = runtimeMeta(instance).runtimeTypes
+  if (Array.isArray(raw)) return raw.filter(Boolean).map(String)
+  return raw ? [String(raw)] : ['SPRING_BOOT_EMBEDDED']
+}
+
+async function setInstanceStatus(instance: ProjectInstance, status: ProjectInstance['status']) {
+  try {
+    await updateRegistryProjectInstanceStatus(projectCode.value, {
+      instanceId: instance.instanceId,
+      status,
+    })
+    ElMessage.success(status === 'DISABLED' ? '实例已禁用' : '实例已解除禁用')
+    await loadInstances()
+  } catch (error) {
+    ElMessage.error((error as Error).message || '实例状态更新失败')
   }
 }
 
@@ -1093,6 +1155,22 @@ function goCapabilitySync() {
       background: #98a2b3;
     }
   }
+
+  &.disabled {
+    background: #fff1f3;
+    color: #c01048;
+    border-color: #fecdd6;
+
+    i {
+      background: #f43f5e;
+    }
+  }
+}
+
+.runtime-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .table-footer {
@@ -1321,6 +1399,12 @@ function goCapabilitySync() {
       background: rgba(51, 65, 85, 0.52);
       color: #cbd5e1;
       border-color: rgba(148, 163, 184, 0.22);
+    }
+
+    &.disabled {
+      background: rgba(136, 19, 55, 0.32);
+      color: #fda4af;
+      border-color: rgba(244, 63, 94, 0.4);
     }
   }
 

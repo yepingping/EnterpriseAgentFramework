@@ -5,6 +5,8 @@ import type {
   AgentResult,
   AgentRuntimeCapability,
   AgentRuntimeValidationResult,
+  AgentReleaseValidationResult,
+  AgentReleaseEvent,
   AgentVersion,
   PublishVersionRequest,
 } from '@/types/agent'
@@ -54,6 +56,19 @@ export function listAgentVersions(agentId: string) {
 
 export function publishAgentVersion(agentId: string, data: PublishVersionRequest) {
   return agentRequest.post<AgentVersion>(`/api/agents/${agentId}/versions`, data)
+}
+
+export function listAgentReleaseEvents(agentId: string, limit = 100) {
+  return agentRequest.get<AgentReleaseEvent[]>(`/api/agents/${agentId}/versions/events`, {
+    params: { limit },
+  })
+}
+
+export function validateAgentRelease(
+  agentId: string,
+  data?: { version?: string; rolloutPercent?: number; operator?: string },
+) {
+  return agentRequest.post<AgentReleaseValidationResult>(`/api/agents/${agentId}/versions/validate`, data ?? {})
 }
 
 export function rollbackAgentVersion(agentId: string, versionId: number, operator?: string) {

@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.registry;
 
+import com.enterprise.ai.agent.graph.AgentGraphSpec;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
 
 import java.util.List;
@@ -32,6 +33,32 @@ public final class RegistryContracts {
             String appVersion,
             String sdkVersion,
             Map<String, Object> metadata
+    ) {
+    }
+
+    public record InstanceHeartbeatResponse(
+            ProjectInstanceEntity instance,
+            RuntimeGovernancePolicy policy
+    ) {
+    }
+
+    public record RuntimeGovernancePolicy(
+            boolean disabled,
+            String status,
+            String minSdkVersion,
+            Boolean allowEmbeddedExecution,
+            Boolean allowHybridExecution,
+            String message
+    ) {
+    }
+
+    public record RuntimeGovernancePolicyUpdateRequest(
+            String instanceId,
+            Boolean disabled,
+            String minSdkVersion,
+            Boolean allowEmbeddedExecution,
+            Boolean allowHybridExecution,
+            String message
     ) {
     }
 
@@ -93,6 +120,47 @@ public final class RegistryContracts {
             int unchanged,
             int applied,
             List<CapabilityDiffItem> items
+    ) {
+    }
+
+    public record AgentGraphSyncRequest(
+            String syncId,
+            String source,
+            Boolean apply,
+            List<AgentGraphRegistration> graphs
+    ) {
+    }
+
+    public record AgentGraphRegistration(
+            String code,
+            String name,
+            String description,
+            String runtimeType,
+            String modelInstanceId,
+            String systemPrompt,
+            String visibility,
+            AgentGraphSpec graphSpec,
+            Map<String, Object> metadata
+    ) {
+    }
+
+    public record AgentGraphSyncResponse(
+            String syncId,
+            Long projectId,
+            String projectCode,
+            int received,
+            int created,
+            int updated,
+            List<AgentGraphSyncItem> items
+    ) {
+    }
+
+    public record AgentGraphSyncItem(
+            String graphCode,
+            String agentId,
+            String keySlug,
+            String changeType,
+            String message
     ) {
     }
 

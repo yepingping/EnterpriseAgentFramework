@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,16 +47,42 @@ public class EafRegistryAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public EafAgentGraphScanner eafAgentGraphScanner(ObjectProvider<EafAgentGraph> graphs) {
+        return new EafAgentGraphScanner(graphs);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EafRegistryClient eafRegistryClient(EafRegistryProperties properties,
                                                EafCapabilityScanner scanner,
+                                               EafAgentGraphScanner graphScanner,
                                                SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
-        return new EafRegistryClient(properties, scanner, descriptionSettingsHolder);
+        return new EafRegistryClient(properties, scanner, graphScanner, descriptionSettingsHolder);
     }
 
     @Bean
     @ConditionalOnMissingBean
     public EafAgentClient eafAgentClient(EafRegistryProperties properties) {
         return new EafAgentClient(properties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public RuntimeGovernanceGuard runtimeGovernanceGuard(EafRegistryClient client) {
+        return new RuntimeGovernanceGuard(client::governanceState);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public EmbeddedRuntimeService embeddedRuntimeService(RuntimeGovernanceGuard governanceGuard,
+                                                         List<EmbeddedRuntimeExecutor> executors) {
+        return new EmbeddedRuntimeService(governanceGuard, executors);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public EmbeddedRuntimeEndpoint embeddedRuntimeEndpoint(EmbeddedRuntimeService embeddedRuntimeService) {
+        return new EmbeddedRuntimeEndpoint(embeddedRuntimeService);
     }
 
     @Bean
@@ -73,6 +100,12 @@ public class EafRegistryAutoConfiguration {
     public EafCapabilitiesEndpoint eafCapabilitiesEndpoint(EafRegistryClient client,
                                                            EafRegistryProperties properties) {
         return new EafCapabilitiesEndpoint(client, properties);
+    }
+
+    @Bean
+    public EafRuntimeGovernanceEndpoint eafRuntimeGovernanceEndpoint(EafRegistryClient client,
+                                                                     EafRegistryProperties properties) {
+        return new EafRuntimeGovernanceEndpoint(client, properties);
     }
 
     public static class EafRegistryHeartbeat {
@@ -113,6 +146,25 @@ public class EafRegistryAutoConfiguration {
                 return List.of();
             }
             return client.capabilities();
+        }
+    }
+
+    @Endpoint(id = "eaf-runtime-governance")
+    public static class EafRuntimeGovernanceEndpoint {
+        private final EafRegistryClient client;
+        private final EafRegistryProperties properties;
+
+        EafRuntimeGovernanceEndpoint(EafRegistryClient client, EafRegistryProperties properties) {
+            this.client = client;
+            this.properties = properties;
+        }
+
+        @ReadOperation
+        public RuntimeGovernanceState state() {
+            if (!properties.getRegistry().isEnabled()) {
+                return RuntimeGovernanceState.defaultState();
+            }
+            return client.governanceState();
         }
     }
 }

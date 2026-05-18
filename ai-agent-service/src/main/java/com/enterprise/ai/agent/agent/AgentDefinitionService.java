@@ -3,6 +3,7 @@ package com.enterprise.ai.agent.agent;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.enterprise.ai.agent.agent.persist.AgentDefinitionEntity;
 import com.enterprise.ai.agent.agent.persist.AgentDefinitionMapper;
+import com.enterprise.ai.agent.graph.AgentGraphSpec;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -160,6 +161,9 @@ public class AgentDefinitionService {
         if (update.getSkillRefs() != null) current.setSkillRefs(update.getSkillRefs());
         if (update.getModelInstanceId() != null) current.setModelInstanceId(update.getModelInstanceId());
         if (update.getRuntimeType() != null) current.setRuntimeType(update.getRuntimeType());
+        if (update.getRuntimePlacement() != null) current.setRuntimePlacement(update.getRuntimePlacement());
+        if (update.getRuntimeConfig() != null) current.setRuntimeConfig(update.getRuntimeConfig());
+        if (update.getGraphSpec() != null) current.setGraphSpec(update.getGraphSpec());
         if (update.getMaxSteps() > 0) current.setMaxSteps(update.getMaxSteps());
         if (update.getType() != null) current.setType(update.getType());
         if (update.getPipelineAgentIds() != null) current.setPipelineAgentIds(update.getPipelineAgentIds());
@@ -329,7 +333,10 @@ public class AgentDefinitionService {
                 .modelInstanceId(e.getModelInstanceId())
                 .runtimeType(e.getRuntimeType() == null || e.getRuntimeType().isBlank()
                         ? "AGENTSCOPE" : e.getRuntimeType())
+                .runtimePlacement(e.getRuntimePlacement() == null || e.getRuntimePlacement().isBlank()
+                        ? "CENTRAL" : e.getRuntimePlacement())
                 .runtimeConfig(parseMap(e.getRuntimeConfigJson()))
+                .graphSpec(parseGraphSpec(e.getGraphSpecJson()))
                 .maxSteps(e.getMaxSteps() == null ? 5 : e.getMaxSteps())
                 .type(e.getType() == null ? "single" : e.getType())
                 .pipelineAgentIds(parseList(e.getPipelineAgentIdsJson()))
@@ -366,7 +373,9 @@ public class AgentDefinitionService {
         e.setSkillRefsJson(writeCapabilityRefs(skillRefs));
         e.setModelInstanceId(d.getModelInstanceId());
         e.setRuntimeType(d.getRuntimeType() == null || d.getRuntimeType().isBlank() ? "AGENTSCOPE" : d.getRuntimeType());
+        e.setRuntimePlacement(normalizeRuntimePlacement(d.getRuntimePlacement()));
         e.setRuntimeConfigJson(writeMap(d.getRuntimeConfig()));
+        e.setGraphSpecJson(writeGraphSpec(d.getGraphSpec()));
         e.setMaxSteps(d.getMaxSteps() > 0 ? d.getMaxSteps() : 5);
         e.setType(d.getType() == null ? "single" : d.getType());
         e.setPipelineAgentIdsJson(writeList(d.getPipelineAgentIds()));
@@ -494,6 +503,18 @@ public class AgentDefinitionService {
         }
     }
 
+    private AgentGraphSpec parseGraphSpec(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return domainObjectMapper.readValue(json, AgentGraphSpec.class);
+        } catch (Exception e) {
+            log.warn("[AgentDef] 解析 AgentGraphSpec JSON 失败，返回空: {}", e.getMessage());
+            return null;
+        }
+    }
+
     private String writeList(List<String> list) {
         if (list == null) {
             return null;
@@ -523,5 +544,27 @@ public class AgentDefinitionService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String writeGraphSpec(AgentGraphSpec graphSpec) {
+        if (graphSpec == null) {
+            return null;
+        }
+        try {
+            return domainObjectMapper.writeValueAsString(graphSpec);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String normalizeRuntimePlacement(String value) {
+        if (value == null || value.isBlank()) {
+            return "CENTRAL";
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "EMBEDDED", "HYBRID" -> normalized;
+            default -> "CENTRAL";
+        };
     }
 }

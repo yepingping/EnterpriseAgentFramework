@@ -8,6 +8,7 @@
         <el-tag v-if="form.keySlug" size="small" type="info">{{ form.keySlug }}</el-tag>
         <el-tag size="small" type="success">{{ form.projectCode || 'GLOBAL' }}</el-tag>
         <el-tag size="small">{{ form.visibility || 'PRIVATE' }}</el-tag>
+        <el-tag v-if="isSdkManaged" size="small" type="warning">SDK 同步</el-tag>
       </div>
       <div class="header-right">
         <el-button @click="handleSwitchToForm" :icon="DocumentCopy">表单视图</el-button>
@@ -15,10 +16,30 @@
         <el-button @click="handleExtractCanvasSkill" :icon="Collection" :loading="canvasExtracting">
           画布转能力草稿
         </el-button>
-        <el-button type="success" @click="handleSave" :loading="saving">保存草稿</el-button>
+        <el-button type="success" @click="handleSave" :loading="saving" :disabled="studioReadOnly">保存草稿</el-button>
         <el-button type="primary" @click="publishDialogOpen = true">发布 / 灰度</el-button>
       </div>
     </div>
+
+    <el-alert
+      v-if="isSdkManaged"
+      class="sdk-source-alert"
+      type="warning"
+      :closable="false"
+      show-icon
+    >
+      <template #title>
+        SDK 代码托管图：{{ sdkGraphMeta.projectCode || form.projectCode }} / {{ sdkGraphMeta.graphCode || form.keySlug }}
+      </template>
+      <div class="sdk-source-detail">
+        Studio 当前以只读方式展示代码同步草稿；代码变更并重启业务系统后会自动更新草稿，发布版本不会自动改变。
+        <span v-if="sdkGraphMeta.lastSyncedAt">最近同步：{{ sdkGraphMeta.lastSyncedAt }}</span>
+        <div class="sdk-publish-state">
+          <el-tag size="small" :type="sdkPublishState.type" effect="dark">{{ sdkPublishState.label }}</el-tag>
+          <span>{{ sdkPublishState.hint }}</span>
+        </div>
+      </div>
+    </el-alert>
 
     <div class="studio-body">
       <!-- 左侧节点调色板 -->
@@ -28,8 +49,9 @@
           v-for="item in paletteItems"
           :key="item.kind"
           class="palette-item"
+          :class="{ disabled: studioReadOnly }"
           :style="{ borderLeftColor: kindColor(item.kind).border }"
-          draggable="true"
+          :draggable="!studioReadOnly"
           @dragstart="onDragStart($event, item.kind)"
         >
           <div class="palette-item-title">{{ item.label }}</div>
@@ -51,9 +73,12 @@
           v-model:edges="edges"
           :default-viewport="{ zoom: 0.9 }"
           :delete-key-code="['Delete', 'Backspace']"
+          :nodes-draggable="!studioReadOnly"
+          :nodes-connectable="!studioReadOnly"
           @node-double-click="onNodeDoubleClick"
-          @pane-click="selectedNodeId = null"
+          @pane-click="clearSelection"
           @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
           class="studio-canvas"
         >
           <Background />
@@ -68,6 +93,13 @@
           <template #node-end="nodeProps">
             <div class="studio-node end-node">
               <div class="node-label">{{ nodeProps.data.label }}</div>
+            </div>
+          </template>
+          <template #node-llm="nodeProps">
+            <div class="studio-node llm-node">
+              <div class="node-kind">LLM</div>
+              <div class="node-label">{{ nodeProps.data.label || nodeProps.id }}</div>
+              <div class="node-desc">LangGraph4j GraphSpec 节点</div>
             </div>
           </template>
           <template #node-skill="nodeProps">
@@ -95,7 +127,35 @@
 
       <!-- 右侧属性面板 -->
       <aside class="property-panel">
-        <div v-if="!selectedNode">
+        <el-alert
+          v-if="studioReadOnly"
+          class="readonly-alert"
+          title="代码托管 Agent 只读展示；请在业务代码中修改 EafGraph 后重启同步。"
+          type="warning"
+          :closable="false"
+        />
+        <div v-if="selectedEdge">
+          <el-divider>连线条件</el-divider>
+          <el-form label-width="100px" size="small">
+            <el-form-item label="来源">
+              <el-input :model-value="selectedEdge.source" disabled />
+            </el-form-item>
+            <el-form-item label="目标">
+              <el-input :model-value="selectedEdge.target" disabled />
+            </el-form-item>
+            <el-form-item label="条件">
+              <el-input
+                v-model="selectedEdge.condition"
+                placeholder="always / success / error / contains:通过"
+                @input="syncSelectedEdgeLabel"
+              />
+            </el-form-item>
+            <div class="condition-help">
+              支持 always、default、success、error、empty、not_empty、contains:文本、equals:文本。
+            </div>
+          </el-form>
+        </div>
+        <div v-else-if="!selectedNode">
           <el-alert title="选中节点以编辑属性" type="info" :closable="false" />
           <el-divider>Agent 元数据</el-divider>
           <el-form label-width="100px" size="small">
@@ -226,14 +286,41 @@
             size="small"
             :icon="Delete"
             @click="deleteSelectedNode"
-            :disabled="selectedNode.data.kind === 'start' || selectedNode.data.kind === 'end'"
+            :disabled="studioReadOnly || selectedNode.data.kind === 'start' || selectedNode.data.kind === 'end'"
           >删除节点</el-button>
         </div>
       </aside>
     </div>
 
     <!-- 发布弹窗 -->
-    <el-dialog v-model="publishDialogOpen" title="发布 Agent 版本" width="480px">
+    <el-dialog v-model="publishDialogOpen" title="发布 Agent 版本" width="640px">
+      <div v-if="releaseErrors.length || releaseWarnings.length" class="release-check-panel">
+        <div class="release-check-head">
+          <div>
+            <strong>后端发布门禁</strong>
+            <span>{{ releaseErrors.length }} 个阻断项 / {{ releaseWarnings.length }} 个提醒项</span>
+          </div>
+          <el-tag :type="releaseErrors.length ? 'danger' : 'success'" size="small">
+            {{ releaseErrors.length ? 'BLOCKED' : 'PASSED' }}
+          </el-tag>
+        </div>
+        <el-collapse model-value="errors" class="release-check-collapse">
+          <el-collapse-item v-if="releaseErrors.length" title="阻断项 ERROR" name="errors">
+            <div v-for="item in releaseErrors" :key="`${item.code}-${item.nodeId}-${item.message}`" class="check-item error">
+              <el-tag size="small" type="danger">{{ item.code }}</el-tag>
+              <span v-if="item.nodeId" class="check-node">{{ item.nodeId }}</span>
+              <span>{{ item.message }}</span>
+            </div>
+          </el-collapse-item>
+          <el-collapse-item v-if="releaseWarnings.length" title="提醒项 WARN" name="warnings">
+            <div v-for="item in releaseWarnings" :key="`${item.code}-${item.nodeId}-${item.message}`" class="check-item warn">
+              <el-tag size="small" type="warning">{{ item.code }}</el-tag>
+              <span v-if="item.nodeId" class="check-node">{{ item.nodeId }}</span>
+              <span>{{ item.message }}</span>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
       <el-alert
         v-if="publishWarnings.length"
         type="warning"
@@ -290,6 +377,15 @@
               <strong>回答：</strong>
               <div>{{ debugResult.answer }}</div>
             </div>
+            <div class="result-section" v-if="debugOpsItems.length">
+              <strong>生产运行信息：</strong>
+              <div class="runtime-insights">
+                <div v-for="item in debugOpsItems" :key="item.label" class="runtime-insight">
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                </div>
+              </div>
+            </div>
             <div class="result-section" v-if="debugResult.toolCalls?.length">
               <strong>Tool 调用：</strong>
               <el-tag
@@ -328,6 +424,11 @@
                   @click="handleExtractCapabilityDraft"
                   :loading="extracting"
                 >抽取为能力草稿</el-button>
+                <el-button
+                  type="primary"
+                  size="small"
+                  @click="router.push(`/runops/${currentTraceId}`)"
+                >查看 RunOps</el-button>
               </div>
               <TraceTimeline :nodes="traceNodes" />
             </div>
@@ -354,9 +455,9 @@ import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-import type { AgentForm } from '@/types/agent'
+import type { AgentForm, AgentReleaseValidationItem, AgentVersion, AgentDefinition } from '@/types/agent'
 import type { CanvasNode, CanvasEdge, CanvasNodeKind } from '@/types/studio'
-import { getAgent, updateAgent, publishAgentVersion, gatewayChat } from '@/api/agent'
+import { getAgent, updateAgent, publishAgentVersion, validateAgentRelease, gatewayChat, listAgentVersions } from '@/api/agent'
 import { getTools } from '@/api/tool'
 import { listCapabilities } from '@/api/capability'
 import type { ToolInfo } from '@/types/tool'
@@ -380,6 +481,9 @@ const { screenToFlowCoordinate } = useVueFlow()
 const saving = ref(false)
 const publishing = ref(false)
 const publishDialogOpen = ref(false)
+const releaseErrors = ref<AgentReleaseValidationItem[]>([])
+const releaseWarnings = ref<AgentReleaseValidationItem[]>([])
+const versions = ref<AgentVersion[]>([])
 const debugOpen = ref(false)
 const debugLoading = ref(false)
 const debugMessage = ref('这是一条测试消息')
@@ -394,6 +498,19 @@ const traceToolNames = computed(() => {
     .map((n) => (n.toolName || '').trim())
     .filter((n) => !!n)
   return Array.from(new Set(names))
+})
+const debugOpsItems = computed(() => {
+  const metadata = debugResult.value?.metadata || {}
+  const fallback = metadata.embeddedFallbackReason ? '已回落' : metadata.runtimePlacement === 'HYBRID' ? '未回落' : '-'
+  return [
+    { label: '版本', value: textValue(metadata.version) },
+    { label: '运行位置', value: textValue(metadata.runtimePlacement) },
+    { label: 'Runtime', value: textValue(metadata.runtimeType) },
+    { label: '业务项目', value: textValue(metadata.projectCode) },
+    { label: '实例', value: textValue(metadata.instanceId) },
+    { label: 'HYBRID 回落', value: fallback },
+    { label: 'Trace', value: textValue(metadata.traceId) },
+  ].filter((item) => item.value !== '-')
 })
 
 const toolOptions = ref<ToolInfo[]>([])
@@ -419,7 +536,9 @@ const form = reactive<AgentForm>({
   skills: [],
   modelInstanceId: '',
   runtimeType: 'AGENTSCOPE',
+  runtimePlacement: 'CENTRAL',
   runtimeConfig: {},
+  graphSpec: null,
   maxSteps: 5,
   enabled: true,
   type: 'single',
@@ -434,11 +553,57 @@ const form = reactive<AgentForm>({
   allowIrreversible: false,
 })
 
+const sdkGraphMeta = computed<Record<string, unknown>>(() => {
+  const extra = form.extra || {}
+  const raw = extra.sdkGraph
+  return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+})
+const isSdkManaged = computed(() => sdkGraphMeta.value.managedBy === 'SDK' || sdkGraphMeta.value.source === 'SDK')
+const studioReadOnly = computed(() => isSdkManaged.value)
+const latestPublishedVersion = computed(() =>
+  [...versions.value]
+    .filter((version) => version.status === 'ACTIVE' || version.status === 'RETIRED')
+    .sort((a, b) => dateMs(b.publishedAt || b.createTime) - dateMs(a.publishedAt || a.createTime))[0] || null,
+)
+const sdkPublishState = computed(() => {
+  const latest = latestPublishedVersion.value
+  const syncAt = String(sdkGraphMeta.value.lastSyncedAt || '')
+  if (!latest) {
+    return {
+      type: 'danger' as const,
+      label: '未发布',
+      hint: `SDK 草稿已同步${syncAt ? `于 ${syncAt}` : ''}，还没有发布版本。`,
+    }
+  }
+  const currentHash = String(sdkGraphMeta.value.sourceHash || '')
+  const publishedHash = sdkSourceHashFromVersion(latest)
+  const hashDiffers = currentHash && publishedHash && currentHash !== publishedHash
+  const timeDiffers = !currentHash || !publishedHash
+    ? dateMs(syncAt) > dateMs(latest.publishedAt || latest.createTime) + 1000
+    : false
+  if (hashDiffers || timeDiffers) {
+    return {
+      type: 'warning' as const,
+      label: '草稿待发布',
+      hint: `SDK 草稿晚于最新发布版本 ${latest.version}，需要重新发布后生产入口才会生效。`,
+    }
+  }
+  return {
+    type: 'success' as const,
+    label: '已发布同步',
+    hint: `最新发布版本 ${latest.version} 已包含当前 SDK 图。`,
+  }
+})
+
 const nodes = ref<CanvasNode[]>([])
 const edges = ref<CanvasEdge[]>([])
 const selectedNodeId = ref<string | null>(null)
+const selectedEdgeId = ref<string | null>(null)
 const selectedNode = computed(() =>
   nodes.value.find((n) => n.id === selectedNodeId.value) ?? null,
+)
+const selectedEdge = computed(() =>
+  edges.value.find((edge) => edge.id === selectedEdgeId.value) ?? null,
 )
 const selectedToolInfo = computed(() => {
   const refName = selectedNode.value?.data.kind === 'tool' ? selectedNode.value.data.ref : ''
@@ -502,11 +667,18 @@ const paletteItems: { kind: CanvasNodeKind; label: string; hint: string }[] = [
 ]
 
 function onDragStart(event: DragEvent, kind: CanvasNodeKind) {
+  if (studioReadOnly.value) {
+    event.preventDefault()
+    return
+  }
   event.dataTransfer?.setData('application/vueflow', kind)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
 function onDrop(event: DragEvent) {
+  if (studioReadOnly.value) {
+    return
+  }
   const kind = event.dataTransfer?.getData('application/vueflow') as CanvasNodeKind | undefined
   if (!kind) return
   const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
@@ -640,13 +812,32 @@ function projectBoundaryWarnings() {
 
 function onNodeClick(evt: { node: { id: string } }) {
   selectedNodeId.value = evt.node.id
+  selectedEdgeId.value = null
 }
 
 function onNodeDoubleClick(evt: { node: { id: string } }) {
   selectedNodeId.value = evt.node.id
+  selectedEdgeId.value = null
+}
+
+function onEdgeClick(evt: { edge: { id: string } }) {
+  selectedEdgeId.value = evt.edge.id
+  selectedNodeId.value = null
+}
+
+function clearSelection() {
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+}
+
+function syncSelectedEdgeLabel() {
+  if (!selectedEdge.value) return
+  const condition = selectedEdge.value.condition?.trim() || ''
+  selectedEdge.value.label = condition || undefined
 }
 
 function deleteSelectedNode() {
+  if (studioReadOnly.value) return
   if (!selectedNode.value) return
   if (selectedNode.value.data.kind === 'start' || selectedNode.value.data.kind === 'end') {
     ElMessage.warning('开始/结束节点不可删除')
@@ -674,7 +865,7 @@ async function loadAgent() {
         data: { label: '结束', kind: 'end' },
       },
     ]
-    edges.value = [{ id: 'e-start-end', source: 'start', target: 'end' }]
+    edges.value = [{ id: 'e-start-end', source: 'start', target: 'end', condition: 'always', label: 'always' }]
     return
   }
   try {
@@ -692,6 +883,9 @@ async function loadAgent() {
       skills: data.skills || [],
       modelInstanceId: data.modelInstanceId || '',
       runtimeType: data.runtimeType || 'AGENTSCOPE',
+      runtimePlacement: data.runtimePlacement || 'CENTRAL',
+      runtimeConfig: data.runtimeConfig || {},
+      graphSpec: data.graphSpec || null,
       maxSteps: data.maxSteps || 5,
       enabled: data.enabled ?? true,
       type: data.type || 'single',
@@ -708,8 +902,22 @@ async function loadAgent() {
     const snap = definitionToCanvas(data)
     nodes.value = snap.nodes
     edges.value = snap.edges
+    await loadVersions()
   } catch {
     ElMessage.error('加载 Agent 失败')
+  }
+}
+
+async function loadVersions() {
+  if (isNew) {
+    versions.value = []
+    return
+  }
+  try {
+    const { data } = await listAgentVersions(agentId)
+    versions.value = Array.isArray(data) ? data : []
+  } catch {
+    versions.value = []
   }
 }
 
@@ -740,21 +948,27 @@ async function loadCapabilityOptions() {
 }
 
 async function handleSave() {
+  if (studioReadOnly.value) {
+    ElMessage.info('SDK 代码托管 Agent 当前为只读草稿，请修改 EafGraph 后重启业务系统同步。')
+    return false
+  }
   if (!form.name) {
     ElMessage.warning('请先填写 Agent 名称')
-    return
+    return false
   }
   saving.value = true
   try {
     const payload = canvasToDefinition(form, { nodes: nodes.value, edges: edges.value })
     if (isNew) {
       ElMessage.warning('请先在表单视图创建 Agent，再进入 Studio 编辑')
-      return
+      return false
     }
     await updateAgent(agentId, payload)
     ElMessage.success('已保存草稿')
+    return true
   } catch {
     ElMessage.error('保存失败')
+    return false
   } finally {
     saving.value = false
   }
@@ -765,20 +979,40 @@ async function handlePublish() {
     ElMessage.warning('请先填写版本号')
     return
   }
-  if (publishWarnings.value.length) {
-    try {
-      await ElMessageBox.confirm(
-        publishWarnings.value.join('\n'),
-        '确认继续发布？',
-        { type: 'warning', confirmButtonText: '继续发布', cancelButtonText: '返回检查' },
-      )
-    } catch {
+  publishing.value = true
+  releaseErrors.value = []
+  releaseWarnings.value = []
+  try {
+    const saved = studioReadOnly.value ? true : await handleSave()
+    if (!saved) {
       return
     }
-  }
-  publishing.value = true
-  try {
-    await handleSave()
+    const validation = await validateAgentRelease(agentId, {
+      version: publishForm.version,
+      rolloutPercent: publishForm.rolloutPercent,
+      operator: publishForm.publishedBy,
+    })
+    releaseErrors.value = validation.data.errors || []
+    releaseWarnings.value = validation.data.warnings || []
+    if (!validation.data.valid) {
+      ElMessage.error('发布门禁未通过，请先修复阻断项')
+      return
+    }
+    const warnings = [
+      ...publishWarnings.value,
+      ...releaseWarnings.value.map(formatReleaseValidationItem),
+    ]
+    if (warnings.length) {
+      try {
+        await ElMessageBox.confirm(
+          warnings.join('\n'),
+          '确认继续发布？',
+          { type: 'warning', confirmButtonText: '继续发布', cancelButtonText: '返回检查' },
+        )
+      } catch {
+        return
+      }
+    }
     await publishAgentVersion(agentId, {
       version: publishForm.version,
       rolloutPercent: publishForm.rolloutPercent,
@@ -786,12 +1020,44 @@ async function handlePublish() {
       publishedBy: publishForm.publishedBy,
     })
     ElMessage.success(`已发布 ${publishForm.version}（灰度 ${publishForm.rolloutPercent}%）`)
+    await loadVersions()
     publishDialogOpen.value = false
   } catch (err) {
     ElMessage.error('发布失败：' + (err as Error).message)
   } finally {
     publishing.value = false
   }
+}
+
+function textValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '-'
+  return String(value)
+}
+
+function dateMs(value?: string | null) {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function sdkSourceHashFromVersion(version: AgentVersion) {
+  const snapshot = parseVersionSnapshot(version)
+  const value = snapshot?.extra?.sdkGraph
+  if (!value || typeof value !== 'object') return ''
+  return String((value as Record<string, unknown>).sourceHash || '')
+}
+
+function parseVersionSnapshot(version: AgentVersion): AgentDefinition | null {
+  if (!version.snapshotJson) return null
+  try {
+    return JSON.parse(version.snapshotJson) as AgentDefinition
+  } catch {
+    return null
+  }
+}
+
+function formatReleaseValidationItem(item: AgentReleaseValidationItem) {
+  return item.nodeId ? `[${item.code}] ${item.nodeId}: ${item.message}` : `[${item.code}] ${item.message}`
 }
 
 async function handleRunDebug() {
@@ -950,6 +1216,65 @@ watch(
   }
 }
 
+.release-check-panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+}
+
+.release-check-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+  }
+
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
+.release-check-collapse {
+  border-top: none;
+  border-bottom: none;
+}
+
+.check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  line-height: 1.5;
+
+  .el-tag {
+    flex: 0 0 auto;
+  }
+}
+
+.check-node {
+  flex: 0 0 auto;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--el-text-color-secondary);
+}
+
+.condition-help {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .studio-header {
   display: flex;
   justify-content: space-between;
@@ -972,6 +1297,31 @@ watch(
   .header-right {
     display: flex;
     gap: 8px;
+  }
+}
+
+.sdk-source-alert {
+  margin: 0 16px 12px;
+}
+
+.sdk-source-detail {
+  font-size: 12px;
+  line-height: 1.7;
+
+  span {
+    margin-left: 12px;
+    color: #92400e;
+  }
+}
+
+.sdk-publish-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+
+  span {
+    margin-left: 0;
   }
 }
 
@@ -1004,6 +1354,11 @@ watch(
 
     &:active {
       cursor: grabbing;
+    }
+
+    &.disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     &-title {
@@ -1040,6 +1395,10 @@ watch(
   border-left: 1px solid rgba(255, 255, 255, 0.05);
   padding: 16px;
   overflow-y: auto;
+}
+
+.readonly-alert {
+  margin-bottom: 12px;
 }
 
 .studio-node {
@@ -1079,6 +1438,11 @@ watch(
 .end-node {
   border-color: #67c23a;
   background: #f0f9eb;
+}
+
+.llm-node {
+  border-color: #6366f1;
+  background: #eef2ff;
 }
 
 .skill-node {
@@ -1126,6 +1490,32 @@ watch(
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;
+  }
+}
+
+.runtime-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.runtime-insight {
+  padding: 10px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+
+  span {
+    display: block;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+    word-break: break-word;
   }
 }
 

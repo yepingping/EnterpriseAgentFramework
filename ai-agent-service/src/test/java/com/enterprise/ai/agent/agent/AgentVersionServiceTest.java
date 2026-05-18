@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -15,11 +16,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 class AgentVersionServiceTest {
 
     private AgentVersionMapper versionMapper;
     private AgentDefinitionService definitionService;
+    private AgentReleaseValidationService releaseValidationService;
+    private AgentReleaseEventService releaseEventService;
     private AgentVersionService service;
     private AtomicLong idGenerator;
     private List<AgentVersionEntity> store;
@@ -28,6 +32,8 @@ class AgentVersionServiceTest {
     void setUp() {
         versionMapper = mock(AgentVersionMapper.class);
         definitionService = mock(AgentDefinitionService.class);
+        releaseValidationService = mock(AgentReleaseValidationService.class);
+        releaseEventService = mock(AgentReleaseEventService.class);
         idGenerator = new AtomicLong(1);
         store = new ArrayList<>();
 
@@ -70,8 +76,10 @@ class AgentVersionServiceTest {
                 .maxSteps(5)
                 .build();
         when(definitionService.findById("agent-1")).thenReturn(Optional.of(def));
+        when(releaseValidationService.validate(any(AgentDefinition.class)))
+                .thenReturn(AgentReleaseValidationResult.ok());
 
-        service = new AgentVersionService(versionMapper, definitionService);
+        service = new AgentVersionService(versionMapper, definitionService, releaseValidationService, releaseEventService);
     }
 
     @Test
@@ -85,6 +93,8 @@ class AgentVersionServiceTest {
         assertEquals("ACTIVE", v2.getStatus());
         AgentVersionEntity v1After = store.stream().filter(s -> "v1.0.0".equals(s.getVersion())).findFirst().orElseThrow();
         assertEquals("RETIRED", v1After.getStatus());
+        verify(releaseEventService, times(2)).record(eq("agent-1"), any(), anyString(), eq("PUBLISH"),
+                eq("COMPLETED"), anyInt(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -106,6 +116,37 @@ class AgentVersionServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void publishRecordsRuntimeMetadataForAgentOpsDetail() {
+        service.publish("agent-1", "v1.0.0", 100, "first", "alice");
+
+        ArgumentCaptor<Map> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(releaseEventService).record(eq("agent-1"), any(), eq("v1.0.0"), eq("PUBLISH"),
+                eq("COMPLETED"), eq(100), eq("alice"), anyString(), any(), metadataCaptor.capture());
+
+        Map<String, Object> metadata = metadataCaptor.getValue();
+        assertEquals("demo-agent", metadata.get("agentName"));
+        assertEquals("AGENTSCOPE", metadata.get("runtimeType"));
+        assertEquals("CENTRAL", metadata.get("runtimePlacement"));
+        assertEquals(2, metadata.get("toolCount"));
+        assertEquals(0, metadata.get("graphNodeCount"));
+    }
+
+    @Test
+    void publishRejectsReleaseValidationErrors() {
+        when(releaseValidationService.validate(any(AgentDefinition.class)))
+                .thenReturn(AgentReleaseValidationResult.builder()
+                        .error("GRAPH_ENTRY_MISSING", null, "GraphSpec 必须配置入口节点")
+                        .build());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.publish("agent-1", "v1.0.0", 100, "bad graph", "alice"));
+        assertTrue(ex.getMessage().contains("发布前校验未通过"));
+        verify(releaseEventService).record(eq("agent-1"), isNull(), eq("v1.0.0"), eq("PUBLISH"),
+                eq("BLOCKED"), eq(100), eq("alice"), anyString(), any(), any());
+    }
+
+    @Test
     void rollbackResurrectsOldVersion() {
         AgentVersionEntity v1 = service.publish("agent-1", "v1.0.0", 100, "first", "alice");
         service.publish("agent-1", "v1.0.1", 100, "second", "bob");
@@ -117,6 +158,8 @@ class AgentVersionServiceTest {
         // v2 应该被 RETIRED
         AgentVersionEntity v2 = store.stream().filter(s -> "v1.0.1".equals(s.getVersion())).findFirst().orElseThrow();
         assertEquals("RETIRED", v2.getStatus());
+        verify(releaseEventService).record(eq("agent-1"), eq(v1.getId()), eq("v1.0.0"), eq("ROLLBACK"),
+                eq("COMPLETED"), eq(100), eq("carol"), anyString(), isNull(), any());
     }
 
     @Test

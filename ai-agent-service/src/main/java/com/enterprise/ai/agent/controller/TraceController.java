@@ -2,6 +2,8 @@ package com.enterprise.ai.agent.controller;
 
 import com.enterprise.ai.agent.tool.log.ToolCallLogEntity;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;
+import com.enterprise.ai.agent.trace.AgentTraceSpanEntity;
+import com.enterprise.ai.agent.trace.AgentTraceSpanService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -22,15 +26,23 @@ public class TraceController {
 
     private static final TypeReference<List<Map<String, Object>>> CANDIDATES_TYPE = new TypeReference<>() {};
     private final ToolCallLogService toolCallLogService;
+    private final AgentTraceSpanService traceSpanService;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/{traceId}")
     public ResponseEntity<TraceDetailResponse> detail(@PathVariable String traceId) {
         List<ToolCallLogEntity> logs = toolCallLogService.getTraceLogs(traceId);
-        if (logs.isEmpty()) {
+        List<AgentTraceSpanEntity> spans = traceSpanService.listByTraceId(traceId);
+        if (logs.isEmpty() && spans.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-        List<TraceNode> nodes = logs.stream().map(this::toNode).toList();
+        List<TraceNode> nodes = java.util.stream.Stream.concat(
+                        logs.stream().map(this::toNode),
+                        spans.stream().map(this::toNode))
+                .sorted(Comparator
+                        .comparing(TraceNode::createdAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                        .thenComparing(TraceNode::id, Comparator.nullsLast(Long::compareTo)))
+                .toList();
         return ResponseEntity.ok(new TraceDetailResponse(traceId, nodes));
     }
 
@@ -45,9 +57,15 @@ public class TraceController {
     private TraceNode toNode(ToolCallLogEntity log) {
         return new TraceNode(
                 log.getId(),
+                "tool_call_log",
                 log.getTraceId(),
                 log.getAgentName(),
                 log.getToolName(),
+                null,
+                null,
+                null,
+                null,
+                null,
                 log.getArgsJson(),
                 log.getResultSummary(),
                 Boolean.TRUE.equals(log.getSuccess()),
@@ -57,6 +75,39 @@ public class TraceController {
                 parseRetrieval(log.getRetrievalTraceJson()),
                 log.getCreateTime()
         );
+    }
+
+    private TraceNode toNode(AgentTraceSpanEntity span) {
+        return new TraceNode(
+                span.getId(),
+                "agent_trace_span",
+                span.getTraceId(),
+                span.getAgentName(),
+                traceSpanName(span),
+                span.getSpanType(),
+                span.getSpanId(),
+                span.getParentSpanId(),
+                span.getNodeId(),
+                span.getRuntimeType(),
+                span.getInputSummary(),
+                span.getOutputSummary(),
+                "SUCCESS".equalsIgnoreCase(span.getStatus()),
+                span.getErrorCode(),
+                span.getLatencyMs(),
+                span.getTokenCost(),
+                List.of(),
+                span.getStartedAt() == null ? span.getCreatedAt() : span.getStartedAt()
+        );
+    }
+
+    private String traceSpanName(AgentTraceSpanEntity span) {
+        if (span.getToolName() != null && !span.getToolName().isBlank()) {
+            return "span:" + span.getToolName();
+        }
+        if (span.getNodeId() != null && !span.getNodeId().isBlank()) {
+            return "span:" + span.getNodeId();
+        }
+        return "span:" + span.getSpanType();
     }
 
     private List<Map<String, Object>> parseRetrieval(String raw) {
@@ -74,9 +125,15 @@ public class TraceController {
 
     public record TraceNode(
             Long id,
+            String source,
             String traceId,
             String agentName,
             String toolName,
+            String spanType,
+            String spanId,
+            String parentSpanId,
+            String nodeId,
+            String runtimeType,
             String argsJson,
             String resultSummary,
             boolean success,

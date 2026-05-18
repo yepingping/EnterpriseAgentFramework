@@ -8,6 +8,44 @@ export interface CapabilityReference {
   version?: string | null
 }
 
+export type AgentRuntimeType = 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+export type AgentRuntimePlacement = 'CENTRAL' | 'EMBEDDED' | 'HYBRID'
+
+export interface AgentGraphSpec {
+  code?: string
+  name?: string
+  mode?: 'WORKFLOW' | 'AUTONOMOUS'
+  runtimeHint?: AgentRuntimeType
+  inputSchema?: Record<string, unknown>
+  stateSchema?: Record<string, unknown>
+  nodes: AgentGraphNode[]
+  edges: AgentGraphEdge[]
+  entry?: string
+  finish?: string[]
+}
+
+export interface AgentGraphNode {
+  id: string
+  type: 'LLM' | 'TOOL' | 'CAPABILITY' | 'HUMAN_APPROVAL' | 'START' | 'END'
+  name?: string
+  ref?: AgentGraphCapabilityRef
+  config?: Record<string, unknown>
+}
+
+export interface AgentGraphEdge {
+  from: string
+  to: string
+  condition?: string
+}
+
+export interface AgentGraphCapabilityRef {
+  kind: 'TOOL' | 'SKILL' | 'CAPABILITY'
+  name?: string
+  qualifiedName?: string
+  definitionId?: number | null
+  projectCode?: string | null
+}
+
 export interface AgentDefinition {
   id: string
   /** 人类可读 slug，对应 /api/v1/agents/{keySlug}/chat */
@@ -25,8 +63,10 @@ export interface AgentDefinition {
   skills?: string[]
   skillRefs?: CapabilityReference[]
   modelInstanceId: string
-  runtimeType?: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  runtimeType?: AgentRuntimeType
+  runtimePlacement?: AgentRuntimePlacement
   runtimeConfig?: Record<string, unknown>
+  graphSpec?: AgentGraphSpec | null
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'
@@ -60,8 +100,10 @@ export interface AgentForm {
   skills: string[]
   skillRefs?: CapabilityReference[]
   modelInstanceId: string
-  runtimeType?: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  runtimeType?: AgentRuntimeType
+  runtimePlacement: AgentRuntimePlacement
   runtimeConfig: Record<string, unknown>
+  graphSpec?: AgentGraphSpec | null
   maxSteps: number
   enabled: boolean
   type: 'single' | 'pipeline'
@@ -77,7 +119,7 @@ export interface AgentForm {
 }
 
 export interface AgentRuntimeCapability {
-  runtimeType: 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
+  runtimeType: AgentRuntimeType
   displayName: string
   description?: string
   available: boolean
@@ -104,6 +146,39 @@ export interface AgentRuntimeValidationResult {
   errorCode?: string
 }
 
+export interface RuntimeRegistryEntry {
+  id: string
+  source: 'PLATFORM' | 'PROJECT_INSTANCE'
+  runtimeType: string
+  displayName?: string
+  description?: string
+  runtimePlacement: AgentRuntimePlacement
+  status: 'ONLINE' | 'OFFLINE' | 'DISABLED' | 'STALE' | string
+  available: boolean
+  unavailableReason?: string
+  supportsGraph: boolean
+  supportsTools: boolean
+  supportsAutonomous: boolean
+  supportsWorkflow: boolean
+  supportsEmbeddedExecution: boolean
+  supportsHybridExecution: boolean
+  projectCode?: string | null
+  instanceId?: string | null
+  baseUrl?: string | null
+  host?: string | null
+  port?: number | null
+  appVersion?: string | null
+  sdkVersion?: string | null
+  lastHeartbeatAt?: string | null
+  policyDisabled?: boolean
+  minSdkVersion?: string | null
+  allowEmbeddedExecution?: boolean | null
+  allowHybridExecution?: boolean | null
+  policyMessage?: string | null
+  runtimeTypes?: string[]
+  metadata?: Record<string, unknown>
+}
+
 /** Agent 发布版本（对应后端 agent_version 表） */
 export interface AgentVersion {
   id: number
@@ -116,6 +191,34 @@ export interface AgentVersion {
   publishedAt?: string
   note?: string
   createTime: string
+}
+
+export interface AgentReleaseValidationItem {
+  code: string
+  level: 'ERROR' | 'WARN' | string
+  nodeId?: string | null
+  message: string
+}
+
+export interface AgentReleaseValidationResult {
+  valid: boolean
+  errors: AgentReleaseValidationItem[]
+  warnings: AgentReleaseValidationItem[]
+}
+
+export interface AgentReleaseEvent {
+  id: number
+  agentId: string
+  versionId?: number | null
+  version?: string | null
+  action: 'VALIDATE' | 'PUBLISH' | 'ROLLBACK' | string
+  decision: 'PASSED' | 'BLOCKED' | 'COMPLETED' | string
+  rolloutPercent?: number | null
+  operator?: string | null
+  summary?: string | null
+  validationJson?: string | null
+  metadataJson?: string | null
+  createdAt: string
 }
 
 /** 发布请求体 */
