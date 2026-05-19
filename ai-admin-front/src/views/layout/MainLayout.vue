@@ -1,6 +1,9 @@
 ﻿<template>
-  <el-container class="main-layout" :class="{ 'registry-shell': isRegistryShell, 'is-dark': theme === 'dark' }">
-    <el-aside width="240px" class="sidebar">
+  <el-container
+    class="main-layout"
+    :class="{ 'registry-shell': isRegistryShell, 'studio-shell': isStudioPage, 'is-dark': theme === 'dark', 'sidebar-collapsed': isSidebarCollapsed }"
+  >
+    <el-aside v-if="!isStudioPage" :width="isSidebarCollapsed ? '72px' : '240px'" class="sidebar">
       <div class="logo">
         <div class="logo-icon-wrap">
           <img src="/reachai-icon.svg" alt="睿池 ReachAI" />
@@ -13,6 +16,8 @@
           router
           class="sidebar-menu"
           :default-openeds="defaultOpenMenuGroups"
+          :collapse="isSidebarCollapsed"
+          :collapse-transition="false"
         >
           <!-- 1 概览 -->
           <el-menu-item index="/dashboard">
@@ -285,7 +290,7 @@
     </el-aside>
 
     <el-container>
-      <el-header class="topbar">
+      <el-header v-if="!isStudioPage" class="topbar">
         <div class="breadcrumb-area">
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
@@ -396,6 +401,9 @@ const activeMenu = computed(() => {
   return path
 })
 
+const isStudioPage = computed(() => route.name === 'AgentStudio')
+const isSidebarCollapsed = computed(() => isStudioPage.value)
+
 const currentTitle = computed(() => (route.meta.title as string) || '')
 
 const isProjectManagementPage = computed(() =>
@@ -435,6 +443,7 @@ watch(
   flex-direction: column;
   position: relative;
   z-index: 10;
+  transition: width 0.18s ease;
 
   &::before {
     content: '';
@@ -458,6 +467,48 @@ watch(
     width: 1px;
     background: linear-gradient(180deg, rgba(99, 102, 241, 0.65), transparent 40%, rgba(14, 165, 233, 0.22));
     pointer-events: none;
+  }
+}
+
+.sidebar-collapsed {
+  .sidebar {
+    width: 72px;
+  }
+
+  .logo {
+    justify-content: center;
+    padding: 0;
+
+    &::after {
+      display: none;
+    }
+  }
+
+  .logo-text,
+  .menu-label,
+  .menu-divider {
+    display: none;
+  }
+
+  .logo-icon-wrap {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  .sidebar-menu {
+    width: 72px;
+    padding: 14px 8px 18px;
+
+    :deep(.el-menu-item),
+    :deep(.el-sub-menu__title) {
+      justify-content: center;
+      padding: 0 !important;
+    }
+
+    :deep(.el-icon) {
+      margin-right: 0;
+    }
   }
 }
 
@@ -907,6 +958,17 @@ watch(
     }
   }
 
+  .main-content {
+    padding: 0;
+    background: var(--bg-primary);
+
+    &::before {
+      display: none;
+    }
+  }
+}
+
+.studio-shell {
   .main-content {
     padding: 0;
     background: var(--bg-primary);

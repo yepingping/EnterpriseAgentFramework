@@ -66,9 +66,114 @@ class AgentReleaseValidationServiceTest {
         AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
                 .entry("llm")
                 .finishNode("llm")
-                .node(AgentGraphSpec.Node.builder().id("llm").type("LLM").build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("llm")
+                        .type("LLM")
+                        .config(Map.of(
+                                "outputFormat", "json",
+                                "outputSchema", List.of(Map.of(
+                                        "name", "answer",
+                                        "type", "string",
+                                        "required", true))))
+                        .build())
                 .edge(AgentGraphSpec.Edge.builder().from("START").to("llm").condition("always").build())
                 .edge(AgentGraphSpec.Edge.builder().from("llm").to("END").condition("always").build())
+                .build()));
+
+        assertTrue(result.valid(), () -> result.errors().toString());
+        assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
+    void validateRejectsInvalidLlmOutputSchema() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("llm")
+                .finishNode("llm")
+                .node(AgentGraphSpec.Node.builder()
+                        .id("llm")
+                        .type("LLM")
+                        .config(Map.of(
+                                "outputFormat", "xml",
+                                "outputSchema", List.of(Map.of("name", "answer", "type", "date"))))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("llm").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("llm").to("END").condition("always").build())
+                .build()));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_LLM_OUTPUT_FORMAT_INVALID"));
+        assertTrue(codes.contains("GRAPH_PARAMETER_FIELD_TYPE_INVALID"));
+    }
+
+    @Test
+    void validateAcceptsFlowPrimitiveNodes() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("llm")
+                .finishNode("reply")
+                .node(AgentGraphSpec.Node.builder().id("llm").type("LLM").build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("vars")
+                        .type("VARIABLE_ASSIGN")
+                        .config(Map.of("assignments", Map.of("summary", "lastOutput")))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("route")
+                        .type("IF_ELSE")
+                        .config(Map.of("conditionGroups", List.of(Map.of(
+                                "id", "nonempty",
+                                "logic", "AND",
+                                "conditions", List.of(Map.of(
+                                        "left", "lastOutput",
+                                        "operator", "not_empty",
+                                        "right", ""))))))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("reply")
+                        .type("TEMPLATE")
+                        .config(Map.of("template", "{{ summary }}"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("llm").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("llm").to("vars").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("vars").to("route").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("route").to("reply").condition("route:nonempty").build())
+                .edge(AgentGraphSpec.Edge.builder().from("reply").to("END").condition("always").build())
+                .build()));
+
+        assertTrue(result.valid(), () -> result.errors().toString());
+        assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
+    void validateAcceptsIntegrationAndRetrievalNodes() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("llm")
+                .finishNode("knowledge")
+                .node(AgentGraphSpec.Node.builder().id("llm").type("LLM").build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("extract")
+                        .type("PARAMETER_EXTRACT")
+                        .config(Map.of("extractMode", "expression", "fields", List.of(Map.of(
+                                "name", "orderId",
+                                "type", "string",
+                                "required", true,
+                                "source", "lastOutput.orderId"))))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("api")
+                        .type("HTTP_REQUEST")
+                        .config(Map.of("method", "POST", "url", "https://example.com/api"))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("knowledge")
+                        .type("KNOWLEDGE_RETRIEVAL")
+                        .config(Map.of("knowledgeBaseCodes", List.of("kb_order"), "query", "input"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("llm").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("llm").to("extract").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("extract").to("api").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("api").to("knowledge").condition("success").build())
+                .edge(AgentGraphSpec.Edge.builder().from("knowledge").to("END").condition("always").build())
                 .build()));
 
         assertTrue(result.valid(), () -> result.errors().toString());

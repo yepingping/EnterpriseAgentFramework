@@ -35,6 +35,7 @@ public final class EafGraph {
         private final List<NodeDraft> nodes = new ArrayList<>();
         private final List<EdgeDraft> edges = new ArrayList<>();
         private final Map<String, Object> metadata = new LinkedHashMap<>();
+        private final Map<String, Object> layout = new LinkedHashMap<>();
         private NodeDraft currentNode;
         private String explicitEntry;
         private final List<String> finish = new ArrayList<>();
@@ -84,11 +85,67 @@ public final class EafGraph {
             return this;
         }
 
+        public Builder layout(String direction) {
+            layout.put("engine", "sdk");
+            layout.put("direction", StringUtils.hasText(direction) ? direction.trim().toUpperCase() : "LR");
+            return this;
+        }
+
         public Builder llm(String id) {
             currentNode = addNode(id, "LLM");
             if (modelInstanceId != null) {
                 currentNode.config.put("modelInstanceId", modelInstanceId);
             }
+            return this;
+        }
+
+        public Builder llmPrompt(String systemPrompt, String userPrompt) {
+            NodeDraft node = requireCurrentNode();
+            if (StringUtils.hasText(systemPrompt)) {
+                node.config.put("systemPrompt", systemPrompt.trim());
+            }
+            if (StringUtils.hasText(userPrompt)) {
+                node.config.put("userPrompt", userPrompt.trim());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder modelParam(String key, Object value) {
+            if (!StringUtils.hasText(key) || value == null) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> params = (Map<String, Object>) node.config.computeIfAbsent(
+                    "modelParams", ignored -> new LinkedHashMap<String, Object>());
+            params.put(key.trim(), value);
+            return this;
+        }
+
+        public Builder llmOutputFormat(String outputFormat) {
+            if (StringUtils.hasText(outputFormat)) {
+                requireCurrentNode().config.put("outputFormat", outputFormat.trim().toLowerCase());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder llmOutputField(String name, String type, boolean required, Object defaultValue) {
+            if (!StringUtils.hasText(name)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            node.config.put("outputFormat", "json");
+            List<Map<String, Object>> fields = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "outputSchema", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name.trim());
+            field.put("type", StringUtils.hasText(type) ? type.trim().toLowerCase() : "string");
+            field.put("required", required);
+            if (defaultValue != null) {
+                field.put("defaultValue", defaultValue);
+            }
+            fields.add(field);
             return this;
         }
 
@@ -103,6 +160,117 @@ public final class EafGraph {
             currentNode = addNode(id, "CAPABILITY");
             currentNode.ref.put("kind", "CAPABILITY");
             currentNode.ref.put("name", id);
+            return this;
+        }
+
+        public Builder ifElse(String id) {
+            currentNode = addNode(id, "IF_ELSE");
+            return this;
+        }
+
+        public Builder variable(String id) {
+            currentNode = addNode(id, "VARIABLE_ASSIGN");
+            return this;
+        }
+
+        public Builder template(String id, String template) {
+            currentNode = addNode(id, "TEMPLATE");
+            if (StringUtils.hasText(template)) {
+                currentNode.config.put("template", template);
+                currentNode.config.put("writeToAnswer", true);
+            }
+            return this;
+        }
+
+        public Builder answer(String id, String template) {
+            currentNode = addNode(id, "ANSWER");
+            currentNode.config.put("template", StringUtils.hasText(template) ? template : "{{ lastOutput }}");
+            currentNode.config.put("writeToAnswer", true);
+            return this;
+        }
+
+        public Builder code(String id) {
+            currentNode = addNode(id, "CODE");
+            currentNode.config.put("language", "expression");
+            return this;
+        }
+
+        public Builder intentClassifier(String id) {
+            currentNode = addNode(id, "INTENT_CLASSIFIER");
+            currentNode.config.put("inputExpression", "input");
+            currentNode.config.put("defaultRoute", "else");
+            return this;
+        }
+
+        public Builder variableAggregator(String id) {
+            currentNode = addNode(id, "VARIABLE_AGGREGATOR");
+            currentNode.config.put("aggregateMode", "object");
+            return this;
+        }
+
+        public Builder humanApproval(String id, String prompt) {
+            currentNode = addNode(id, "HUMAN_APPROVAL");
+            currentNode.config.put("title", "人工确认");
+            currentNode.config.put("prompt", StringUtils.hasText(prompt) ? prompt : "{{ lastOutput }}");
+            currentNode.config.put("defaultRoute", "approved");
+            currentNode.output("approved", "boolean", false);
+            currentNode.output("rejected", "boolean", false);
+            return this;
+        }
+
+        public Builder loop(String id, int maxIterations) {
+            currentNode = addNode(id, "LOOP");
+            currentNode.config.put("loopKey", id);
+            currentNode.config.put("maxIterations", Math.max(1, maxIterations));
+            currentNode.output("continue", "boolean", false);
+            currentNode.output("done", "boolean", false);
+            return this;
+        }
+
+        public Builder knowledgeWrite(String id, String knowledgeBaseCode) {
+            currentNode = addNode(id, "KNOWLEDGE_WRITE");
+            currentNode.config.put("knowledgeBaseCode", trimToNull(knowledgeBaseCode));
+            currentNode.config.put("titleExpression", "const:工作流写入");
+            currentNode.config.put("contentExpression", "lastOutput");
+            currentNode.config.put("writeMode", "draft");
+            return this;
+        }
+
+        public Builder documentExtract(String id) {
+            currentNode = addNode(id, "DOCUMENT_EXTRACT");
+            currentNode.config.put("sourceExpression", "lastOutput");
+            currentNode.config.put("format", "text");
+            return this;
+        }
+
+        public Builder mcpCall(String id, String toolName) {
+            currentNode = addNode(id, "MCP_CALL");
+            currentNode.config.put("toolName", trimToNull(toolName));
+            return this;
+        }
+
+        public Builder parameterExtract(String id) {
+            currentNode = addNode(id, "PARAMETER_EXTRACT");
+            return this;
+        }
+
+        public Builder http(String id, String method, String url) {
+            currentNode = addNode(id, "HTTP_REQUEST");
+            currentNode.config.put("method", StringUtils.hasText(method) ? method.trim().toUpperCase() : "GET");
+            currentNode.config.put("url", StringUtils.hasText(url) ? url.trim() : "");
+            return this;
+        }
+
+        public Builder knowledgeRetrieval(String id, String knowledgeBaseGroupId) {
+            currentNode = addNode(id, "KNOWLEDGE_RETRIEVAL");
+            currentNode.config.put("knowledgeBaseGroupId", trimToNull(knowledgeBaseGroupId));
+            if (StringUtils.hasText(knowledgeBaseGroupId)) {
+                currentNode.config.put("knowledgeBaseCodes", List.of(knowledgeBaseGroupId.trim()));
+            }
+            currentNode.config.put("query", "input");
+            currentNode.config.put("topK", 5);
+            currentNode.config.put("searchMode", "hybrid");
+            currentNode.config.put("rerankEnabled", true);
             return this;
         }
 
@@ -141,7 +309,420 @@ public final class EafGraph {
         public Builder outputAlias(String alias) {
             if (StringUtils.hasText(alias)) {
                 requireCurrentNode().config.put("outputAlias", alias.trim());
+                requireCurrentNode().output(alias.trim(), "any", false);
             }
+            return this;
+        }
+
+        public Builder inputPort(String id, String type, boolean required) {
+            if (StringUtils.hasText(id)) {
+                requireCurrentNode().input(id.trim(), type, required);
+            }
+            return this;
+        }
+
+        public Builder outputPort(String id, String type, boolean required) {
+            if (StringUtils.hasText(id)) {
+                requireCurrentNode().output(id.trim(), type, required);
+            }
+            return this;
+        }
+
+        public Builder retry(int maxAttempts, long backoffMs) {
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> retry = new LinkedHashMap<>();
+            retry.put("enabled", maxAttempts > 1);
+            retry.put("maxAttempts", Math.max(1, maxAttempts));
+            retry.put("backoffMs", Math.max(0L, backoffMs));
+            node.retry = retry;
+            return this;
+        }
+
+        public Builder onError(String strategy) {
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> policy = new LinkedHashMap<>();
+            policy.put("strategy", StringUtils.hasText(strategy) ? strategy.trim().toUpperCase() : "TERMINATE");
+            node.errorPolicy = policy;
+            return this;
+        }
+
+        public Builder fallback(String fallbackNodeId) {
+            if (!StringUtils.hasText(fallbackNodeId)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> policy = node.errorPolicy == null ? new LinkedHashMap<>() : new LinkedHashMap<>(node.errorPolicy);
+            policy.put("strategy", "FALLBACK");
+            policy.put("fallbackNodeId", fallbackNodeId.trim());
+            node.errorPolicy = policy;
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder assign(String variableName, String expression) {
+            if (!StringUtils.hasText(variableName) || !StringUtils.hasText(expression)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, String> assignments = (Map<String, String>) node.config.computeIfAbsent(
+                    "assignments", ignored -> new LinkedHashMap<String, String>());
+            assignments.put(variableName.trim(), expression.trim());
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder parameter(String name, String expression) {
+            if (!StringUtils.hasText(name) || !StringUtils.hasText(expression)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> fields = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "fields", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name.trim());
+            field.put("type", "string");
+            field.put("required", false);
+            field.put("source", expression.trim());
+            fields.add(field);
+            node.config.putIfAbsent("extractMode", "expression");
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder output(String name, String expression) {
+            if (!StringUtils.hasText(name) || !StringUtils.hasText(expression)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, String> outputs = (Map<String, String>) node.config.computeIfAbsent(
+                    "outputs", ignored -> new LinkedHashMap<String, String>());
+            outputs.put(name.trim(), expression.trim());
+            node.output(name.trim(), "any", false);
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder intentClass(String id, String label, String... keywords) {
+            if (!StringUtils.hasText(id)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> classes = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "classes", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", id.trim());
+            item.put("label", StringUtils.hasText(label) ? label.trim() : id.trim());
+            item.put("keywords", keywords == null ? List.of() : java.util.Arrays.stream(keywords)
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .toList());
+            classes.add(item);
+            node.output(id.trim(), "boolean", false);
+            return this;
+        }
+
+        public Builder classifierInput(String expression) {
+            if (StringUtils.hasText(expression)) {
+                requireCurrentNode().config.put("inputExpression", expression.trim());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder aggregateItem(String name, String expression) {
+            if (!StringUtils.hasText(name) || !StringUtils.hasText(expression)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> items = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "items", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("name", name.trim());
+            item.put("source", expression.trim());
+            items.add(item);
+            return this;
+        }
+
+        public Builder aggregateMode(String mode) {
+            if (StringUtils.hasText(mode)) {
+                requireCurrentNode().config.put("aggregateMode", mode.trim().toLowerCase());
+            }
+            return this;
+        }
+
+        public Builder approver(String approver) {
+            if (!StringUtils.hasText(approver)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            @SuppressWarnings("unchecked")
+            List<String> approvers = (List<String>) node.config.computeIfAbsent("approvers", ignored -> new ArrayList<String>());
+            approvers.add(approver.trim());
+            return this;
+        }
+
+        public Builder loopKey(String loopKey) {
+            if (StringUtils.hasText(loopKey)) {
+                requireCurrentNode().config.put("loopKey", loopKey.trim());
+            }
+            return this;
+        }
+
+        public Builder breakWhen(String condition) {
+            if (StringUtils.hasText(condition)) {
+                requireCurrentNode().config.put("breakCondition", condition.trim());
+            }
+            return this;
+        }
+
+        public Builder knowledgeContent(String titleExpression, String contentExpression) {
+            NodeDraft node = requireCurrentNode();
+            if (StringUtils.hasText(titleExpression)) {
+                node.config.put("titleExpression", titleExpression.trim());
+            }
+            if (StringUtils.hasText(contentExpression)) {
+                node.config.put("contentExpression", contentExpression.trim());
+            }
+            return this;
+        }
+
+        public Builder knowledgeTag(String tag) {
+            if (!StringUtils.hasText(tag)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            @SuppressWarnings("unchecked")
+            List<String> tags = (List<String>) node.config.computeIfAbsent("tags", ignored -> new ArrayList<String>());
+            tags.add(tag.trim());
+            return this;
+        }
+
+        public Builder documentField(String name, String source) {
+            if (!StringUtils.hasText(name)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> fields = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "fields", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name.trim());
+            field.put("type", "string");
+            field.put("source", StringUtils.hasText(source) ? source.trim() : "");
+            fields.add(field);
+            return this;
+        }
+
+        public Builder mcpServer(String serverRef) {
+            if (StringUtils.hasText(serverRef)) {
+                requireCurrentNode().config.put("serverRef", serverRef.trim());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder parameterField(String name, String type, boolean required, String sourceExpression) {
+            return parameterField(name, type, required, sourceExpression, null);
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder parameterField(String name, String type, boolean required, String sourceExpression, Object defaultValue) {
+            if (!StringUtils.hasText(name)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> fields = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "fields", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name.trim());
+            field.put("type", StringUtils.hasText(type) ? type.trim().toLowerCase() : "string");
+            field.put("required", required);
+            if (StringUtils.hasText(sourceExpression)) {
+                field.put("source", sourceExpression.trim());
+            }
+            if (defaultValue != null) {
+                field.put("defaultValue", defaultValue);
+            }
+            fields.add(field);
+            node.config.putIfAbsent("extractMode", "expression");
+            return this;
+        }
+
+        public Builder extractMode(String mode) {
+            if (StringUtils.hasText(mode)) {
+                requireCurrentNode().config.put("extractMode", mode.trim().toLowerCase());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder header(String name, String value) {
+            if (!StringUtils.hasText(name) || !StringUtils.hasText(value)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, String> headers = (Map<String, String>) node.config.computeIfAbsent(
+                    "headers", ignored -> new LinkedHashMap<String, String>());
+            headers.put(name.trim(), value.trim());
+            return this;
+        }
+
+        public Builder body(String body) {
+            requireCurrentNode().config.put("body", body == null ? "" : body);
+            return this;
+        }
+
+        public Builder bodyType(String bodyType) {
+            if (StringUtils.hasText(bodyType)) {
+                requireCurrentNode().config.put("bodyType", bodyType.trim().toLowerCase());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder queryParam(String name, String value) {
+            if (!StringUtils.hasText(name) || !StringUtils.hasText(value)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, String> params = (Map<String, String>) node.config.computeIfAbsent(
+                    "queryParams", ignored -> new LinkedHashMap<String, String>());
+            params.put(name.trim(), value.trim());
+            return this;
+        }
+
+        public Builder timeoutMs(long timeoutMs) {
+            requireCurrentNode().config.put("timeoutMs", Math.max(1L, timeoutMs));
+            return this;
+        }
+
+        public Builder credentialRef(String credentialRef) {
+            if (StringUtils.hasText(credentialRef)) {
+                requireCurrentNode().config.put("credentialRef", credentialRef.trim());
+            }
+            return this;
+        }
+
+        public Builder query(String expression) {
+            if (StringUtils.hasText(expression)) {
+                requireCurrentNode().config.put("query", expression.trim());
+            }
+            return this;
+        }
+
+        public Builder topK(int topK) {
+            requireCurrentNode().config.put("topK", Math.max(1, topK));
+            return this;
+        }
+
+        public Builder searchMode(String searchMode) {
+            if (StringUtils.hasText(searchMode)) {
+                requireCurrentNode().config.put("searchMode", searchMode.trim());
+            }
+            return this;
+        }
+
+        public Builder rerankEnabled(boolean rerankEnabled) {
+            requireCurrentNode().config.put("rerankEnabled", rerankEnabled);
+            return this;
+        }
+
+        public Builder similarityThreshold(double threshold) {
+            requireCurrentNode().config.put("similarityThreshold", Math.max(0D, Math.min(1D, threshold)));
+            return this;
+        }
+
+        public Builder directReturn(boolean enabled, double threshold) {
+            NodeDraft node = requireCurrentNode();
+            node.config.put("directReturnEnabled", enabled);
+            node.config.put("directReturnThreshold", Math.max(0D, Math.min(1D, threshold)));
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder conditionGroup(String id, String logic) {
+            if (!StringUtils.hasText(id)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> groups = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "conditionGroups", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> group = new LinkedHashMap<>();
+            group.put("id", id.trim());
+            group.put("logic", StringUtils.hasText(logic) ? logic.trim().toUpperCase() : "AND");
+            group.put("conditions", new ArrayList<Map<String, Object>>());
+            groups.add(group);
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder condition(String groupId, String left, String operator, String right) {
+            if (!StringUtils.hasText(groupId) || !StringUtils.hasText(left)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            List<Map<String, Object>> groups = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "conditionGroups", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> group = groups.stream()
+                    .filter(item -> groupId.trim().equals(item.get("id")))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        Map<String, Object> created = new LinkedHashMap<>();
+                        created.put("id", groupId.trim());
+                        created.put("logic", "AND");
+                        created.put("conditions", new ArrayList<Map<String, Object>>());
+                        groups.add(created);
+                        return created;
+                    });
+            List<Map<String, Object>> conditions = (List<Map<String, Object>>) group.computeIfAbsent(
+                    "conditions", ignored -> new ArrayList<Map<String, Object>>());
+            Map<String, Object> condition = new LinkedHashMap<>();
+            condition.put("left", left.trim());
+            condition.put("operator", StringUtils.hasText(operator) ? operator.trim().toLowerCase() : "exists");
+            condition.put("right", right == null ? "" : right.trim());
+            conditions.add(condition);
+            return this;
+        }
+
+        public Builder defaultRoute(String route) {
+            if (StringUtils.hasText(route)) {
+                requireCurrentNode().config.put("defaultRoute", route.trim());
+            }
+            return this;
+        }
+
+        public Builder writeTemplateToAnswer(boolean writeToAnswer) {
+            requireCurrentNode().config.put("writeToAnswer", writeToAnswer);
+            return this;
+        }
+
+        public Builder nodeDescription(String description) {
+            if (StringUtils.hasText(description)) {
+                requireCurrentNode().config.put("description", description.trim());
+            }
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder position(int x, int y) {
+            NodeDraft node = requireCurrentNode();
+            node.layout.put("x", x);
+            node.layout.put("y", y);
+            Map<String, Object> ui = (Map<String, Object>) node.config.computeIfAbsent(
+                    "ui", ignored -> new LinkedHashMap<String, Object>());
+            ui.put("position", Map.of("x", x, "y", y));
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder ui(String key, Object value) {
+            if (!StringUtils.hasText(key) || value == null) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> ui = (Map<String, Object>) node.config.computeIfAbsent(
+                    "ui", ignored -> new LinkedHashMap<String, Object>());
+            ui.put(key.trim(), value);
             return this;
         }
 
@@ -183,6 +764,7 @@ public final class EafGraph {
             graphSpec.put("name", name);
             graphSpec.put("mode", "WORKFLOW");
             graphSpec.put("runtimeHint", runtimeType);
+            graphSpec.put("layout", layout.isEmpty() ? Map.of("engine", "sdk", "direction", "LR") : Map.copyOf(layout));
             graphSpec.put("nodes", nodes.stream().map(NodeDraft::toMap).toList());
             graphSpec.put("edges", normalizedEdges.stream().map(EdgeDraft::toMap).toList());
             graphSpec.put("entry", entry);
@@ -210,7 +792,7 @@ public final class EafGraph {
 
         private NodeDraft requireCurrentNode() {
             if (currentNode == null) {
-                throw new IllegalStateException("No current node. Call llm/tool/capability first.");
+                throw new IllegalStateException("No current node. Call a node builder method before configuring node details.");
             }
             return currentNode;
         }
@@ -325,6 +907,24 @@ public final class EafGraph {
             return parent;
         }
 
+        public EdgeBuilder label(String label) {
+            if (StringUtils.hasText(label)) {
+                edge.layout.put("label", label.trim());
+            }
+            return this;
+        }
+
+        public EdgeBuilder handles(String sourceHandle, String targetHandle) {
+            edge.sourceHandle = StringUtils.hasText(sourceHandle) ? sourceHandle.trim() : null;
+            edge.targetHandle = StringUtils.hasText(targetHandle) ? targetHandle.trim() : null;
+            return this;
+        }
+
+        public EdgeBuilder priority(int priority) {
+            edge.priority = priority;
+            return this;
+        }
+
         public EafAgentGraph build() {
             return parent.build();
         }
@@ -336,6 +936,11 @@ public final class EafGraph {
         private String name;
         private final Map<String, Object> ref = new LinkedHashMap<>();
         private final Map<String, Object> config = new LinkedHashMap<>();
+        private final List<Map<String, Object>> inputs = new ArrayList<>();
+        private final List<Map<String, Object>> outputs = new ArrayList<>();
+        private Map<String, Object> retry;
+        private Map<String, Object> errorPolicy;
+        private final Map<String, Object> layout = new LinkedHashMap<>();
 
         private NodeDraft(String id, String type) {
             this.id = id;
@@ -348,13 +953,50 @@ public final class EafGraph {
             out.put("id", id);
             out.put("type", type);
             out.put("name", name);
+            Object description = config.get("description");
+            if (description != null) {
+                out.put("description", description);
+            }
             if (!ref.isEmpty()) {
                 out.put("ref", ref);
+            }
+            if (!inputs.isEmpty()) {
+                out.put("inputs", inputs);
+            }
+            if (!outputs.isEmpty()) {
+                out.put("outputs", outputs);
+            }
+            if (retry != null && !retry.isEmpty()) {
+                out.put("retry", retry);
+            }
+            if (errorPolicy != null && !errorPolicy.isEmpty()) {
+                out.put("errorPolicy", errorPolicy);
+            }
+            if (!layout.isEmpty()) {
+                out.put("layout", layout);
             }
             if (!config.isEmpty()) {
                 out.put("config", config);
             }
             return out;
+        }
+
+        private void input(String id, String type, boolean required) {
+            inputs.add(port(id, type, required));
+        }
+
+        private void output(String id, String type, boolean required) {
+            outputs.removeIf(port -> id.equals(port.get("id")));
+            outputs.add(port(id, type, required));
+        }
+
+        private Map<String, Object> port(String id, String type, boolean required) {
+            Map<String, Object> port = new LinkedHashMap<>();
+            port.put("id", id);
+            port.put("name", id);
+            port.put("type", StringUtils.hasText(type) ? type.trim().toLowerCase() : "any");
+            port.put("required", required);
+            return port;
         }
     }
 
@@ -362,6 +1004,10 @@ public final class EafGraph {
         private final String from;
         private final String to;
         private String condition;
+        private String sourceHandle;
+        private String targetHandle;
+        private Integer priority;
+        private final Map<String, Object> layout = new LinkedHashMap<>();
 
         private EdgeDraft(String from, String to, String condition) {
             this.from = from;
@@ -371,9 +1017,22 @@ public final class EafGraph {
 
         private Map<String, Object> toMap() {
             Map<String, Object> out = new LinkedHashMap<>();
+            out.put("id", "e-" + from + "-" + to);
             out.put("from", from);
             out.put("to", to);
             out.put("condition", condition);
+            if (StringUtils.hasText(sourceHandle)) {
+                out.put("sourceHandle", sourceHandle);
+            }
+            if (StringUtils.hasText(targetHandle)) {
+                out.put("targetHandle", targetHandle);
+            }
+            if (priority != null) {
+                out.put("priority", priority);
+            }
+            if (!layout.isEmpty()) {
+                out.put("layout", layout);
+            }
             return out;
         }
     }

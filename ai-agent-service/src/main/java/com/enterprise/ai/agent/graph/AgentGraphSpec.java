@@ -37,6 +37,8 @@ public class AgentGraphSpec {
 
     private Map<String, Object> stateSchema;
 
+    private Layout layout;
+
     @Singular
     private List<Node> nodes;
 
@@ -60,7 +62,21 @@ public class AgentGraphSpec {
 
         private String name;
 
+        private String description;
+
         private CapabilityRef ref;
+
+        @Singular
+        private List<Port> inputs;
+
+        @Singular
+        private List<Port> outputs;
+
+        private RetryPolicy retry;
+
+        private ErrorPolicy errorPolicy;
+
+        private Layout.NodeLayout layout;
 
         private Map<String, Object> config;
     }
@@ -71,11 +87,21 @@ public class AgentGraphSpec {
     @AllArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Edge {
+        private String id;
+
         private String from;
 
         private String to;
 
         private String condition;
+
+        private String sourceHandle;
+
+        private String targetHandle;
+
+        private Integer priority;
+
+        private Layout.EdgeLayout layout;
     }
 
     @Data
@@ -93,5 +119,91 @@ public class AgentGraphSpec {
         private Long definitionId;
 
         private String projectCode;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Port {
+        private String id;
+
+        private String name;
+
+        private String type;
+
+        private Boolean required;
+
+        private String schema;
+
+        private String source;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RetryPolicy {
+        private Boolean enabled;
+
+        private Integer maxAttempts;
+
+        private Long backoffMs;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ErrorPolicy {
+        private String strategy;
+
+        private String fallbackNodeId;
+
+        private Map<String, Object> defaultOutput;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Layout {
+        private String engine;
+
+        private String direction;
+
+        private Map<String, Object> viewport;
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class NodeLayout {
+            private Double x;
+
+            private Double y;
+
+            private Double width;
+
+            private Double height;
+
+            private Boolean collapsed;
+        }
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class EdgeLayout {
+            private String label;
+
+            private String style;
+        }
     }
 }

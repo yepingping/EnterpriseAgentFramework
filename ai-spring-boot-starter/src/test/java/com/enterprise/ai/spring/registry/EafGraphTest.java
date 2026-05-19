@@ -19,11 +19,20 @@ class EafGraphTest {
                 .modelInstanceId("llm-1")
                 .systemPrompt("Help users with order questions.")
                 .llm("classify")
+                .llmPrompt("Classify orders.", "Return JSON for {{ input }}")
+                .modelParam("temperature", 0.2)
+                .llmOutputField("intent", "string", true, null)
+                .llmOutputField("confidence", "number", false, 0.5)
                 .tool("queryOrder")
                 .ref("order-service:queryOrder")
+                .nodeDescription("Query order details from order service.")
+                .position(520, 260)
+                .inputPort("orderNo", "string", true)
                 .input("orderNo", "$.message.orderNo")
                 .outputAlias("order")
-                .edge("classify", "queryOrder").when("success")
+                .retry(3, 500)
+                .onError("continue")
+                .edge("classify", "queryOrder").label("classified").handles("success", "input").priority(10).when("success")
                 .edge("queryOrder", EafGraph.END).always()
                 .build();
 
@@ -32,14 +41,35 @@ class EafGraphTest {
         Map<String, Object> spec = graph.graphSpec();
         assertEquals("classify", spec.get("entry"));
         assertEquals(List.of("queryOrder"), spec.get("finish"));
+        assertEquals("LR", ((Map<String, Object>) spec.get("layout")).get("direction"));
         List<Map<String, Object>> nodes = (List<Map<String, Object>>) spec.get("nodes");
         assertEquals(2, nodes.size());
         Map<String, Object> tool = nodes.get(1);
         assertEquals("TOOL", tool.get("type"));
+        assertEquals("Query order details from order service.", tool.get("description"));
         assertEquals("queryOrder", ((Map<String, Object>) tool.get("ref")).get("name"));
+        Map<String, Object> llmConfig = (Map<String, Object>) nodes.get(0).get("config");
+        assertEquals("json", llmConfig.get("outputFormat"));
+        assertEquals(0.2, ((Map<String, Object>) llmConfig.get("modelParams")).get("temperature"));
+        assertEquals(2, ((List<Map<String, Object>>) llmConfig.get("outputSchema")).size());
         Map<String, Object> config = (Map<String, Object>) tool.get("config");
         assertEquals("order", config.get("outputAlias"));
+        assertEquals("Query order details from order service.", config.get("description"));
+        assertEquals(Map.of("x", 520, "y", 260), ((Map<String, Object>) config.get("ui")).get("position"));
+        assertEquals(520, ((Map<String, Object>) tool.get("layout")).get("x"));
+        assertEquals(3, ((Map<String, Object>) tool.get("retry")).get("maxAttempts"));
+        assertEquals("CONTINUE", ((Map<String, Object>) tool.get("errorPolicy")).get("strategy"));
+        assertEquals("orderNo", ((List<Map<String, Object>>) tool.get("inputs")).get(0).get("id"));
+        assertEquals("order", ((List<Map<String, Object>>) tool.get("outputs")).get(0).get("id"));
         assertEquals("$.message.orderNo", ((Map<String, String>) config.get("inputMapping")).get("orderNo"));
+        List<Map<String, Object>> edges = (List<Map<String, Object>>) spec.get("edges");
+        Map<String, Object> classified = edges.stream()
+                .filter(edge -> "classify".equals(edge.get("from")) && "queryOrder".equals(edge.get("to")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("success", classified.get("sourceHandle"));
+        assertEquals(10, classified.get("priority"));
+        assertEquals("classified", ((Map<String, Object>) classified.get("layout")).get("label"));
     }
 
     @Test
@@ -100,5 +130,112 @@ class EafGraphTest {
                 "planner".equals(edge.get("from"))
                         && "queryOrder".equals(edge.get("to"))
                         && "always".equals(edge.get("condition"))));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void builderEmitsVariableTemplateAndConditionNodes() {
+        EafAgentGraph graph = EafGraph.agent("workflow_assistant")
+                .modelInstanceId("llm-1")
+                .llm("planner")
+                .variable("vars")
+                .assign("customerId", "$input")
+                .outputAlias("state")
+                .ifElse("route")
+                .template("reply", "Customer {{ state.customerId }}")
+                .writeTemplateToAnswer(true)
+                .edge("planner", "vars").always()
+                .edge("vars", "route").always()
+                .edge("route", "reply").when("not_empty")
+                .build();
+
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) graph.graphSpec().get("nodes");
+        assertTrue(nodes.stream().anyMatch(node -> "VARIABLE_ASSIGN".equals(node.get("type"))));
+        assertTrue(nodes.stream().anyMatch(node -> "IF_ELSE".equals(node.get("type"))));
+        Map<String, Object> template = nodes.stream()
+                .filter(node -> "TEMPLATE".equals(node.get("type")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> config = (Map<String, Object>) template.get("config");
+        assertEquals("Customer {{ state.customerId }}", config.get("template"));
+        assertEquals(true, config.get("writeToAnswer"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void builderEmitsIntegrationAndRetrievalNodes() {
+        EafAgentGraph graph = EafGraph.agent("integration_assistant")
+                .modelInstanceId("llm-1")
+                .llm("planner")
+                .parameterExtract("extract")
+                .parameterField("orderId", "integer", true, "lastOutput.orderId", 0)
+                .outputAlias("params")
+                .http("orderApi", "POST", "https://example.com/orders/{{ params.orderId }}")
+                .header("Content-Type", "application/json")
+                .body("{\"query\":\"{{ input }}\"}")
+                .outputAlias("orderApi")
+                .knowledgeRetrieval("knowledge", "kb_order")
+                .query("input")
+                .topK(3)
+                .searchMode("hybrid")
+                .rerankEnabled(true)
+                .edge("planner", "extract").always()
+                .edge("extract", "orderApi").always()
+                .edge("orderApi", "knowledge").always()
+                .build();
+
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) graph.graphSpec().get("nodes");
+        assertTrue(nodes.stream().anyMatch(node -> "PARAMETER_EXTRACT".equals(node.get("type"))));
+        assertTrue(nodes.stream().anyMatch(node -> "HTTP_REQUEST".equals(node.get("type"))));
+        Map<String, Object> knowledge = nodes.stream()
+                .filter(node -> "KNOWLEDGE_RETRIEVAL".equals(node.get("type")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> config = (Map<String, Object>) knowledge.get("config");
+        assertEquals("kb_order", config.get("knowledgeBaseGroupId"));
+        assertEquals(3, config.get("topK"));
+        Map<String, Object> extract = nodes.stream()
+                .filter(node -> "PARAMETER_EXTRACT".equals(node.get("type")))
+                .findFirst()
+                .map(node -> (Map<String, Object>) node.get("config"))
+                .orElseThrow();
+        List<Map<String, Object>> fields = (List<Map<String, Object>>) extract.get("fields");
+        assertEquals("integer", fields.get(0).get("type"));
+        assertEquals(0, fields.get(0).get("defaultValue"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void builderEmitsAdvancedWorkflowNodes() {
+        EafAgentGraph graph = EafGraph.agent("advanced_assistant")
+                .modelInstanceId("llm-1")
+                .llm("planner")
+                .intentClassifier("intent")
+                .classifierInput("input")
+                .intentClass("refund", "Refund", "refund", "退款")
+                .code("transform")
+                .output("intent", "lastRoute")
+                .output("draft", "planner")
+                .variableAggregator("summary")
+                .aggregateItem("intent", "nodeOutput.transform.intent")
+                .aggregateItem("draft", "nodeOutput.transform.draft")
+                .outputAlias("summary")
+                .answer("reply", "Intent {{ summary.intent }}: {{ summary.draft }}")
+                .edge("planner", "intent").always()
+                .edge("intent", "transform").when("route:refund")
+                .edge("transform", "summary").always()
+                .edge("summary", "reply").always()
+                .build();
+
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) graph.graphSpec().get("nodes");
+        assertTrue(nodes.stream().anyMatch(node -> "INTENT_CLASSIFIER".equals(node.get("type"))));
+        assertTrue(nodes.stream().anyMatch(node -> "CODE".equals(node.get("type"))));
+        assertTrue(nodes.stream().anyMatch(node -> "VARIABLE_AGGREGATOR".equals(node.get("type"))));
+        Map<String, Object> answer = nodes.stream()
+                .filter(node -> "ANSWER".equals(node.get("type")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Intent {{ summary.intent }}: {{ summary.draft }}",
+                ((Map<String, Object>) answer.get("config")).get("template"));
     }
 }

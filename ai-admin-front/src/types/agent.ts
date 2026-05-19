@@ -18,6 +18,7 @@ export interface AgentGraphSpec {
   runtimeHint?: AgentRuntimeType
   inputSchema?: Record<string, unknown>
   stateSchema?: Record<string, unknown>
+  layout?: AgentGraphLayout
   nodes: AgentGraphNode[]
   edges: AgentGraphEdge[]
   entry?: string
@@ -26,16 +27,47 @@ export interface AgentGraphSpec {
 
 export interface AgentGraphNode {
   id: string
-  type: 'LLM' | 'TOOL' | 'CAPABILITY' | 'HUMAN_APPROVAL' | 'START' | 'END'
+  type:
+    | 'LLM'
+    | 'TOOL'
+    | 'CAPABILITY'
+    | 'IF_ELSE'
+    | 'VARIABLE_ASSIGN'
+    | 'TEMPLATE'
+    | 'ANSWER'
+    | 'CODE'
+    | 'INTENT_CLASSIFIER'
+    | 'VARIABLE_AGGREGATOR'
+    | 'HUMAN_APPROVAL'
+    | 'LOOP'
+    | 'KNOWLEDGE_WRITE'
+    | 'DOCUMENT_EXTRACT'
+    | 'MCP_CALL'
+    | 'PARAMETER_EXTRACT'
+    | 'HTTP_REQUEST'
+    | 'KNOWLEDGE_RETRIEVAL'
+    | 'START'
+    | 'END'
   name?: string
+  description?: string
   ref?: AgentGraphCapabilityRef
+  inputs?: AgentGraphPort[]
+  outputs?: AgentGraphPort[]
+  retry?: AgentGraphRetryPolicy
+  errorPolicy?: AgentGraphErrorPolicy
+  layout?: AgentGraphNodeLayout
   config?: Record<string, unknown>
 }
 
 export interface AgentGraphEdge {
+  id?: string
   from: string
   to: string
   condition?: string
+  sourceHandle?: string
+  targetHandle?: string
+  priority?: number
+  layout?: AgentGraphEdgeLayout
 }
 
 export interface AgentGraphCapabilityRef {
@@ -44,6 +76,46 @@ export interface AgentGraphCapabilityRef {
   qualifiedName?: string
   definitionId?: number | null
   projectCode?: string | null
+}
+
+export interface AgentGraphPort {
+  id: string
+  name?: string
+  type?: string
+  required?: boolean
+  schema?: string
+  source?: string
+}
+
+export interface AgentGraphRetryPolicy {
+  enabled?: boolean
+  maxAttempts?: number
+  backoffMs?: number
+}
+
+export interface AgentGraphErrorPolicy {
+  strategy?: 'TERMINATE' | 'CONTINUE' | 'FALLBACK' | string
+  fallbackNodeId?: string
+  defaultOutput?: Record<string, unknown>
+}
+
+export interface AgentGraphLayout {
+  engine?: string
+  direction?: 'LR' | 'TB' | string
+  viewport?: Record<string, unknown>
+}
+
+export interface AgentGraphNodeLayout {
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  collapsed?: boolean
+}
+
+export interface AgentGraphEdgeLayout {
+  label?: string
+  style?: string
 }
 
 export interface AgentDefinition {
@@ -219,6 +291,27 @@ export interface AgentReleaseEvent {
   validationJson?: string | null
   metadataJson?: string | null
   createdAt: string
+}
+
+export interface AgentNodeDebugRequest {
+  agentDefinition: Partial<AgentForm>
+  nodeId: string
+  message?: string
+  state?: Record<string, unknown>
+}
+
+export interface AgentNodeDebugResult {
+  nodeId: string
+  nodeType?: string
+  success: boolean
+  elapsedMs?: number
+  inputState?: Record<string, unknown>
+  outputState?: Record<string, unknown>
+  nodeOutput?: unknown
+  lastRoute?: string
+  errorCode?: string
+  errorMessage?: string
+  traceId?: string
 }
 
 /** 发布请求体 */

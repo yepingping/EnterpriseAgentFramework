@@ -26,7 +26,13 @@ public class AgentReleaseValidationService {
 
     private static final String START = "START";
     private static final String END = "END";
-    private static final Set<String> SUPPORTED_NODE_TYPES = Set.of("LLM", "TOOL", "CAPABILITY");
+    private static final Set<String> SUPPORTED_NODE_TYPES = Set.of(
+            "LLM", "TOOL", "CAPABILITY", "IF_ELSE", "VARIABLE_ASSIGN", "TEMPLATE",
+            "ANSWER", "CODE", "INTENT_CLASSIFIER", "VARIABLE_AGGREGATOR",
+            "HUMAN_APPROVAL", "LOOP", "KNOWLEDGE_WRITE", "DOCUMENT_EXTRACT", "MCP_CALL",
+            "PARAMETER_EXTRACT", "HTTP_REQUEST", "KNOWLEDGE_RETRIEVAL"
+    );
+    private static final Set<String> SUPPORTED_HTTP_METHODS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE");
     private static final Set<String> SUPPORTED_EDGE_CONDITIONS = Set.of(
             "always", "default", "else", "success", "error", "failure", "empty", "not_empty"
     );
@@ -179,12 +185,190 @@ public class AgentReleaseValidationService {
                               AgentReleaseValidationResult.Builder report) {
         String id = trim(node.getId());
         String type = normalize(node.getType(), "");
+        Map<String, Object> config = config(node);
         if (!SUPPORTED_NODE_TYPES.contains(type)) {
-            report.error("GRAPH_NODE_TYPE_UNSUPPORTED", id, "当前 Runtime 不支持节点类型: " + node.getType());
+            report.error("GRAPH_NODE_TYPE_UNSUPPORTED", id, "Unsupported graph node type: " + node.getType());
             return;
         }
         if ("TOOL".equals(type) || "CAPABILITY".equals(type)) {
             validateCapabilityRef(type, node, definition, report);
+        }
+        if ("LLM".equals(type)) {
+            if (!StringUtils.hasText(text(config.get("modelInstanceId")))
+                    && !StringUtils.hasText(definition == null ? null : definition.getModelInstanceId())) {
+                report.error("GRAPH_LLM_MODEL_EMPTY", id, "LLM node requires modelInstanceId or an Agent-level default model");
+            }
+            String outputFormat = normalize(text(config.get("outputFormat")), "TEXT");
+            if (!Set.of("TEXT", "JSON").contains(outputFormat)) {
+                report.error("GRAPH_LLM_OUTPUT_FORMAT_INVALID", id, "LLM outputFormat must be text or json");
+            }
+            Object outputSchema = config.get("outputSchema");
+            if (outputSchema != null) {
+                if (!(outputSchema instanceof List<?> list)) {
+                    report.error("GRAPH_LLM_OUTPUT_SCHEMA_INVALID", id, "LLM outputSchema must be a field schema array");
+                } else {
+                    validateParameterFields(id, list, report);
+                }
+            }
+        }
+        if ("VARIABLE_ASSIGN".equals(type)) {
+            Object assignments = config.get("assignments");
+            if (!(assignments instanceof Map<?, ?> map) || map.isEmpty()) {
+                report.warn("GRAPH_VARIABLE_ASSIGN_EMPTY", id, "VARIABLE_ASSIGN node has no assignments");
+            }
+        }
+        if ("TEMPLATE".equals(type)) {
+            Object template = config.get("template");
+            if (!StringUtils.hasText(template == null ? null : String.valueOf(template))) {
+                report.warn("GRAPH_TEMPLATE_EMPTY", id, "TEMPLATE node has no template");
+            }
+        }
+        if ("ANSWER".equals(type)) {
+            Object template = config.get("template");
+            if (!StringUtils.hasText(template == null ? null : String.valueOf(template))) {
+                report.error("GRAPH_ANSWER_TEMPLATE_EMPTY", id, "ANSWER node requires template");
+            }
+        }
+        if ("CODE".equals(type)) {
+            Object outputs = config.get("outputs");
+            if (!(outputs instanceof Map<?, ?> map) || map.isEmpty()) {
+                report.warn("GRAPH_CODE_OUTPUTS_EMPTY", id, "CODE node has no expression outputs");
+            }
+        }
+        if ("INTENT_CLASSIFIER".equals(type)) {
+            Object classes = config.get("classes");
+            if (!(classes instanceof List<?> list) || list.isEmpty()) {
+                report.error("GRAPH_CLASSIFIER_CLASSES_EMPTY", id, "INTENT_CLASSIFIER node requires classes");
+            }
+        }
+        if ("VARIABLE_AGGREGATOR".equals(type)) {
+            Object items = config.get("items");
+            if (!(items instanceof List<?> list) || list.isEmpty()) {
+                report.warn("GRAPH_AGGREGATOR_ITEMS_EMPTY", id, "VARIABLE_AGGREGATOR node has no items");
+            }
+        }
+        if ("HUMAN_APPROVAL".equals(type)) {
+            if (!StringUtils.hasText(text(config.get("prompt")))) {
+                report.error("GRAPH_APPROVAL_PROMPT_EMPTY", id, "HUMAN_APPROVAL node requires prompt");
+            }
+        }
+        if ("LOOP".equals(type)) {
+            int maxIterations = number(config.get("maxIterations"), 0);
+            if (maxIterations < 1) {
+                report.error("GRAPH_LOOP_MAX_INVALID", id, "LOOP maxIterations must be greater than 0");
+            }
+        }
+        if ("KNOWLEDGE_WRITE".equals(type)) {
+            if (!StringUtils.hasText(text(config.get("knowledgeBaseCode")))) {
+                report.warn("GRAPH_KNOWLEDGE_WRITE_TARGET_EMPTY", id, "KNOWLEDGE_WRITE node has no knowledgeBaseCode");
+            }
+            if (!StringUtils.hasText(text(config.get("contentExpression")))) {
+                report.error("GRAPH_KNOWLEDGE_WRITE_CONTENT_EMPTY", id, "KNOWLEDGE_WRITE node requires contentExpression");
+            }
+        }
+        if ("DOCUMENT_EXTRACT".equals(type)) {
+            if (!StringUtils.hasText(text(config.get("sourceExpression")))) {
+                report.error("GRAPH_DOCUMENT_EXTRACT_SOURCE_EMPTY", id, "DOCUMENT_EXTRACT node requires sourceExpression");
+            }
+        }
+        if ("MCP_CALL".equals(type)) {
+            if (!StringUtils.hasText(text(config.get("toolName")))) {
+                report.error("GRAPH_MCP_TOOL_EMPTY", id, "MCP_CALL node requires toolName");
+            }
+        }
+        if ("PARAMETER_EXTRACT".equals(type)) {
+            Object fields = config.get("fields");
+            if (!(fields instanceof List<?> list) || list.isEmpty()) {
+                report.error("GRAPH_PARAMETER_FIELDS_EMPTY", id, "PARAMETER_EXTRACT node requires fields schema");
+            } else {
+                validateParameterFields(id, list, report);
+            }
+            String mode = normalize(text(config.get("extractMode")), "EXPRESSION");
+            if ("LLM".equals(mode)
+                    && !StringUtils.hasText(text(config.get("modelInstanceId")))
+                    && !StringUtils.hasText(definition == null ? null : definition.getModelInstanceId())) {
+                report.error("GRAPH_PARAMETER_LLM_MODEL_EMPTY", id, "LLM parameter extraction requires modelInstanceId or an Agent-level default model");
+            }
+        }
+        if ("IF_ELSE".equals(type)) {
+            Object groups = config.get("conditionGroups");
+            if (!(groups instanceof List<?> list) || list.isEmpty()) {
+                report.error("GRAPH_CONDITION_GROUPS_EMPTY", id, "IF_ELSE node requires conditionGroups");
+            } else {
+                validateConditionGroups(id, list, report);
+            }
+        }
+        if ("HTTP_REQUEST".equals(type)) {
+            String method = normalize(config.get("method") == null ? null : String.valueOf(config.get("method")), "GET");
+            String url = trim(config.get("url") == null ? null : String.valueOf(config.get("url")));
+            if (!SUPPORTED_HTTP_METHODS.contains(method)) {
+                report.error("GRAPH_HTTP_METHOD_UNSUPPORTED", id, "Unsupported HTTP method: " + method);
+            }
+            if (!StringUtils.hasText(url)) {
+                report.error("GRAPH_HTTP_URL_EMPTY", id, "HTTP_REQUEST node requires URL");
+            }
+            Object timeout = config.get("timeoutMs");
+            if (timeout != null && longValue(timeout, -1L) <= 0L) {
+                report.error("GRAPH_HTTP_TIMEOUT_INVALID", id, "HTTP timeoutMs must be greater than 0");
+            }
+        }
+        if ("KNOWLEDGE_RETRIEVAL".equals(type)) {
+            Object codes = config.get("knowledgeBaseCodes");
+            Object groupId = config.get("knowledgeBaseGroupId");
+            if ((!(codes instanceof List<?> list) || list.isEmpty())
+                    && !StringUtils.hasText(groupId == null ? null : String.valueOf(groupId))) {
+                report.error("GRAPH_KNOWLEDGE_BASE_EMPTY", id, "KNOWLEDGE_RETRIEVAL node requires knowledgeBaseCodes");
+            }
+            if (longValue(config.get("topK"), 1L) <= 0L) {
+                report.error("GRAPH_KNOWLEDGE_TOPK_INVALID", id, "Knowledge retrieval topK must be greater than 0");
+            }
+            Object threshold = config.get("similarityThreshold");
+            if (threshold != null) {
+                double value = doubleValue(threshold, -1D);
+                if (value < 0D || value > 1D) {
+                    report.error("GRAPH_KNOWLEDGE_THRESHOLD_INVALID", id, "similarityThreshold must be between 0 and 1");
+                }
+            }
+        }
+    }
+
+    private void validateParameterFields(String nodeId, List<?> fields, AgentReleaseValidationResult.Builder report) {
+        Set<String> names = new HashSet<>();
+        for (Object rawField : fields) {
+            Map<String, Object> field = asMap(rawField);
+            String name = text(field.get("name"));
+            if (!StringUtils.hasText(name)) {
+                report.error("GRAPH_PARAMETER_FIELD_NAME_EMPTY", nodeId, "Parameter field name is required");
+                continue;
+            }
+            if (!names.add(name)) {
+                report.error("GRAPH_PARAMETER_FIELD_DUPLICATE", nodeId, "Duplicate parameter field: " + name);
+            }
+            String fieldType = normalize(text(field.get("type")), "STRING");
+            if (!Set.of("STRING", "NUMBER", "INTEGER", "BOOLEAN", "OBJECT", "ARRAY").contains(fieldType)) {
+                report.error("GRAPH_PARAMETER_FIELD_TYPE_INVALID", nodeId, "Unsupported parameter field type: " + fieldType);
+            }
+        }
+    }
+
+    private void validateConditionGroups(String nodeId, List<?> groups, AgentReleaseValidationResult.Builder report) {
+        Set<String> groupIds = new HashSet<>();
+        for (Object rawGroup : groups) {
+            Map<String, Object> group = asMap(rawGroup);
+            String groupId = text(group.get("id"));
+            if (!StringUtils.hasText(groupId)) {
+                report.error("GRAPH_CONDITION_GROUP_ID_EMPTY", nodeId, "Condition group id is required");
+            } else if (!groupIds.add(groupId)) {
+                report.error("GRAPH_CONDITION_GROUP_DUPLICATE", nodeId, "Duplicate condition group id: " + groupId);
+            }
+            String logic = normalize(text(group.get("logic")), "AND");
+            if (!Set.of("AND", "OR").contains(logic)) {
+                report.error("GRAPH_CONDITION_LOGIC_INVALID", nodeId, "Condition group logic must be AND or OR");
+            }
+            Object conditions = group.get("conditions");
+            if (!(conditions instanceof List<?> list) || list.isEmpty()) {
+                report.error("GRAPH_CONDITION_EMPTY", nodeId, "Condition group requires at least one condition");
+            }
         }
     }
 
@@ -335,10 +519,64 @@ public class AgentReleaseValidationService {
         if (SUPPORTED_EDGE_CONDITIONS.contains(normalized)) {
             return true;
         }
+        if (normalized.startsWith("route:")) {
+            return normalized.length() > "route:".length();
+        }
         return normalized.startsWith("contains:")
                 || normalized.startsWith("not_contains:")
                 || normalized.startsWith("equals:")
                 || normalized.startsWith("not_equals:");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> config(AgentGraphSpec.Node node) {
+        return node == null || node.getConfig() == null ? Map.of() : node.getConfig();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private long longValue(Object value, long fallback) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        String text = text(value);
+        if (!StringUtils.hasText(text)) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private int number(Object value, int fallback) {
+        return (int) longValue(value, fallback);
+    }
+
+    private double doubleValue(Object value, double fallback) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        String text = text(value);
+        if (!StringUtils.hasText(text)) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private boolean visibilityAllowed(AgentDefinition definition, ToolDefinitionEntity entity) {

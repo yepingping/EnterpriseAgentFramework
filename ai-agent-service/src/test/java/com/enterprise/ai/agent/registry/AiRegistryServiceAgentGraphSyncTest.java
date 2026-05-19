@@ -122,6 +122,9 @@ class AiRegistryServiceAgentGraphSyncTest {
             assertEquals(List.of("queryOrder"), def.getTools());
             assertNotNull(def.getGraphSpec());
             assertTrue(def.getCanvasJson().contains("\"type\":\"llm\""));
+            assertTrue(def.getCanvasJson().contains("\"x\":520"));
+            assertTrue(def.getCanvasJson().contains("\"y\":260"));
+            assertTrue(def.getCanvasJson().contains("\"animated\":true"));
             assertTrue(def.getExtra().containsKey("sdkGraph"));
             @SuppressWarnings("unchecked")
             Map<String, Object> sdkGraph = (Map<String, Object>) def.getExtra().get("sdkGraph");
@@ -154,7 +157,10 @@ class AiRegistryServiceAgentGraphSyncTest {
                                 .qualifiedName("order-service:queryOrder")
                                 .projectCode("order-service")
                                 .build())
-                        .config(Map.of("outputAlias", "order"))
+                        .config(Map.of(
+                                "outputAlias", "order",
+                                "description", "Query order details from order service.",
+                                "ui", Map.of("position", Map.of("x", 520, "y", 260))))
                         .build())
                 .edge(AgentGraphSpec.Edge.builder().from("START").to("classify").condition("always").build())
                 .edge(AgentGraphSpec.Edge.builder().from("classify").to("queryOrder").condition("success").build())

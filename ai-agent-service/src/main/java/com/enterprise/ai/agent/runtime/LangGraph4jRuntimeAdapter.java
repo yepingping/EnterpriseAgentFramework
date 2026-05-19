@@ -2,12 +2,18 @@ package com.enterprise.ai.agent.runtime;
 
 import com.enterprise.ai.agent.agent.AgentDefinition;
 import com.enterprise.ai.agent.client.ModelServiceClient;
+import com.enterprise.ai.agent.credential.WorkflowCredentialRuntime;
+import com.enterprise.ai.agent.credential.WorkflowCredentialService;
 import com.enterprise.ai.agent.graph.AgentGraphSpec;
 import com.enterprise.ai.agent.skill.ToolExecutionContextHolder;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
 import com.enterprise.ai.agent.trace.AgentTraceSpanService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.Builder;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
@@ -15,6 +21,13 @@ import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.state.AgentState;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,7 +35,10 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -37,6 +53,21 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
     static final String NODE_LLM = "llm";
     static final String NODE_TOOL = "tool";
     static final String NODE_CAPABILITY = "capability";
+    static final String NODE_IF_ELSE = "if_else";
+    static final String NODE_VARIABLE_ASSIGN = "variable_assign";
+    static final String NODE_TEMPLATE = "template";
+    static final String NODE_ANSWER = "answer";
+    static final String NODE_CODE = "code";
+    static final String NODE_INTENT_CLASSIFIER = "intent_classifier";
+    static final String NODE_VARIABLE_AGGREGATOR = "variable_aggregator";
+    static final String NODE_HUMAN_APPROVAL = "human_approval";
+    static final String NODE_LOOP = "loop";
+    static final String NODE_KNOWLEDGE_WRITE = "knowledge_write";
+    static final String NODE_DOCUMENT_EXTRACT = "document_extract";
+    static final String NODE_MCP_CALL = "mcp_call";
+    static final String NODE_PARAMETER_EXTRACT = "parameter_extract";
+    static final String NODE_HTTP_REQUEST = "http_request";
+    static final String NODE_KNOWLEDGE_RETRIEVAL = "knowledge_retrieval";
     static final String INPUT = "input";
     static final String SYSTEM_PROMPT = "systemPrompt";
     static final String MODEL_INSTANCE_ID = "modelInstanceId";
@@ -48,21 +79,78 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
     static final String LAST_OUTPUT = "lastOutput";
     static final String LAST_SUCCESS = "lastSuccess";
     static final String LAST_ERROR = "lastError";
+    static final String LAST_ROUTE = "lastRoute";
     static final String CONFIG_ARGS = "args";
     static final String CONFIG_TOOL_ARGS = "toolArgs";
     static final String CONFIG_TOOL_NAME = "toolName";
     static final String CONFIG_QUALIFIED_NAME = "qualifiedName";
     static final String CONFIG_INPUT_MAPPING = "inputMapping";
     static final String CONFIG_OUTPUT_ALIAS = "outputAlias";
+    static final String CONFIG_ASSIGNMENTS = "assignments";
+    static final String CONFIG_TEMPLATE = "template";
+    static final String CONFIG_WRITE_TO_ANSWER = "writeToAnswer";
+    static final String CONFIG_PARAMETERS = "parameters";
+    static final String CONFIG_OUTPUTS = "outputs";
+    static final String CONFIG_ITEMS = "items";
+    static final String CONFIG_AGGREGATE_MODE = "aggregateMode";
+    static final String CONFIG_INPUT_EXPRESSION = "inputExpression";
+    static final String CONFIG_CLASSES = "classes";
+    static final String CONFIG_KEYWORDS = "keywords";
+    static final String CONFIG_APPROVERS = "approvers";
+    static final String CONFIG_TIMEOUT_SECONDS = "timeoutSeconds";
+    static final String CONFIG_LOOP_KEY = "loopKey";
+    static final String CONFIG_MAX_ITERATIONS = "maxIterations";
+    static final String CONFIG_ITEM_EXPRESSION = "itemExpression";
+    static final String CONFIG_BREAK_CONDITION = "breakCondition";
+    static final String CONFIG_KNOWLEDGE_BASE_CODE = "knowledgeBaseCode";
+    static final String CONFIG_TITLE_EXPRESSION = "titleExpression";
+    static final String CONFIG_CONTENT_EXPRESSION = "contentExpression";
+    static final String CONFIG_TAGS = "tags";
+    static final String CONFIG_WRITE_MODE = "writeMode";
+    static final String CONFIG_SOURCE_EXPRESSION = "sourceExpression";
+    static final String CONFIG_FORMAT = "format";
+    static final String CONFIG_SERVER_REF = "serverRef";
+    static final String CONFIG_USER_PROMPT = "userPrompt";
+    static final String CONFIG_MODEL_PARAMS = "modelParams";
+    static final String CONFIG_OUTPUT_FORMAT = "outputFormat";
+    static final String CONFIG_OUTPUT_SCHEMA = "outputSchema";
+    static final String CONFIG_FIELDS = "fields";
+    static final String CONFIG_EXTRACT_MODE = "extractMode";
+    static final String CONFIG_METHOD = "method";
+    static final String CONFIG_URL = "url";
+    static final String CONFIG_QUERY_PARAMS = "queryParams";
+    static final String CONFIG_HEADERS = "headers";
+    static final String CONFIG_BODY_TYPE = "bodyType";
+    static final String CONFIG_BODY = "body";
+    static final String CONFIG_TIMEOUT_MS = "timeoutMs";
+    static final String CONFIG_CREDENTIAL_REF = "credentialRef";
+    static final String CONFIG_KNOWLEDGE_BASE_CODES = "knowledgeBaseCodes";
+    static final String CONFIG_KNOWLEDGE_BASE_GROUP_ID = "knowledgeBaseGroupId";
+    static final String CONFIG_QUERY = "query";
+    static final String CONFIG_TOP_K = "topK";
+    static final String CONFIG_SEARCH_MODE = "searchMode";
+    static final String CONFIG_RERANK_ENABLED = "rerankEnabled";
+    static final String CONFIG_SIMILARITY_THRESHOLD = "similarityThreshold";
+    static final String CONFIG_DIRECT_RETURN_ENABLED = "directReturnEnabled";
+    static final String CONFIG_DIRECT_RETURN_THRESHOLD = "directReturnThreshold";
+    static final String CONFIG_CONDITION_GROUPS = "conditionGroups";
+    static final String CONFIG_DEFAULT_ROUTE = "defaultRoute";
+    static final String TOOL_SEARCH_KNOWLEDGE = "search_knowledge";
     static final String VAR_PREFIX = "var.";
     static final String SPAN_ROOT = "agent-run";
 
     private static final int SUCCESS_CODE = 200;
+    private static final Pattern TEMPLATE_VARIABLE = Pattern.compile("\\{\\{\\s*([^}]+?)\\s*}}");
 
     private final ModelServiceClient modelServiceClient;
     private final ToolDefinitionService toolDefinitionService;
     private final ToolCallLogService toolCallLogService;
     private final AgentTraceSpanService traceSpanService;
+    private final ObjectMapper objectMapper;
+    private final WorkflowCredentialService workflowCredentialService;
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 
     @Override
     public String runtimeType() {
@@ -74,7 +162,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         return AgentRuntimeCapability.builder()
                 .runtimeType(LANGGRAPH4J_RUNTIME_TYPE)
                 .displayName("LangGraph4j")
-                .description("Java graph runtime that compiles platform GraphSpec into observable LLM, Tool and conditional edge execution.")
+                .description("Java graph runtime that compiles platform GraphSpec into observable LLM, Tool, variable, template and conditional edge execution.")
                 .available(true)
                 .supportedModelType("LLM")
                 .supportsStreaming(false)
@@ -115,7 +203,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         if (orderedExecutableNodes(definition).stream().noneMatch(this::isLlmNode)) {
             return "LangGraph4j graphSpec must contain at least one LLM node.";
         }
-        return "LangGraph4j currently supports LLM, TOOL, CAPABILITY nodes and simple conditional edges.";
+        return "LangGraph4j currently supports LLM, TOOL, CAPABILITY, IF_ELSE, VARIABLE_ASSIGN, TEMPLATE, ANSWER, CODE, INTENT_CLASSIFIER, VARIABLE_AGGREGATOR, HUMAN_APPROVAL, LOOP, KNOWLEDGE_WRITE, DOCUMENT_EXTRACT, MCP_CALL, PARAMETER_EXTRACT, HTTP_REQUEST, KNOWLEDGE_RETRIEVAL nodes and simple conditional edges.";
     }
 
     @Override
@@ -201,6 +289,120 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         }
     }
 
+    public NodeDebugResult debugNode(AgentDefinition definition,
+                                     String nodeId,
+                                     String message,
+                                     Map<String, Object> stateOverrides) {
+        if (definition == null || graphSpec(definition) == null) {
+            throw new IllegalArgumentException("Agent definition must include graphSpec");
+        }
+        AgentGraphSpec.Node node = graphSpec(definition).getNodes() == null ? null : graphSpec(definition).getNodes().stream()
+                .filter(item -> item != null && nodeId != null && nodeId.equals(item.getId()))
+                .findFirst()
+                .orElse(null);
+        if (node == null || !isSupportedNode(node)) {
+            throw new IllegalArgumentException("Executable node not found: " + nodeId);
+        }
+        AgentGraphSpec singleNodeSpec = AgentGraphSpec.builder()
+                .code(firstNonBlank(graphSpec(definition).getCode(), "studio_node_debug"))
+                .name(firstNonBlank(graphSpec(definition).getName(), definition.getName()))
+                .runtimeHint(LANGGRAPH4J_RUNTIME_TYPE)
+                .entry(node.getId())
+                .finishNode(node.getId())
+                .node(node)
+                .edge(AgentGraphSpec.Edge.builder().from(START).to(node.getId()).condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from(node.getId()).to(END).condition("always").build())
+                .build();
+        AgentDefinition debugDefinition = copyDefinitionForGraph(definition, singleNodeSpec);
+        AgentRuntimeRequest request = AgentRuntimeRequest.builder()
+                .traceId("studio-node-debug-" + UUID.randomUUID())
+                .sessionId("studio-node-debug")
+                .userId("studio-debug")
+                .message(nullToEmpty(message))
+                .intentType(definition.getIntentType())
+                .agentDefinition(debugDefinition)
+                .build();
+        List<AgentGraphSpec.Node> executableNodes = List.of(node);
+        Map<String, Object> initial = initialState(request, debugDefinition, executableNodes);
+        if (stateOverrides != null) {
+            initial.putAll(stateOverrides);
+        }
+        long start = System.currentTimeMillis();
+        ToolExecutionContext context = buildExecutionContext(request, debugDefinition);
+        try {
+            StateGraph<LangGraphState> graph = buildGraph(context, debugDefinition, executableNodes);
+            LangGraphState finalState = graph.compile()
+                    .invoke(initial, RunnableConfig.builder()
+                            .threadId(request.getSessionId())
+                            .graphId("studio-node-debug:" + definition.getId() + ":" + node.getId())
+                            .build())
+                    .orElseThrow(() -> new IllegalStateException("LangGraph4j node debug returned no final state"));
+            Map<String, Object> outputState = new LinkedHashMap<>(finalState.data());
+            return NodeDebugResult.builder()
+                    .nodeId(node.getId())
+                    .nodeType(node.getType())
+                    .success(true)
+                    .elapsedMs(System.currentTimeMillis() - start)
+                    .inputState(initial)
+                    .outputState(outputState)
+                    .nodeOutput(outputState.get(LAST_OUTPUT))
+                    .lastRoute(asString(outputState.get(LAST_ROUTE)))
+                    .traceId(request.getTraceId())
+                    .build();
+        } catch (Exception ex) {
+            return NodeDebugResult.builder()
+                    .nodeId(node.getId())
+                    .nodeType(node.getType())
+                    .success(false)
+                    .elapsedMs(System.currentTimeMillis() - start)
+                    .inputState(initial)
+                    .outputState(Map.of(
+                            LAST_SUCCESS, false,
+                            LAST_ERROR, nullToEmpty(ex.getMessage())))
+                    .errorCode(ex.getClass().getSimpleName())
+                    .errorMessage(ex.getMessage())
+                    .traceId(request.getTraceId())
+                    .build();
+        }
+    }
+
+    private AgentDefinition copyDefinitionForGraph(AgentDefinition source, AgentGraphSpec graphSpec) {
+        return AgentDefinition.builder()
+                .id(source.getId())
+                .keySlug(source.getKeySlug())
+                .name(source.getName())
+                .description(source.getDescription())
+                .projectId(source.getProjectId())
+                .projectCode(source.getProjectCode())
+                .visibility(source.getVisibility())
+                .intentType(source.getIntentType())
+                .systemPrompt(source.getSystemPrompt())
+                .tools(source.getTools())
+                .toolRefs(source.getToolRefs())
+                .skills(source.getSkills())
+                .skillRefs(source.getSkillRefs())
+                .modelInstanceId(source.getModelInstanceId())
+                .runtimeType(source.getRuntimeType())
+                .runtimePlacement(source.getRuntimePlacement())
+                .runtimeConfig(source.getRuntimeConfig())
+                .graphSpec(graphSpec)
+                .maxSteps(source.getMaxSteps())
+                .enabled(source.isEnabled())
+                .type(source.getType())
+                .pipelineAgentIds(source.getPipelineAgentIds())
+                .knowledgeBaseGroupId(source.getKnowledgeBaseGroupId())
+                .promptTemplateId(source.getPromptTemplateId())
+                .outputSchemaType(source.getOutputSchemaType())
+                .triggerMode(source.getTriggerMode())
+                .useMultiAgentModel(source.isUseMultiAgentModel())
+                .extra(source.getExtra())
+                .canvasJson(source.getCanvasJson())
+                .allowIrreversible(source.isAllowIrreversible())
+                .createdAt(source.getCreatedAt())
+                .updatedAt(source.getUpdatedAt())
+                .build();
+    }
+
     private StateGraph<LangGraphState> buildGraph(ToolExecutionContext context,
                                                   AgentDefinition definition,
                                                   List<AgentGraphSpec.Node> nodes) throws Exception {
@@ -220,6 +422,8 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                 graph = graph.addNode(node.getId(), node_async(state -> callModelNode(state, context, definition, node, allowErrorRoute)));
             } else if (isToolNode(node)) {
                 graph = graph.addNode(node.getId(), node_async(state -> callToolNode(state, context, definition, node, allowErrorRoute)));
+            } else if (isFlowNode(node)) {
+                graph = graph.addNode(node.getId(), node_async(state -> callFlowNode(state, context, definition, node, allowErrorRoute)));
             }
         }
         String entry = resolveEntry(spec, nodeById);
@@ -252,7 +456,9 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         Map<String, Object> config = safeMap(node.getConfig());
         String modelInstanceId = firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), state.value(MODEL_INSTANCE_ID, ""));
         String systemPrompt = firstNonBlank(asString(config.get(SYSTEM_PROMPT)), state.value(SYSTEM_PROMPT, ""));
-        String userMessage = renderModelInput(state);
+        String configuredPrompt = asString(config.get(CONFIG_USER_PROMPT));
+        String userMessage = configuredPrompt.isBlank() ? renderModelInput(state) : renderTemplate(state, configuredPrompt);
+        Map<String, Object> modelParams = asMap(config.get(CONFIG_MODEL_PARAMS));
         try {
             ModelServiceClient.ModelChatResult result = modelServiceClient.chat(ModelServiceClient.ModelChatRequest.builder()
                     .modelInstanceId(modelInstanceId)
@@ -265,6 +471,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                                     .role("user")
                                     .content(userMessage)
                                     .build()))
+                    .options(modelParams.isEmpty() ? null : modelParams)
                     .build());
             if (result == null || result.getCode() != SUCCESS_CODE || result.getData() == null) {
                 String message = result == null ? "empty response" : result.getMessage();
@@ -272,13 +479,14 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             }
 
             ModelServiceClient.ModelChatData data = result.getData();
+            Object modelOutput = normalizeLlmOutput(config, nullToEmpty(data.getContent()));
             Map<String, Object> update = new LinkedHashMap<>();
-            update.put(ANSWER, nullToEmpty(data.getContent()));
-            update.put(LAST_OUTPUT, nullToEmpty(data.getContent()));
+            update.put(ANSWER, stringify(modelOutput));
+            update.put(LAST_OUTPUT, modelOutput);
             update.put(LAST_SUCCESS, true);
             update.put(LAST_ERROR, "");
-            update.put(nodeOutputKey(node.getId()), nullToEmpty(data.getContent()));
-            putOutputAlias(update, node, nullToEmpty(data.getContent()));
+            update.put(nodeOutputKey(node.getId()), modelOutput);
+            putOutputAlias(update, node, modelOutput);
             update.put(MODEL, data.getModel());
             update.put(PROVIDER, data.getProvider());
             update.put(TOKEN_USAGE, tokenUsage(data.getUsage()));
@@ -329,7 +537,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             if (allowErrorRoute) {
                 return update;
             }
-            throw ex;
+            throw new IllegalStateException(ex.getMessage(), ex);
         }
     }
 
@@ -342,6 +550,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         LocalDateTime startedAt = LocalDateTime.now();
         String toolName = resolveExecutableToolName(node);
         Map<String, Object> args = resolveToolArgs(state, node);
+        applyToolCredentialArgs(args, node, definition);
         ToolExecutionContext prev = ToolExecutionContextHolder.get();
         try {
             ToolExecutionContextHolder.set(context);
@@ -397,10 +606,772 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             if (allowErrorRoute) {
                 return update;
             }
-            throw ex;
+            throw new IllegalStateException(ex.getMessage(), ex);
         } finally {
             ToolExecutionContextHolder.set(prev);
         }
+    }
+
+    private Map<String, Object> callFlowNode(LangGraphState state,
+                                             ToolExecutionContext context,
+                                             AgentDefinition definition,
+                                             AgentGraphSpec.Node node,
+                                             boolean allowErrorRoute) {
+        long start = System.currentTimeMillis();
+        LocalDateTime startedAt = LocalDateTime.now();
+        try {
+            Map<String, Object> update = switch (normalizeNodeType(node)) {
+                case "VARIABLE_ASSIGN" -> executeVariableAssign(state, node);
+                case "TEMPLATE" -> executeTemplate(state, node);
+                case "ANSWER" -> executeAnswer(state, node);
+                case "CODE" -> executeCode(state, node);
+                case "INTENT_CLASSIFIER" -> executeIntentClassifier(state, node);
+                case "VARIABLE_AGGREGATOR" -> executeVariableAggregator(state, node);
+                case "HUMAN_APPROVAL" -> executeHumanApproval(state, node);
+                case "LOOP" -> executeLoop(state, node);
+                case "KNOWLEDGE_WRITE" -> executeKnowledgeWrite(state, node);
+                case "DOCUMENT_EXTRACT" -> executeDocumentExtract(state, node);
+                case "MCP_CALL" -> executeMcpCall(state, node);
+                case "IF_ELSE" -> executeIfElse(state, node);
+                case "PARAMETER_EXTRACT" -> executeParameterExtract(state, node);
+                case "HTTP_REQUEST" -> executeHttpRequest(state, definition, node);
+                case "KNOWLEDGE_RETRIEVAL" -> executeKnowledgeRetrieval(state, node);
+                default -> throw new IllegalArgumentException("Unsupported flow node: " + node.getType());
+            };
+            long elapsed = System.currentTimeMillis() - start;
+            logNode(context, node, node.getConfig(), update, true, null, elapsed);
+            recordSpan(context, definition, AgentTraceSpanService.SpanRecord.builder()
+                    .spanType("FLOW_NODE")
+                    .runtimeType(runtimeType())
+                    .parentSpanId(SPAN_ROOT)
+                    .nodeId(node.getId())
+                    .input(node.getConfig())
+                    .output(update)
+                    .success(true)
+                    .latencyMs(elapsed)
+                    .startedAt(startedAt)
+                    .endedAt(LocalDateTime.now())
+                    .metadata(nodeMetadata(node))
+                    .build());
+            return update;
+        } catch (Exception ex) {
+            long elapsed = System.currentTimeMillis() - start;
+            Map<String, Object> update = new LinkedHashMap<>();
+            update.put(LAST_OUTPUT, nullToEmpty(ex.getMessage()));
+            update.put(LAST_SUCCESS, false);
+            update.put(LAST_ERROR, nullToEmpty(ex.getMessage()));
+            logNode(context, node, node.getConfig(), update, false, ex, elapsed);
+            recordSpan(context, definition, AgentTraceSpanService.SpanRecord.builder()
+                    .spanType("FLOW_NODE")
+                    .runtimeType(runtimeType())
+                    .parentSpanId(SPAN_ROOT)
+                    .nodeId(node.getId())
+                    .input(node.getConfig())
+                    .output(update)
+                    .success(false)
+                    .errorCode(ex.getClass().getSimpleName())
+                    .errorMessage(ex.getMessage())
+                    .latencyMs(elapsed)
+                    .startedAt(startedAt)
+                    .endedAt(LocalDateTime.now())
+                    .metadata(nodeMetadata(node))
+                    .build());
+            if (allowErrorRoute) {
+                return update;
+            }
+            throw new IllegalStateException(ex.getMessage(), ex);
+        }
+    }
+
+    private Map<String, Object> executeVariableAssign(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        Map<String, Object> assigned = new LinkedHashMap<>();
+        Object rawAssignments = config.get(CONFIG_ASSIGNMENTS);
+        if (rawAssignments instanceof Map<?, ?> assignments) {
+            assignments.forEach((target, expression) -> {
+                String key = asString(target);
+                if (key.isBlank()) {
+                    return;
+                }
+                assigned.put(key, resolveExpression(state, String.valueOf(expression)));
+            });
+        }
+        Map<String, Object> update = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : assigned.entrySet()) {
+            update.put(entry.getKey(), entry.getValue());
+            update.put(VAR_PREFIX + entry.getKey(), entry.getValue());
+        }
+        update.put(LAST_OUTPUT, assigned);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), assigned);
+        putOutputAlias(update, node, assigned);
+        return update;
+    }
+
+    private Map<String, Object> executeTemplate(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String template = asString(config.get(CONFIG_TEMPLATE));
+        String rendered = renderTemplate(state, template);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, rendered);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), rendered);
+        if (Boolean.TRUE.equals(config.get(CONFIG_WRITE_TO_ANSWER)) || !config.containsKey(CONFIG_WRITE_TO_ANSWER)) {
+            update.put(ANSWER, rendered);
+        }
+        putOutputAlias(update, node, rendered);
+        return update;
+    }
+
+    private Map<String, Object> executeAnswer(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String template = firstNonBlank(asString(config.get(CONFIG_TEMPLATE)), "{{ lastOutput }}");
+        String rendered = renderTemplate(state, template);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(ANSWER, rendered);
+        update.put(LAST_OUTPUT, rendered);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), rendered);
+        putOutputAlias(update, node, rendered);
+        return update;
+    }
+
+    private Map<String, Object> executeCode(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        Map<String, Object> outputs = resolveOutputMap(state, config.get(CONFIG_OUTPUTS));
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, outputs);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), outputs);
+        putOutputAlias(update, node, outputs);
+        return update;
+    }
+
+    private Map<String, Object> executeIntentClassifier(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String inputExpression = firstNonBlank(asString(config.get(CONFIG_INPUT_EXPRESSION)), INPUT);
+        String input = stringify(resolveExpression(state, inputExpression)).toLowerCase();
+        String route = firstNonBlank(asString(config.get(CONFIG_DEFAULT_ROUTE)), "else");
+        Object rawClasses = config.get(CONFIG_CLASSES);
+        if (rawClasses instanceof List<?> classes) {
+            for (Object raw : classes) {
+                Map<String, Object> item = asMap(raw);
+                String id = asString(item.get("id"));
+                if (id.isBlank()) {
+                    continue;
+                }
+                Object rawKeywords = item.get(CONFIG_KEYWORDS);
+                if (rawKeywords instanceof List<?> keywords && keywords.stream()
+                        .map(LangGraph4jRuntimeAdapter::asString)
+                        .filter(keyword -> !keyword.isBlank())
+                        .anyMatch(keyword -> input.contains(keyword.toLowerCase()))) {
+                    route = id;
+                    break;
+                }
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("route", route);
+        result.put("input", input);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(LAST_ROUTE, route);
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeVariableAggregator(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        List<Map<String, Object>> items = fieldList(config.get(CONFIG_ITEMS));
+        Map<String, Object> object = new LinkedHashMap<>();
+        List<Object> array = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            String name = asString(item.get("name"));
+            String source = firstNonBlank(asString(item.get("source")), name);
+            Object value = resolveExpression(state, source);
+            if (!name.isBlank()) {
+                object.put(name, value);
+            }
+            array.add(value);
+        }
+        String mode = firstNonBlank(asString(config.get(CONFIG_AGGREGATE_MODE)), "object").toLowerCase();
+        Object result;
+        if ("array".equals(mode)) {
+            result = array;
+        } else if ("text".equals(mode)) {
+            Map<String, Object> merged = new LinkedHashMap<>(state.data());
+            object.forEach((key, value) -> {
+                merged.put(key, value);
+                merged.put(VAR_PREFIX + key, value);
+            });
+            result = renderTemplate(new LangGraphState(merged), firstNonBlank(asString(config.get(CONFIG_TEMPLATE)), "{{ lastOutput }}"));
+        } else {
+            result = object;
+        }
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeHumanApproval(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String prompt = renderTemplate(state, firstNonBlank(asString(config.get("prompt")), "{{ lastOutput }}"));
+        String route = firstNonBlank(asString(config.get(CONFIG_DEFAULT_ROUTE)), "approved");
+        Map<String, Object> approval = new LinkedHashMap<>();
+        approval.put("status", route);
+        approval.put("title", firstNonBlank(asString(config.get("title")), "人工确认"));
+        approval.put("prompt", prompt);
+        approval.put("approvers", config.getOrDefault(CONFIG_APPROVERS, List.of()));
+        approval.put("timeoutSeconds", longValue(config.get(CONFIG_TIMEOUT_SECONDS), 3600L));
+        approval.put("interactive", true);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, approval);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(LAST_ROUTE, route);
+        update.put(nodeOutputKey(node.getId()), approval);
+        putOutputAlias(update, node, approval);
+        return update;
+    }
+
+    private Map<String, Object> executeLoop(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String loopKey = firstNonBlank(asString(config.get(CONFIG_LOOP_KEY)), node.getId());
+        String stateKey = VAR_PREFIX + loopKey + ".iteration";
+        int current = (int) longValue(state.value(stateKey).orElse(0), 0L);
+        int next = current + 1;
+        int max = Math.max(1, (int) longValue(config.get(CONFIG_MAX_ITERATIONS), 1L));
+        Object itemSource = String.valueOf(config.getOrDefault(CONFIG_ITEM_EXPRESSION, "")).isBlank()
+                ? state.value(LAST_OUTPUT).orElse(null)
+                : resolveExpression(state, asString(config.get(CONFIG_ITEM_EXPRESSION)));
+        boolean breakHit = false;
+        String breakCondition = asString(config.get(CONFIG_BREAK_CONDITION));
+        if (!breakCondition.isBlank()) {
+            breakHit = matchesCondition(state, breakCondition);
+        }
+        String route = breakHit || next >= max ? "done" : "continue";
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("loopKey", loopKey);
+        result.put("iteration", next);
+        result.put("maxIterations", max);
+        result.put("route", route);
+        result.put("item", itemSource);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(stateKey, next);
+        update.put(VAR_PREFIX + loopKey, result);
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(LAST_ROUTE, route);
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeKnowledgeWrite(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("knowledgeBaseCode", asString(config.get(CONFIG_KNOWLEDGE_BASE_CODE)));
+        payload.put("title", stringify(resolveExpression(state, firstNonBlank(asString(config.get(CONFIG_TITLE_EXPRESSION)), "const:工作流写入"))));
+        payload.put("content", stringify(resolveExpression(state, firstNonBlank(asString(config.get(CONFIG_CONTENT_EXPRESSION)), LAST_OUTPUT))));
+        payload.put("tags", config.getOrDefault(CONFIG_TAGS, List.of()));
+        payload.put("mode", firstNonBlank(asString(config.get(CONFIG_WRITE_MODE)), "draft"));
+        payload.put("status", "prepared");
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put("pendingKnowledgeWrite", payload);
+        update.put(LAST_OUTPUT, payload);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), payload);
+        putOutputAlias(update, node, payload);
+        return update;
+    }
+
+    private Map<String, Object> executeDocumentExtract(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String text = stringify(resolveExpression(state, firstNonBlank(asString(config.get(CONFIG_SOURCE_EXPRESSION)), LAST_OUTPUT)));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("format", firstNonBlank(asString(config.get(CONFIG_FORMAT)), "text"));
+        result.put("text", text);
+        result.put("length", text.length());
+        for (Map<String, Object> field : fieldList(config.get(CONFIG_FIELDS))) {
+            String name = asString(field.get("name"));
+            if (name.isBlank()) {
+                continue;
+            }
+            String source = asString(field.get("source"));
+            result.put(name, source.startsWith("regex:")
+                    ? firstRegexGroup(text, source.substring("regex:".length()))
+                    : source.isBlank() ? "" : resolveExpression(state, source));
+        }
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeMcpCall(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String toolName = firstNonBlank(asString(config.get(CONFIG_TOOL_NAME)), asString(config.get("name")));
+        if (toolName.isBlank()) {
+            throw new IllegalArgumentException("MCP toolName is required");
+        }
+        Map<String, Object> args = resolveToolArgs(state, node);
+        args.put("mcpServerRef", asString(config.get(CONFIG_SERVER_REF)));
+        Object result = toolDefinitionService.executeTool(toolName, args);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeIfElse(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        Object lastOutput = state.value(LAST_OUTPUT).orElse(state.value(ANSWER).orElse(null));
+        String route = selectConditionRoute(state, config);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, lastOutput);
+        update.put(LAST_SUCCESS, Boolean.TRUE.equals(state.value(LAST_SUCCESS).orElse(Boolean.TRUE)));
+        update.put(LAST_ERROR, state.value(LAST_ERROR, ""));
+        update.put(LAST_ROUTE, route);
+        update.put(nodeOutputKey(node.getId()), lastOutput);
+        putOutputAlias(update, node, lastOutput);
+        return update;
+    }
+
+    private Map<String, Object> executeParameterExtract(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String mode = firstNonBlank(asString(config.get(CONFIG_EXTRACT_MODE)), "expression").toLowerCase();
+        List<Map<String, Object>> fields = fieldConfigs(config);
+        Map<String, Object> extracted = "llm".equals(mode)
+                ? extractParametersWithLlm(state, config, fields)
+                : extractParametersByExpression(state, config, fields);
+        validateExtractedFields(fields, extracted);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, extracted);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), extracted);
+        putOutputAlias(update, node, extracted);
+        return update;
+    }
+
+    private Map<String, Object> executeKnowledgeRetrieval(LangGraphState state, AgentGraphSpec.Node node) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("input", state.value(INPUT, ""));
+        args.put("query", stringify(resolveExpression(state, firstNonBlank(asString(config.get(CONFIG_QUERY)), "input"))));
+        putIfPresent(args, "knowledgeBaseCodes", config.get(CONFIG_KNOWLEDGE_BASE_CODES));
+        putIfText(args, "knowledgeBaseGroupId", config.get(CONFIG_KNOWLEDGE_BASE_GROUP_ID));
+        putIfText(args, "searchMode", config.get(CONFIG_SEARCH_MODE));
+        putIfPresent(args, "topK", config.get(CONFIG_TOP_K));
+        putIfPresent(args, "rerankEnabled", config.get(CONFIG_RERANK_ENABLED));
+        putIfPresent(args, "similarityThreshold", config.get(CONFIG_SIMILARITY_THRESHOLD));
+        putIfPresent(args, "directReturnEnabled", config.get(CONFIG_DIRECT_RETURN_ENABLED));
+        putIfPresent(args, "directReturnThreshold", config.get(CONFIG_DIRECT_RETURN_THRESHOLD));
+        Object result = toolDefinitionService.executeTool(TOOL_SEARCH_KNOWLEDGE, args);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private Map<String, Object> executeHttpRequest(LangGraphState state,
+                                                   AgentDefinition definition,
+                                                   AgentGraphSpec.Node node) throws Exception {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String method = firstNonBlank(asString(config.get(CONFIG_METHOD)), "GET").toUpperCase();
+        String url = appendQueryParams(renderTemplate(state, asString(config.get(CONFIG_URL))), config.get(CONFIG_QUERY_PARAMS), state);
+        url = appendQueryParams(url, credentialQueryParams(config, definition), state);
+        if (url.isBlank()) {
+            throw new IllegalArgumentException("HTTP_REQUEST node requires url: " + node.getId());
+        }
+        HttpRequest.Builder request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMillis(longValue(config.get(CONFIG_TIMEOUT_MS), 30000L)));
+        Object headers = config.get(CONFIG_HEADERS);
+        if (headers instanceof Map<?, ?> map) {
+            map.forEach((key, value) -> {
+                String headerName = asString(key);
+                if (!headerName.isBlank()) {
+                    request.header(headerName, renderTemplate(state, String.valueOf(value)));
+                }
+            });
+        }
+        applyCredential(request, config, definition, state);
+        String bodyType = firstNonBlank(asString(config.get(CONFIG_BODY_TYPE)), "json").toLowerCase();
+        String body = renderTemplate(state, asString(config.get(CONFIG_BODY)));
+        if ("GET".equals(method) || "DELETE".equals(method)) {
+            request.method(method, HttpRequest.BodyPublishers.noBody());
+        } else {
+            if ("json".equals(bodyType) && !hasHeader(config.get(CONFIG_HEADERS), "Content-Type")) {
+                request.header("Content-Type", "application/json");
+            }
+            request.method(method, HttpRequest.BodyPublishers.ofString(body));
+        }
+        HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", response.statusCode());
+        result.put("body", response.body());
+        result.put("headers", response.headers().map());
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, response.statusCode() >= 200 && response.statusCode() < 400);
+        update.put(LAST_ERROR, response.statusCode() >= 400 ? "HTTP " + response.statusCode() : "");
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private String selectConditionRoute(LangGraphState state, Map<String, Object> config) {
+        Object rawGroups = config.get(CONFIG_CONDITION_GROUPS);
+        if (rawGroups instanceof List<?> groups) {
+            for (Object rawGroup : groups) {
+                Map<String, Object> group = asMap(rawGroup);
+                String groupId = asString(group.get("id"));
+                if (!groupId.isBlank() && matchesConditionGroup(state, group)) {
+                    return groupId;
+                }
+            }
+        }
+        return firstNonBlank(asString(config.get(CONFIG_DEFAULT_ROUTE)), "else");
+    }
+
+    private boolean matchesConditionGroup(LangGraphState state, Map<String, Object> group) {
+        Object rawConditions = group.get("conditions");
+        if (!(rawConditions instanceof List<?> conditions) || conditions.isEmpty()) {
+            return false;
+        }
+        boolean andLogic = !"OR".equalsIgnoreCase(asString(group.get("logic")));
+        boolean matchedAny = false;
+        for (Object rawCondition : conditions) {
+            Map<String, Object> condition = asMap(rawCondition);
+            boolean matched = matchesStructuredCondition(state, condition);
+            matchedAny = matchedAny || matched;
+            if (andLogic && !matched) {
+                return false;
+            }
+            if (!andLogic && matched) {
+                return true;
+            }
+        }
+        return andLogic ? matchedAny : false;
+    }
+
+    private boolean matchesStructuredCondition(LangGraphState state, Map<String, Object> condition) {
+        Object left = resolveExpression(state, asString(condition.get("left")));
+        String operator = firstNonBlank(asString(condition.get("operator")), "exists").toLowerCase();
+        Object right = condition.containsKey("right")
+                ? resolveExpression(state, asString(condition.get("right")))
+                : "";
+        String leftText = stringify(left);
+        String rightText = stringify(right);
+        return switch (operator) {
+            case "eq", "equals" -> leftText.equals(rightText);
+            case "neq", "not_equals" -> !leftText.equals(rightText);
+            case "contains" -> leftText.contains(rightText);
+            case "not_contains" -> !leftText.contains(rightText);
+            case "empty" -> leftText.isBlank();
+            case "not_empty", "exists" -> !leftText.isBlank();
+            case "gt" -> doubleValue(left, 0D) > doubleValue(right, 0D);
+            case "gte" -> doubleValue(left, 0D) >= doubleValue(right, 0D);
+            case "lt" -> doubleValue(left, 0D) < doubleValue(right, 0D);
+            case "lte" -> doubleValue(left, 0D) <= doubleValue(right, 0D);
+            default -> false;
+        };
+    }
+
+    private List<Map<String, Object>> fieldConfigs(Map<String, Object> config) {
+        Object rawFields = config.get(CONFIG_FIELDS);
+        List<Map<String, Object>> fields = fieldList(rawFields);
+        if (!fields.isEmpty()) {
+            return fields;
+        }
+        Object rawParameters = config.get(CONFIG_PARAMETERS);
+        if (rawParameters instanceof Map<?, ?> parameters) {
+            List<Map<String, Object>> legacyFields = new ArrayList<>();
+            parameters.forEach((name, expression) -> {
+                String fieldName = asString(name);
+                if (!fieldName.isBlank()) {
+                    Map<String, Object> field = new LinkedHashMap<>();
+                    field.put("name", fieldName);
+                    field.put("type", "string");
+                    field.put("source", String.valueOf(expression));
+                    legacyFields.add(field);
+                }
+            });
+            return legacyFields;
+        }
+        return List.of();
+    }
+
+    private static List<Map<String, Object>> fieldList(Object rawFields) {
+        if (rawFields instanceof List<?> fields) {
+            return fields.stream()
+                    .map(LangGraph4jRuntimeAdapter::asMap)
+                    .filter(field -> !asString(field.get("name")).isBlank())
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private Map<String, Object> resolveOutputMap(LangGraphState state, Object rawOutputs) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (rawOutputs instanceof Map<?, ?> outputs) {
+            outputs.forEach((target, expression) -> {
+                String key = asString(target);
+                if (!key.isBlank()) {
+                    result.put(key, resolveExpression(state, String.valueOf(expression)));
+                }
+            });
+        }
+        if (result.isEmpty()) {
+            result.put("result", state.value(LAST_OUTPUT).orElse(state.value(INPUT).orElse("")));
+        }
+        return result;
+    }
+
+    private Map<String, Object> extractParametersByExpression(LangGraphState state,
+                                                              Map<String, Object> config,
+                                                              List<Map<String, Object>> fields) {
+        Map<String, Object> extracted = new LinkedHashMap<>();
+        if (fields.isEmpty()) {
+            Object rawParameters = config.get(CONFIG_PARAMETERS);
+            if (rawParameters instanceof Map<?, ?> parameters) {
+                parameters.forEach((target, expression) -> {
+                    String key = asString(target);
+                    if (!key.isBlank()) {
+                        extracted.put(key, resolveExpression(state, String.valueOf(expression)));
+                    }
+                });
+            }
+            return extracted;
+        }
+        for (Map<String, Object> field : fields) {
+            String name = asString(field.get("name"));
+            String source = firstNonBlank(asString(field.get("source")), name);
+            Object value = resolveExpression(state, source);
+            if (isBlankValue(value) && field.containsKey("defaultValue")) {
+                value = field.get("defaultValue");
+            }
+            extracted.put(name, coerceFieldValue(value, asString(field.get("type"))));
+        }
+        return extracted;
+    }
+
+    private Object normalizeLlmOutput(Map<String, Object> config, String content) {
+        String outputFormat = asString(config.get(CONFIG_OUTPUT_FORMAT)).toLowerCase();
+        List<Map<String, Object>> schema = fieldList(config.get(CONFIG_OUTPUT_SCHEMA));
+        if (!"json".equals(outputFormat) && schema.isEmpty()) {
+            return content;
+        }
+        Map<String, Object> parsed = parseJsonObject(content, "LLM output");
+        if (!schema.isEmpty()) {
+            validateStructuredFields(schema, parsed, "LLM output");
+        }
+        return parsed;
+    }
+
+    private Map<String, Object> extractParametersWithLlm(LangGraphState state,
+                                                         Map<String, Object> config,
+                                                         List<Map<String, Object>> fields) {
+        String modelInstanceId = firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), state.value(MODEL_INSTANCE_ID, ""));
+        String schema = stringify(fields);
+        String prompt = "Extract JSON fields from the input. Return only a JSON object.\nSchema: "
+                + schema
+                + "\nInput:\n"
+                + renderModelInput(state);
+        ModelServiceClient.ModelChatResult result = modelServiceClient.chat(ModelServiceClient.ModelChatRequest.builder()
+                .modelInstanceId(modelInstanceId)
+                .messages(List.of(
+                        ModelServiceClient.ModelChatRequest.ChatMessage.builder()
+                                .role("system")
+                                .content("You extract structured JSON parameters.")
+                                .build(),
+                        ModelServiceClient.ModelChatRequest.ChatMessage.builder()
+                                .role("user")
+                                .content(prompt)
+                                .build()))
+                .build());
+        if (result == null || result.getCode() != SUCCESS_CODE || result.getData() == null) {
+            String message = result == null ? "empty response" : result.getMessage();
+            throw new IllegalStateException("parameter extraction model call failed: " + message);
+        }
+        return parseJsonObject(nullToEmpty(result.getData().getContent()), "parameter extraction");
+    }
+
+    private void validateExtractedFields(List<Map<String, Object>> fields, Map<String, Object> extracted) {
+        validateStructuredFields(fields, extracted, "parameter extraction");
+    }
+
+    private void validateStructuredFields(List<Map<String, Object>> fields, Map<String, Object> extracted, String source) {
+        for (Map<String, Object> field : fields) {
+            String name = asString(field.get("name"));
+            if (!extracted.containsKey(name) && field.containsKey("defaultValue")) {
+                extracted.put(name, field.get("defaultValue"));
+            }
+            if (Boolean.TRUE.equals(field.get("required")) && isBlankValue(extracted.get(name))) {
+                throw new IllegalArgumentException(source + " required field is missing: " + name);
+            }
+            if (extracted.containsKey(name)) {
+                extracted.put(name, coerceFieldValue(extracted.get(name), asString(field.get("type"))));
+            }
+        }
+    }
+
+    private Map<String, Object> parseJsonObject(String content, String source) {
+        String normalized = stripJsonFence(content);
+        try {
+            return objectMapper.readValue(normalized, new TypeReference<LinkedHashMap<String, Object>>() {
+            });
+        } catch (Exception ex) {
+            throw new IllegalArgumentException(source + " did not return valid JSON object");
+        }
+    }
+
+    private String stripJsonFence(String content) {
+        String text = content == null ? "" : content.trim();
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```(?:json)?\\s*", "");
+            text = text.replaceFirst("\\s*```$", "");
+        }
+        return text.trim();
+    }
+
+    private Object coerceFieldValue(Object value, String type) {
+        if (value == null) {
+            return null;
+        }
+        return switch (type == null ? "" : type.toLowerCase()) {
+            case "number" -> doubleValue(value, 0D);
+            case "integer" -> (long) doubleValue(value, 0D);
+            case "boolean" -> Boolean.parseBoolean(stringify(value));
+            default -> value;
+        };
+    }
+
+    private String appendQueryParams(String baseUrl, Object rawParams, LangGraphState state) {
+        if (!(rawParams instanceof Map<?, ?> params) || params.isEmpty()) {
+            return baseUrl;
+        }
+        StringBuilder builder = new StringBuilder(baseUrl);
+        builder.append(baseUrl.contains("?") ? "&" : "?");
+        boolean first = true;
+        for (Map.Entry<?, ?> entry : params.entrySet()) {
+            String key = asString(entry.getKey());
+            if (key.isBlank()) {
+                continue;
+            }
+            String value = renderTemplate(state, String.valueOf(entry.getValue()));
+            if (!first) {
+                builder.append("&");
+            }
+            builder.append(URLEncoder.encode(key, StandardCharsets.UTF_8))
+                    .append("=")
+                    .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+            first = false;
+        }
+        return first ? baseUrl : builder.toString();
+    }
+
+    private boolean hasHeader(Object rawHeaders, String expected) {
+        if (!(rawHeaders instanceof Map<?, ?> headers)) {
+            return false;
+        }
+        return headers.keySet().stream().map(LangGraph4jRuntimeAdapter::asString)
+                .anyMatch(key -> expected.equalsIgnoreCase(key));
+    }
+
+    private void applyCredential(HttpRequest.Builder request,
+                                 Map<String, Object> config,
+                                 AgentDefinition definition,
+                                 LangGraphState state) {
+        String credentialRef = asString(config.get(CONFIG_CREDENTIAL_REF));
+        if (credentialRef.isBlank() || workflowCredentialService == null) {
+            return;
+        }
+        WorkflowCredentialRuntime credential = workflowCredentialService
+                .resolve(credentialRef, definition == null ? null : definition.getProjectId(),
+                        definition == null ? null : definition.getProjectCode())
+                .orElseThrow(() -> new IllegalArgumentException("Credential not found: " + credentialRef));
+        Map<String, Object> secret = credential.getSecret() == null ? Map.of() : credential.getSecret();
+        String type = firstNonBlank(asString(credential.getType()), asString(config.get("authType"))).toUpperCase();
+        switch (type) {
+            case "BEARER" -> {
+                String token = firstNonBlank(asString(secret.get("token")), asString(secret.get("apiKey")));
+                if (!token.isBlank()) {
+                    request.header("Authorization", "Bearer " + renderTemplate(state, token));
+                }
+            }
+            case "BASIC" -> {
+                String username = asString(secret.get("username"));
+                String password = asString(secret.get("password"));
+                String raw = username + ":" + password;
+                request.header("Authorization", "Basic " + java.util.Base64.getEncoder()
+                        .encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
+            }
+            case "API_KEY_HEADER" -> {
+                String header = firstNonBlank(asString(secret.get("headerName")), "X-API-Key");
+                String value = firstNonBlank(asString(secret.get("apiKey")), asString(secret.get("token")));
+                if (!value.isBlank()) {
+                    request.header(header, renderTemplate(state, value));
+                }
+            }
+            case "CUSTOM_HEADERS" -> {
+                Object headers = secret.get("headers");
+                if (headers instanceof Map<?, ?> map) {
+                    map.forEach((key, value) -> {
+                        String header = asString(key);
+                        if (!header.isBlank()) {
+                            request.header(header, renderTemplate(state, String.valueOf(value)));
+                        }
+                    });
+                }
+            }
+            case "API_KEY_QUERY" -> {
+                // Query credentials are added before URI creation by appendQueryParams.
+            }
+            default -> {
+            }
+        }
+    }
+
+    private Map<String, Object> credentialQueryParams(Map<String, Object> config, AgentDefinition definition) {
+        String credentialRef = asString(config.get(CONFIG_CREDENTIAL_REF));
+        if (credentialRef.isBlank() || workflowCredentialService == null) {
+            return Map.of();
+        }
+        WorkflowCredentialRuntime credential = workflowCredentialService
+                .resolve(credentialRef, definition == null ? null : definition.getProjectId(),
+                        definition == null ? null : definition.getProjectCode())
+                .orElse(null);
+        if (credential == null || !"API_KEY_QUERY".equalsIgnoreCase(credential.getType())) {
+            return Map.of();
+        }
+        Map<String, Object> secret = credential.getSecret() == null ? Map.of() : credential.getSecret();
+        String name = firstNonBlank(asString(secret.get("paramName")), "api_key");
+        String value = firstNonBlank(asString(secret.get("apiKey")), asString(secret.get("token")));
+        return value.isBlank() ? Map.of() : Map.of(name, value);
     }
 
     private Map<String, Object> metadata(AgentRuntimeRequest request,
@@ -471,11 +1442,11 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         args.put("runtimeType", runtimeType());
         args.put("node", node.getId());
         args.put("nodeType", node.getType());
-        args.put("input", input);
+        args.put("input", redactSensitive(input));
         toolCallLogService.record(context,
                 "runtime.langgraph4j.node." + node.getId(),
                 args,
-                result,
+                redactSensitive(result),
                 success,
                 error == null ? null : error.getClass().getSimpleName(),
                 elapsedMs,
@@ -655,9 +1626,16 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         if ("error".equalsIgnoreCase(normalized) || "failure".equalsIgnoreCase(normalized)) {
             return !success || !state.value(LAST_ERROR, "").isBlank();
         }
+        String lowerCondition = normalized.toLowerCase();
+        String route = state.value(LAST_ROUTE, "");
+        if (lowerCondition.startsWith("route:")) {
+            return route.equals(normalized.substring("route:".length()).trim());
+        }
+        if (!route.isBlank() && route.equals(normalized)) {
+            return true;
+        }
         String output = stringify(state.value(LAST_OUTPUT).orElse(state.value(ANSWER, "")));
         String lowerOutput = output.toLowerCase();
-        String lowerCondition = normalized.toLowerCase();
         if (lowerCondition.startsWith("contains:")) {
             return lowerOutput.contains(lowerCondition.substring("contains:".length()).trim());
         }
@@ -703,7 +1681,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
     }
 
     private boolean isSupportedNode(AgentGraphSpec.Node node) {
-        return isLlmNode(node) || isToolNode(node);
+        return isLlmNode(node) || isToolNode(node) || isFlowNode(node);
     }
 
     private boolean isLlmNode(AgentGraphSpec.Node node) {
@@ -717,6 +1695,75 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                 || NODE_TOOL.equalsIgnoreCase(type)
                 || "CAPABILITY".equalsIgnoreCase(type)
                 || NODE_CAPABILITY.equalsIgnoreCase(type);
+    }
+
+    private boolean isFlowNode(AgentGraphSpec.Node node) {
+        String type = normalizeNodeType(node);
+        return "IF_ELSE".equals(type)
+                || "VARIABLE_ASSIGN".equals(type)
+                || "TEMPLATE".equals(type)
+                || "ANSWER".equals(type)
+                || "CODE".equals(type)
+                || "INTENT_CLASSIFIER".equals(type)
+                || "VARIABLE_AGGREGATOR".equals(type)
+                || "HUMAN_APPROVAL".equals(type)
+                || "LOOP".equals(type)
+                || "KNOWLEDGE_WRITE".equals(type)
+                || "DOCUMENT_EXTRACT".equals(type)
+                || "MCP_CALL".equals(type)
+                || "PARAMETER_EXTRACT".equals(type)
+                || "HTTP_REQUEST".equals(type)
+                || "KNOWLEDGE_RETRIEVAL".equals(type);
+    }
+
+    private String normalizeNodeType(AgentGraphSpec.Node node) {
+        String type = asString(node == null ? null : node.getType()).toUpperCase();
+        if (NODE_IF_ELSE.equalsIgnoreCase(type) || "CONDITION".equalsIgnoreCase(type)) {
+            return "IF_ELSE";
+        }
+        if (NODE_VARIABLE_ASSIGN.equalsIgnoreCase(type) || "VARIABLE".equalsIgnoreCase(type)) {
+            return "VARIABLE_ASSIGN";
+        }
+        if (NODE_TEMPLATE.equalsIgnoreCase(type)) {
+            return "TEMPLATE";
+        }
+        if (NODE_ANSWER.equalsIgnoreCase(type) || "REPLY".equalsIgnoreCase(type)) {
+            return "ANSWER";
+        }
+        if (NODE_CODE.equalsIgnoreCase(type) || "CODE".equalsIgnoreCase(type)) {
+            return "CODE";
+        }
+        if (NODE_INTENT_CLASSIFIER.equalsIgnoreCase(type) || "CLASSIFIER".equalsIgnoreCase(type) || "QUESTION_CLASSIFIER".equalsIgnoreCase(type)) {
+            return "INTENT_CLASSIFIER";
+        }
+        if (NODE_VARIABLE_AGGREGATOR.equalsIgnoreCase(type) || "AGGREGATE".equalsIgnoreCase(type)) {
+            return "VARIABLE_AGGREGATOR";
+        }
+        if (NODE_HUMAN_APPROVAL.equalsIgnoreCase(type) || "APPROVAL".equalsIgnoreCase(type)) {
+            return "HUMAN_APPROVAL";
+        }
+        if (NODE_LOOP.equalsIgnoreCase(type)) {
+            return "LOOP";
+        }
+        if (NODE_KNOWLEDGE_WRITE.equalsIgnoreCase(type)) {
+            return "KNOWLEDGE_WRITE";
+        }
+        if (NODE_DOCUMENT_EXTRACT.equalsIgnoreCase(type) || "DOCUMENT".equalsIgnoreCase(type)) {
+            return "DOCUMENT_EXTRACT";
+        }
+        if (NODE_MCP_CALL.equalsIgnoreCase(type) || "MCP".equalsIgnoreCase(type)) {
+            return "MCP_CALL";
+        }
+        if (NODE_PARAMETER_EXTRACT.equalsIgnoreCase(type) || "PARAMETER".equalsIgnoreCase(type)) {
+            return "PARAMETER_EXTRACT";
+        }
+        if (NODE_HTTP_REQUEST.equalsIgnoreCase(type) || "HTTP".equalsIgnoreCase(type)) {
+            return "HTTP_REQUEST";
+        }
+        if (NODE_KNOWLEDGE_RETRIEVAL.equalsIgnoreCase(type) || "KNOWLEDGE".equalsIgnoreCase(type)) {
+            return "KNOWLEDGE_RETRIEVAL";
+        }
+        return type;
     }
 
     private String resolveToolName(AgentGraphSpec.Node node) {
@@ -743,6 +1790,22 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         return toolDefinitionService.findByQualifiedName(name)
                 .map(entity -> firstNonBlank(entity.getName(), name))
                 .orElse(name);
+    }
+
+    private void applyToolCredentialArgs(Map<String, Object> args, AgentGraphSpec.Node node, AgentDefinition definition) {
+        Map<String, Object> config = safeMap(node.getConfig());
+        String credentialRef = asString(config.get(CONFIG_CREDENTIAL_REF));
+        if (credentialRef.isBlank() || workflowCredentialService == null) {
+            return;
+        }
+        WorkflowCredentialRuntime credential = workflowCredentialService
+                .resolve(credentialRef, definition == null ? null : definition.getProjectId(),
+                        definition == null ? null : definition.getProjectCode())
+                .orElseThrow(() -> new IllegalArgumentException("Credential not found: " + credentialRef));
+        args.put("credentialRef", credentialRef);
+        args.put("__credential", Map.of(
+                "type", nullToEmpty(credential.getType()),
+                "secret", credential.getSecret() == null ? Map.of() : credential.getSecret()));
     }
 
     private Map<String, Object> resolveToolArgs(LangGraphState state, AgentGraphSpec.Node node) {
@@ -816,6 +1879,35 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         return traverse(root, parts, 1, expr);
     }
 
+    private String renderTemplate(LangGraphState state, String template) {
+        if (template == null || template.isBlank()) {
+            return "";
+        }
+        Matcher matcher = TEMPLATE_VARIABLE.matcher(template);
+        StringBuffer out = new StringBuffer();
+        while (matcher.find()) {
+            Object value = resolveExpression(state, matcher.group(1));
+            matcher.appendReplacement(out, Matcher.quoteReplacement(stringify(value)));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private String firstRegexGroup(String text, String regex) {
+        if (regex == null || regex.isBlank()) {
+            return "";
+        }
+        try {
+            Matcher matcher = Pattern.compile(regex, Pattern.DOTALL).matcher(text == null ? "" : text);
+            if (!matcher.find()) {
+                return "";
+            }
+            return matcher.groupCount() >= 1 ? matcher.group(1) : matcher.group();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     private Object stateValue(LangGraphState state, String key) {
         if (key == null || key.isBlank()) {
             return null;
@@ -826,6 +1918,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             case "lastOutput", "previousOutput" -> state.value(LAST_OUTPUT).orElse(null);
             case "lastError" -> state.value(LAST_ERROR).orElse(null);
             case "lastSuccess" -> state.value(LAST_SUCCESS).orElse(null);
+            case "lastRoute" -> state.value(LAST_ROUTE).orElse(null);
             default -> {
                 Object exact = state.value(key).orElse(null);
                 if (exact != null) {
@@ -952,6 +2045,36 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         return result;
     }
 
+    private static Object redactSensitive(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> redacted = new LinkedHashMap<>();
+            map.forEach((key, child) -> {
+                String name = asString(key);
+                if (isSensitiveKey(name)) {
+                    redacted.put(name, "***");
+                } else {
+                    redacted.put(name, redactSensitive(child));
+                }
+            });
+            return redacted;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(LangGraph4jRuntimeAdapter::redactSensitive).toList();
+        }
+        return value;
+    }
+
+    private static boolean isSensitiveKey(String key) {
+        String normalized = key == null ? "" : key.toLowerCase();
+        return normalized.contains("credential")
+                || normalized.contains("secret")
+                || normalized.contains("token")
+                || normalized.contains("apikey")
+                || normalized.contains("api_key")
+                || normalized.contains("password")
+                || normalized.contains("authorization");
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
         if (value instanceof Map<?, ?> map) {
@@ -962,6 +2085,53 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
 
     private static Map<String, Object> safeMap(Map<String, Object> value) {
         return value == null ? Map.of() : value;
+    }
+
+    private static void putIfText(Map<String, Object> target, String key, Object value) {
+        String text = asString(value);
+        if (!text.isBlank()) {
+            target.put(key, text);
+        }
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
+    private static long longValue(Object value, long fallback) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        String text = asString(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static double doubleValue(Object value, double fallback) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        String text = asString(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean isBlankValue(Object value) {
+        return value == null || stringify(value).isBlank();
     }
 
     private static Integer tokenCostFrom(Object result) {
@@ -1044,6 +2214,22 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             return first;
         }
         return second != null && !second.isBlank() ? second : null;
+    }
+
+    @Data
+    @Builder
+    public static class NodeDebugResult {
+        private String nodeId;
+        private String nodeType;
+        private boolean success;
+        private long elapsedMs;
+        private Map<String, Object> inputState;
+        private Map<String, Object> outputState;
+        private Object nodeOutput;
+        private String lastRoute;
+        private String errorCode;
+        private String errorMessage;
+        private String traceId;
     }
 
     public static class LangGraphState extends AgentState {

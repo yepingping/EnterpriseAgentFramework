@@ -242,6 +242,24 @@ CREATE TABLE IF NOT EXISTS `registry_project_credential` (
     KEY `idx_registry_credential_project` (`project_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='注册中心项目接入凭证';
 
+CREATE TABLE IF NOT EXISTS `agent_workflow_credential` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `credential_ref` VARCHAR(128) NOT NULL,
+    `name`           VARCHAR(128) NOT NULL,
+    `type`           VARCHAR(32)  NOT NULL,
+    `project_id`     BIGINT       DEFAULT NULL,
+    `project_code`   VARCHAR(96)  DEFAULT NULL,
+    `scope`          VARCHAR(24)  NOT NULL DEFAULT 'PROJECT',
+    `status`         VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `secret_json`    MEDIUMTEXT   NOT NULL,
+    `created_at`     DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_workflow_credential_ref` (`credential_ref`),
+    KEY `idx_workflow_credential_project` (`project_id`, `status`),
+    KEY `idx_workflow_credential_code` (`project_code`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent Studio ?????????';
+
 CREATE TABLE IF NOT EXISTS `market_item` (
     `id`                       BIGINT       NOT NULL AUTO_INCREMENT,
     `asset_kind`               VARCHAR(24)  NOT NULL,

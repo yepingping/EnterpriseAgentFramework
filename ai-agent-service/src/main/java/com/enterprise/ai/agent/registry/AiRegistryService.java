@@ -504,22 +504,40 @@ public class AiRegistryService {
         int index = 0;
         for (AgentGraphSpec.Node graphNode : spec.getNodes() == null ? List.<AgentGraphSpec.Node>of() : spec.getNodes()) {
             String kind = canvasKind(graphNode);
+            Map<String, Object> config = graphNode.getConfig() == null ? Map.of() : graphNode.getConfig();
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("label", firstText(graphNode.getName(), graphNode.getId()));
             data.put("kind", kind);
+            data.put("configVersion", 2);
+            data.put("source", "SDK");
+            data.put("category", canvasCategory(kind));
+            data.put("collapsed", graphNode.getLayout() != null && Boolean.TRUE.equals(graphNode.getLayout().getCollapsed()));
+            data.put("inputs", graphNode.getInputs() == null ? List.of() : graphNode.getInputs());
+            data.put("outputs", graphNode.getOutputs() == null ? List.of() : graphNode.getOutputs());
+            data.put("retry", graphNode.getRetry() == null
+                    ? Map.of("enabled", false, "maxAttempts", 1, "backoffMs", 800)
+                    : graphNode.getRetry());
+            data.put("errorPolicy", graphNode.getErrorPolicy() == null
+                    ? Map.of("strategy", "TERMINATE")
+                    : graphNode.getErrorPolicy());
             if (graphNode.getRef() != null) {
-                data.put("ref", firstText(graphNode.getRef().getName(), graphNode.getRef().getQualifiedName()));
-                data.put("qualifiedName", graphNode.getRef().getQualifiedName());
-                data.put("projectCode", graphNode.getRef().getProjectCode());
+                data.put("toolConfig", Map.of(
+                        "ref", firstText(graphNode.getRef().getName(), graphNode.getRef().getQualifiedName(), ""),
+                        "qualifiedName", firstText(graphNode.getRef().getQualifiedName(), ""),
+                        "projectCode", firstText(graphNode.getRef().getProjectCode(), ""),
+                        "inputMapping", config.getOrDefault("inputMapping", Map.of()),
+                        "mappingNote", firstText(String.valueOf(config.getOrDefault("mappingNote", "")), ""),
+                        "credentialRef", firstText(String.valueOf(config.getOrDefault("credentialRef", "")), "")
+                ));
             }
-            Map<String, Object> config = graphNode.getConfig() == null ? Map.of() : graphNode.getConfig();
+            data.put("description", firstText(graphNode.getDescription(), stringValue(config.get("description")), ""));
             if (config.get("outputAlias") != null) {
                 data.put("outputAlias", config.get("outputAlias"));
             }
-            if (config.get("inputMapping") != null) {
-                data.put("inputMapping", config.get("inputMapping"));
-            }
-            nodes.add(canvasNode(graphNode.getId(), kind, 260 + (index * 220), 220, data));
+            applyCanvasNodeConfig(kind, data, config);
+            int x = canvasPosition(graphNode, config, "x", 260 + (index * 220));
+            int y = canvasPosition(graphNode, config, "y", 220);
+            nodes.add(canvasNode(graphNode.getId(), kind, x, y, data));
             index++;
         }
         nodes.add(canvasNode("end", "end", 260 + (Math.max(index, 1) * 220), 220, Map.of("label", "结束", "kind", "end")));
@@ -534,9 +552,113 @@ public class AiRegistryService {
             edge.put("target", target);
             edge.put("condition", condition);
             edge.put("label", condition);
+            edge.put("type", "smoothstep");
+            edge.put("markerEnd", "arrowclosed");
+            edge.put("interactionWidth", 18);
+            edge.put("animated", !"always".equalsIgnoreCase(condition) && !"default".equalsIgnoreCase(condition));
             edges.add(edge);
         }
-        return writeJson(Map.of("nodes", nodes, "edges", edges));
+        return writeJson(Map.of("version", 2, "nodes", nodes, "edges", edges));
+    }
+
+    private void applyCanvasNodeConfig(String kind, Map<String, Object> data, Map<String, Object> config) {
+        if ("llm".equals(kind)) {
+            data.put("llmConfig", Map.of(
+                    "modelInstanceId", firstText(stringValue(config.get("modelInstanceId")), ""),
+                    "systemPrompt", firstText(stringValue(config.get("systemPrompt")), ""),
+                    "userPrompt", firstText(stringValue(config.get("userPrompt")), "{{ input }}"),
+                    "contextVariables", config.getOrDefault("contextVariables", List.of()),
+                    "modelParams", config.getOrDefault("modelParams", Map.of()),
+                    "outputFormat", firstText(stringValue(config.get("outputFormat")), "text"),
+                    "outputSchema", config.getOrDefault("outputSchema", List.of())
+            ));
+        } else if ("condition".equals(kind)) {
+            data.put("conditionConfig", Map.of(
+                    "groups", config.getOrDefault("conditionGroups", List.of()),
+                    "defaultRoute", firstText(stringValue(config.get("defaultRoute")), "else")
+            ));
+        } else if ("variable".equals(kind)) {
+            data.put("assignments", config.getOrDefault("assignments", Map.of()));
+        } else if ("template".equals(kind)) {
+            data.put("template", firstText(stringValue(config.get("template")), ""));
+            data.put("writeToAnswer", config.getOrDefault("writeToAnswer", true));
+        } else if ("parameter".equals(kind)) {
+            data.put("parameterConfig", Map.of(
+                    "mode", firstText(stringValue(config.get("extractMode")), "expression"),
+                    "modelInstanceId", firstText(stringValue(config.get("modelInstanceId")), ""),
+                    "fields", config.getOrDefault("fields", List.of())
+            ));
+        } else if ("http".equals(kind)) {
+            data.put("httpConfig", Map.of(
+                    "method", firstText(stringValue(config.get("method")), "GET"),
+                    "url", firstText(stringValue(config.get("url")), ""),
+                    "queryParams", config.getOrDefault("queryParams", Map.of()),
+                    "headers", config.getOrDefault("headers", Map.of()),
+                    "bodyType", firstText(stringValue(config.get("bodyType")), "none"),
+                    "body", firstText(stringValue(config.get("body")), ""),
+                    "timeoutMs", config.getOrDefault("timeoutMs", 30000),
+                    "credentialRef", firstText(stringValue(config.get("credentialRef")), "")
+            ));
+        } else if ("knowledge".equals(kind)) {
+            data.put("knowledgeConfig", Map.of(
+                    "knowledgeBaseCodes", config.getOrDefault("knowledgeBaseCodes", List.of()),
+                    "query", firstText(stringValue(config.get("query")), "input"),
+                    "topK", config.getOrDefault("topK", 5),
+                    "similarityThreshold", config.getOrDefault("similarityThreshold", 0.5),
+                    "searchMode", firstText(stringValue(config.get("searchMode")), "hybrid"),
+                    "rerankEnabled", config.getOrDefault("rerankEnabled", true),
+                    "directReturnEnabled", config.getOrDefault("directReturnEnabled", false),
+                    "directReturnThreshold", config.getOrDefault("directReturnThreshold", 0.85)
+            ));
+        }
+    }
+
+    private int canvasPosition(AgentGraphSpec.Node node, Map<String, Object> config, String axis, int fallback) {
+        AgentGraphSpec.Layout.NodeLayout layout = node.getLayout();
+        if (layout != null) {
+            Double value = "x".equals(axis) ? layout.getX() : layout.getY();
+            if (value != null) {
+                return value.intValue();
+            }
+        }
+        return canvasPosition(config, axis, fallback);
+    }
+
+    @SuppressWarnings("unchecked")
+    private int canvasPosition(Map<String, Object> config, String axis, int fallback) {
+        Object ui = config.get("ui");
+        if (!(ui instanceof Map<?, ?> uiMap)) {
+            return fallback;
+        }
+        Object position = uiMap.get("position");
+        if (!(position instanceof Map<?, ?> positionMap)) {
+            return fallback;
+        }
+        Object raw = positionMap.get(axis);
+        if (raw instanceof Number number) {
+            return number.intValue();
+        }
+        if (raw instanceof String text && StringUtils.hasText(text)) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String canvasCategory(String kind) {
+        return switch (kind) {
+            case "llm", "skill", "tool" -> "action";
+            case "condition", "variable", "parameter", "template" -> "flow";
+            case "knowledge", "http" -> "integration";
+            default -> "system";
+        };
     }
 
     private Map<String, Object> canvasNode(String id, String type, int x, int y, Map<String, Object> data) {
@@ -555,6 +677,12 @@ public class AiRegistryService {
         return switch (node.getType().trim().toUpperCase(Locale.ROOT)) {
             case "LLM" -> "llm";
             case "CAPABILITY" -> "skill";
+            case "IF_ELSE" -> "condition";
+            case "VARIABLE_ASSIGN" -> "variable";
+            case "TEMPLATE" -> "template";
+            case "PARAMETER_EXTRACT" -> "parameter";
+            case "HTTP_REQUEST" -> "http";
+            case "KNOWLEDGE_RETRIEVAL" -> "knowledge";
             default -> "tool";
         };
     }

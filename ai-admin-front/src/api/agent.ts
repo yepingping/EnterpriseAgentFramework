@@ -7,6 +7,8 @@ import type {
   AgentRuntimeValidationResult,
   AgentReleaseValidationResult,
   AgentReleaseEvent,
+  AgentNodeDebugRequest,
+  AgentNodeDebugResult,
   AgentVersion,
   PublishVersionRequest,
 } from '@/types/agent'
@@ -38,6 +40,10 @@ export function getAgentRuntimes() {
 
 export function validateAgentRuntime(data: Partial<AgentForm>) {
   return agentRequest.post<AgentRuntimeValidationResult>('/api/agent/definitions/runtime-validation', data)
+}
+
+export function debugAgentNode(data: AgentNodeDebugRequest) {
+  return agentRequest.post<AgentNodeDebugResult>('/api/agent/studio/debug-node', data)
 }
 
 export function executeAgent(data: ChatRequest) {
