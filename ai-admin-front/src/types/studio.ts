@@ -1,6 +1,7 @@
 export type CanvasNodeKind =
   | 'start'
   | 'end'
+  | 'userInput'
   | 'llm'
   | 'skill'
   | 'tool'
@@ -20,7 +21,7 @@ export type CanvasNodeKind =
   | 'documentExtract'
   | 'mcp'
 
-export type FieldType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array'
+export type FieldType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'file'
 export type ParameterExtractMode = 'expression' | 'llm'
 export type ConditionLogic = 'AND' | 'OR'
 export type ConditionOperator =
@@ -51,6 +52,15 @@ export interface StudioPort {
   type?: FieldType | 'any' | 'file' | 'message'
   required?: boolean
   schema?: string
+  source?: string
+}
+
+export interface StudioVariableOption {
+  value: string
+  label: string
+  group: '用户输入' | '系统变量' | '节点输出' | '运行态变量' | '高级表达式' | string
+  description?: string
+  nodeId?: string
   source?: string
 }
 
@@ -129,6 +139,11 @@ export interface ParameterNodeConfig {
   mode: ParameterExtractMode
   modelInstanceId?: string
   fields: StudioFieldSchema[]
+}
+
+export interface UserInputNodeConfig {
+  fields: StudioFieldSchema[]
+  outputAlias: string
 }
 
 export interface AnswerNodeConfig {
@@ -226,9 +241,15 @@ export interface CanvasNodeData {
   collapsed?: boolean
   inputs?: StudioPort[]
   outputs?: StudioPort[]
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  inputMapping?: Record<string, string>
   retry?: StudioRetryPolicy
   errorPolicy?: StudioErrorPolicy
   outputAlias?: string
+  needsConfiguration?: boolean
+  placeholderReason?: string
+  userInputConfig?: UserInputNodeConfig
   llmConfig?: LlmNodeConfig
   knowledgeConfig?: KnowledgeNodeConfig
   httpConfig?: HttpNodeConfig

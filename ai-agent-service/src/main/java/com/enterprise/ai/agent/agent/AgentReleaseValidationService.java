@@ -185,6 +185,10 @@ public class AgentReleaseValidationService {
             report.error("GRAPH_NODE_TYPE_UNSUPPORTED", id, "Unsupported graph node type: " + node.getType());
             return;
         }
+        if (Boolean.TRUE.equals(config.get("needsConfiguration"))) {
+            report.error("GRAPH_PLACEHOLDER_NODE_UNCONFIGURED", id, "AI 生成的占位节点尚未补全，不能发布");
+            return;
+        }
         if ("TOOL".equals(type) || "CAPABILITY".equals(type)) {
             validateCapabilityRef(type, node, definition, report);
         }
@@ -204,6 +208,15 @@ public class AgentReleaseValidationService {
                 } else {
                     validateParameterFields(id, list, report);
                 }
+            }
+        }
+        validateNodeContract(node, report);
+        if ("USER_INPUT".equals(type)) {
+            Object fields = config.get("fields");
+            if (!(fields instanceof List<?> list) || list.isEmpty()) {
+                report.error("GRAPH_USER_INPUT_FIELDS_EMPTY", id, "USER_INPUT node requires fields");
+            } else {
+                validateUserInputFields(id, list, report);
             }
         }
         if ("VARIABLE_ASSIGN".equals(type)) {
@@ -346,6 +359,65 @@ public class AgentReleaseValidationService {
         }
     }
 
+    private void validateUserInputFields(String nodeId, List<?> fields, AgentReleaseValidationResult.Builder report) {
+        Set<String> names = new HashSet<>();
+        for (Object rawField : fields) {
+            Map<String, Object> field = asMap(rawField);
+            String name = text(field.get("name"));
+            if (!StringUtils.hasText(name)) {
+                report.error("GRAPH_USER_INPUT_FIELD_NAME_EMPTY", nodeId, "USER_INPUT field name is required");
+                continue;
+            }
+            if (!name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                report.error("GRAPH_USER_INPUT_FIELD_NAME_INVALID", nodeId, "Invalid USER_INPUT field name: " + name);
+            }
+            if (!names.add(name)) {
+                report.error("GRAPH_USER_INPUT_FIELD_DUPLICATE", nodeId, "Duplicate USER_INPUT field: " + name);
+            }
+            String fieldType = normalize(text(field.get("type")), "STRING");
+            if (!Set.of("STRING", "NUMBER", "INTEGER", "BOOLEAN", "OBJECT", "ARRAY", "FILE").contains(fieldType)) {
+                report.error("GRAPH_USER_INPUT_FIELD_TYPE_INVALID", nodeId, "Unsupported USER_INPUT field type: " + fieldType);
+            }
+        }
+    }
+
+    private void validateNodeContract(AgentGraphSpec.Node node, AgentReleaseValidationResult.Builder report) {
+        String nodeId = trim(node.getId());
+        Map<String, Object> nodeConfig = config(node);
+        Object rawMapping = nodeConfig.get("inputMapping");
+        Map<?, ?> mapping = rawMapping instanceof Map<?, ?> map ? map : Map.of();
+        for (AgentGraphSpec.Port port : node.getInputs() == null ? List.<AgentGraphSpec.Port>of() : node.getInputs()) {
+            if (port == null || !Boolean.TRUE.equals(port.getRequired())) {
+                continue;
+            }
+            String target = firstText(port.getId(), port.getName());
+            if (!StringUtils.hasText(target)) {
+                report.error("GRAPH_REQUIRED_INPUT_NAME_EMPTY", nodeId, "Required input port must include id or name");
+                continue;
+            }
+            if (!mapping.containsKey(target) && !StringUtils.hasText(port.getSource())) {
+                report.error("GRAPH_REQUIRED_INPUT_UNBOUND", nodeId, "Required input is not bound: " + target);
+            }
+        }
+        validateSchemaObject(nodeId, "inputSchema", node.getInputSchema(), report);
+        validateSchemaObject(nodeId, "outputSchema", node.getOutputSchema(), report);
+    }
+
+    private void validateSchemaObject(String nodeId,
+                                      String field,
+                                      Map<String, Object> schema,
+                                      AgentReleaseValidationResult.Builder report) {
+        if (schema == null || schema.isEmpty()) {
+            return;
+        }
+        Object fields = schema.get("fields");
+        if (fields instanceof List<?> list) {
+            validateParameterFields(nodeId, list, report);
+        } else if (fields != null) {
+            report.error("GRAPH_SCHEMA_FIELDS_INVALID", nodeId, field + ".fields must be a field schema array");
+        }
+    }
+
     private void validateConditionGroups(String nodeId, List<?> groups, AgentReleaseValidationResult.Builder report) {
         Set<String> groupIds = new HashSet<>();
         for (Object rawGroup : groups) {
@@ -442,6 +514,10 @@ public class AgentReleaseValidationService {
             if (alias != null && StringUtils.hasText(String.valueOf(alias))) {
                 aliases.add(String.valueOf(alias).trim());
             }
+            if ("USER_INPUT".equals(AgentGraphNodeType.normalize(node.getType()))) {
+                String userInputAlias = alias == null ? "params" : String.valueOf(alias).trim();
+                aliases.add(StringUtils.hasText(userInputAlias) ? userInputAlias : "params");
+            }
         }
         for (AgentGraphSpec.Node node : nodes) {
             if (node == null) {
@@ -475,7 +551,17 @@ public class AgentReleaseValidationService {
                 || value.equals("null") || value.equals("true") || value.equals("false")
                 || value.equals("$input") || value.equals("input")
                 || value.equals("$answer") || value.equals("answer")
-                || value.equals("$lastOutput") || value.equals("previousOutput")) {
+                || value.equals("$lastOutput") || value.equals("lastOutput") || value.equals("previousOutput")) {
+            return;
+        }
+        if (value.equals("sys") || value.startsWith("sys.") || value.startsWith("$sys.")) {
+            return;
+        }
+        if (value.startsWith("var.")) {
+            String alias = value.substring("var.".length()).split("\\.", 2)[0];
+            if (!aliases.contains(alias)) {
+                report.error("GRAPH_MAPPING_ALIAS_INVALID", nodeId, "inputMapping references unknown outputAlias: " + alias);
+            }
             return;
         }
         if (value.startsWith("nodeOutput.")) {
@@ -487,7 +573,7 @@ public class AgentReleaseValidationService {
         }
         String alias = value.split("\\.", 2)[0];
         if (!aliases.contains(alias)) {
-            report.warn("GRAPH_MAPPING_ALIAS_UNKNOWN", nodeId, "inputMapping 引用了未知 outputAlias: " + alias);
+            report.error("GRAPH_MAPPING_ALIAS_INVALID", nodeId, "inputMapping references unknown outputAlias: " + alias);
         }
     }
 
@@ -607,6 +693,15 @@ public class AgentReleaseValidationService {
 
     private String firstText(String first, String fallback) {
         return StringUtils.hasText(first) ? first : fallback;
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String normalize(String value, String fallback) {

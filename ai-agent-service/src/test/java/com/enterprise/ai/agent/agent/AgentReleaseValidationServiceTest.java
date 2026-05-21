@@ -254,6 +254,102 @@ class AgentReleaseValidationServiceTest {
         assertTrue(codes.contains("GRAPH_UNREACHABLE_NODE"));
     }
 
+    @Test
+    void validateRejectsUnconfiguredPlaceholderNodes() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("llm")
+                .finishNode("reply")
+                .node(AgentGraphSpec.Node.builder().id("llm").type("LLM").build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("placeholder_query_order")
+                        .type("TOOL")
+                        .name("待配置：查询订单")
+                        .config(Map.of(
+                                "needsConfiguration", true,
+                                "placeholderReason", "没有匹配到已注册能力"))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("reply")
+                        .type("ANSWER")
+                        .config(Map.of("template", "{{ lastOutput }}"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("llm").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("llm").to("placeholder_query_order").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("placeholder_query_order").to("reply").condition("success").build())
+                .edge(AgentGraphSpec.Edge.builder().from("reply").to("END").condition("always").build())
+                .build()));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_PLACEHOLDER_NODE_UNCONFIGURED"));
+    }
+
+    @Test
+    void validateRejectsInvalidUserInputFields() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("user_input")
+                .finishNode("answer")
+                .node(AgentGraphSpec.Node.builder()
+                        .id("user_input")
+                        .type("USER_INPUT")
+                        .config(Map.of("fields", List.of(
+                                Map.of("name", "question", "type", "string", "required", true),
+                                Map.of("name", "question", "type", "file", "required", false))))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("answer")
+                        .type("ANSWER")
+                        .config(Map.of("template", "{{ params.question }}"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("user_input").to("answer").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                .build()));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_USER_INPUT_FIELD_DUPLICATE"));
+    }
+
+    @Test
+    void validateRejectsRequiredInputWithoutBinding() {
+        AgentReleaseValidationResult result = service.validate(baseDefinition(AgentGraphSpec.builder()
+                .entry("user_input")
+                .finishNode("reply")
+                .node(AgentGraphSpec.Node.builder()
+                        .id("user_input")
+                        .type("USER_INPUT")
+                        .config(Map.of(
+                                "outputAlias", "params",
+                                "fields", List.of(Map.of("name", "question", "type", "string", "required", true))))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("call_tool")
+                        .type("TOOL")
+                        .inputs(List.of(AgentGraphSpec.Port.builder()
+                                .id("query")
+                                .name("query")
+                                .type("string")
+                                .required(true)
+                                .build()))
+                        .ref(AgentGraphSpec.CapabilityRef.builder().name("query_order").build())
+                        .config(Map.of("outputAlias", "tool_result"))
+                        .build())
+                .node(AgentGraphSpec.Node.builder()
+                        .id("reply")
+                        .type("ANSWER")
+                        .config(Map.of("template", "{{ tool_result }}"))
+                        .build())
+                .edge(AgentGraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("user_input").to("call_tool").condition("always").build())
+                .edge(AgentGraphSpec.Edge.builder().from("call_tool").to("reply").condition("success").build())
+                .edge(AgentGraphSpec.Edge.builder().from("reply").to("END").condition("always").build())
+                .build()));
+
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_REQUIRED_INPUT_UNBOUND"));
+    }
+
     private AgentDefinition baseDefinition(AgentGraphSpec graphSpec) {
         return AgentDefinition.builder()
                 .id("agent-1")

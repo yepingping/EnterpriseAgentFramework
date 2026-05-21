@@ -65,12 +65,46 @@
     <section class="llm-card utility-card">
       <el-form-item label="变量引用">
         <div class="variable-picker">
-          <el-select v-model="config.contextVariables" multiple filterable allow-create default-first-option placeholder="声明本节点会使用的变量" style="width: 100%">
-            <el-option v-for="item in variableOptions" :key="item" :label="item" :value="item" />
+          <el-select
+            v-model="config.contextVariables"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :filter-method="filterVariableOptions"
+            placeholder="选择本节点会使用的变量"
+            popper-class="studio-variable-select"
+            style="width: 100%"
+            @visible-change="handleVariableVisibleChange"
+          >
+            <el-option-group
+              v-for="group in groupedVariableOptions"
+              :key="group.group"
+              :label="group.group"
+            >
+              <el-option
+                v-for="item in group.options"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              >
+                <div class="variable-option">
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ item.value }}</span>
+                  <em v-if="item.description">{{ item.description }}</em>
+                </div>
+              </el-option>
+            </el-option-group>
           </el-select>
-          <div class="variable-chips">
-            <el-button v-for="item in variableOptions" :key="item" size="small" @click="insertVariable(item)">
-              {{ item }}
+          <div class="variable-shortcuts">
+            <el-button
+              v-for="item in suggestedVariableOptions"
+              :key="item.value"
+              size="small"
+              @click="insertVariable(item.value)"
+            >
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.value }}</span>
             </el-button>
           </div>
         </div>
@@ -132,8 +166,36 @@
         <el-switch v-model="config.visionEnabled" active-text="启用" inactive-text="关闭" />
       </el-form-item>
       <el-form-item v-if="config.visionEnabled" label="图片变量">
-        <el-select v-model="config.visionInputs" multiple filterable allow-create default-first-option placeholder="选择图片/文件变量" style="width: 100%">
-          <el-option v-for="item in variableOptions" :key="item" :label="item" :value="item" />
+        <el-select
+          v-model="config.visionInputs"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          :filter-method="filterVariableOptions"
+          placeholder="选择图片/文件变量"
+          popper-class="studio-variable-select"
+          style="width: 100%"
+          @visible-change="handleVariableVisibleChange"
+        >
+          <el-option-group
+            v-for="group in groupedVariableOptions"
+            :key="group.group"
+            :label="group.group"
+          >
+            <el-option
+              v-for="item in group.options"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            >
+              <div class="variable-option">
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.value }}</span>
+                <em v-if="item.description">{{ item.description }}</em>
+              </div>
+            </el-option>
+          </el-option-group>
         </el-select>
       </el-form-item>
 
@@ -147,14 +209,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Bottom, Delete, Plus, Top } from '@element-plus/icons-vue'
-import type { CanvasNodeData, LlmNodeConfig, LlmPromptMessage } from '@/types/studio'
+import type { CanvasNodeData, LlmNodeConfig, LlmPromptMessage, StudioVariableOption } from '@/types/studio'
 import type { ModelInstance } from '@/types/model'
 import { addField, formatMap, parseMap } from './panelUtils'
 
 const props = defineProps<{
   data: CanvasNodeData
   modelOptions: ModelInstance[]
-  variableOptions: string[]
+  variableOptions: Array<string | StudioVariableOption>
 }>()
 
 const promptModeOptions = [
@@ -162,6 +224,19 @@ const promptModeOptions = [
   { label: '简洁模式', value: 'simple' },
 ]
 const focusedMessageId = ref<string>('')
+const variableKeyword = ref('')
+
+const fallbackVariableOptions: StudioVariableOption[] = [
+  { value: 'params', label: '用户输入 · 全部参数', group: '用户输入', description: '用户输入节点写入的 params 对象' },
+  { value: 'params.question', label: '用户输入 · 用户问题', group: '用户输入', description: '用户输入节点的 question 字段' },
+  { value: 'sys.userId', label: '系统变量 · 当前用户 ID', group: '系统变量', description: '运行上下文中的用户标识' },
+  { value: 'sys.tenantId', label: '系统变量 · 租户 ID', group: '系统变量', description: '运行上下文中的租户标识' },
+  { value: 'sys.roles', label: '系统变量 · 用户角色', group: '系统变量', description: '当前用户角色列表' },
+  { value: 'input', label: '运行态 · 原始输入消息', group: '运行态变量', description: '本次运行的原始消息' },
+  { value: 'answer', label: '运行态 · 最终回答', group: '运行态变量', description: '当前已生成的 answer' },
+  { value: 'lastOutput', label: '运行态 · 上一步输出', group: '运行态变量', description: '便捷变量，适合快速串联原型' },
+  { value: 'lastRoute', label: '运行态 · 命中分支', group: '运行态变量', description: '条件或意图分类节点最近一次路由' },
+]
 
 const config = computed<LlmNodeConfig>(() => {
   props.data.llmConfig ||= defaultConfig()
@@ -195,6 +270,123 @@ const renderedPreview = computed(() => activeMessages.value
     ...message,
     content: renderPreview(message.content),
   })))
+
+const normalizedVariableOptions = computed<StudioVariableOption[]>(() => {
+  const map = new Map<string, StudioVariableOption>()
+  for (const item of fallbackVariableOptions) map.set(item.value, item)
+  for (const item of props.variableOptions) {
+    const option = normalizeVariableOption(item)
+    if (option.value) map.set(option.value, option)
+  }
+  return Array.from(map.values())
+})
+
+const groupedVariableOptions = computed(() => {
+  const keyword = variableKeyword.value.trim().toLowerCase()
+  const filtered = normalizedVariableOptions.value.filter((item) => {
+    if (!keyword) return true
+    return [item.label, item.value, item.group, item.description, item.source]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(keyword)
+  })
+  const groups = ['用户输入', '系统变量', '节点输出', '运行态变量', '高级表达式']
+  return groups
+    .map((group) => ({
+      group,
+      options: filtered.filter((item) => item.group === group),
+    }))
+    .filter((group) => group.options.length)
+})
+
+const suggestedVariableOptions = computed(() => {
+  const preferred = ['params.question', 'input', 'lastOutput', 'answer']
+  const byValue = new Map(normalizedVariableOptions.value.map((item) => [item.value, item]))
+  const picks: StudioVariableOption[] = []
+  for (const value of config.value.contextVariables || []) {
+    const item = byValue.get(value)
+    if (item) picks.push(item)
+  }
+  for (const value of preferred) {
+    const item = byValue.get(value)
+    if (item) picks.push(item)
+  }
+  for (const item of normalizedVariableOptions.value) {
+    if (picks.length >= 8) break
+    picks.push(item)
+  }
+  const seen = new Set<string>()
+  return picks.filter((item) => {
+    if (seen.has(item.value)) return false
+    seen.add(item.value)
+    return true
+  }).slice(0, 8)
+})
+
+function filterVariableOptions(keyword: string) {
+  variableKeyword.value = keyword
+}
+
+function handleVariableVisibleChange(visible: boolean) {
+  if (!visible) variableKeyword.value = ''
+}
+
+function normalizeVariableOption(item: string | StudioVariableOption): StudioVariableOption {
+  if (typeof item !== 'string') return item
+  if (item.startsWith('sys.')) {
+    return { value: item, label: systemVariableLabel(item), group: '系统变量', description: item }
+  }
+  if (item.startsWith('nodeOutput.')) {
+    return {
+      value: item,
+      label: `节点输出 · ${item.replace('nodeOutput.', '')}`,
+      group: '节点输出',
+      description: item,
+    }
+  }
+  if (item.startsWith('var.')) {
+    return {
+      value: item,
+      label: `业务别名 · ${item.replace('var.', '')}`,
+      group: '节点输出',
+      description: item,
+    }
+  }
+  if (['input', 'answer', 'lastOutput', 'lastRoute', 'lastSuccess', 'lastError'].includes(item)) {
+    return { value: item, label: runtimeVariableLabel(item), group: '运行态变量', description: item }
+  }
+  if (item.startsWith('params')) {
+    return {
+      value: item,
+      label: item === 'params' ? '用户输入 · 全部参数' : `用户输入 · ${item.replace('params.', '')}`,
+      group: '用户输入',
+      description: item,
+    }
+  }
+  return { value: item, label: `表达式 · ${item}`, group: '高级表达式', description: item }
+}
+
+function systemVariableLabel(value: string) {
+  const labels: Record<string, string> = {
+    'sys.userId': '系统变量 · 当前用户 ID',
+    'sys.tenantId': '系统变量 · 租户 ID',
+    'sys.roles': '系统变量 · 用户角色',
+  }
+  return labels[value] || `系统变量 · ${value.replace('sys.', '')}`
+}
+
+function runtimeVariableLabel(value: string) {
+  const labels: Record<string, string> = {
+    input: '运行态 · 原始输入消息',
+    answer: '运行态 · 最终回答',
+    lastOutput: '运行态 · 上一步输出',
+    lastRoute: '运行态 · 命中分支',
+    lastSuccess: '运行态 · 上一步是否成功',
+    lastError: '运行态 · 上一步错误',
+  }
+  return labels[value] || `运行态 · ${value}`
+}
 
 function defaultConfig(): LlmNodeConfig {
   return {
@@ -307,7 +499,7 @@ function updateParams(text: string) {
 
   .llm-toolbar,
   .quick-add-row,
-  .variable-chips {
+  .variable-shortcuts {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -470,14 +662,43 @@ function updateParams(text: string) {
     width: 100%;
   }
 
-  .variable-chips {
-    max-height: 76px;
+  .variable-shortcuts {
+    max-height: 112px;
     overflow: auto;
 
     :deep(.el-button) {
+      height: auto;
+      min-height: 44px;
+      padding: 7px 10px;
       border-color: #dbeafe;
       background: #eff6ff;
       color: #2563eb;
+      text-align: left;
+
+      > span {
+        display: grid;
+        gap: 2px;
+        max-width: 220px;
+      }
+    }
+
+    strong,
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    strong {
+      color: #1e293b;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    span {
+      color: #4f46e5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
     }
   }
 

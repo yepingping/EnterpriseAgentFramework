@@ -11,8 +11,12 @@ import type {
   AgentReleaseEvent,
   AgentNodeDebugRequest,
   AgentNodeDebugResult,
+  AgentWorkflowDebugRunRequest,
+  AgentWorkflowDebugRunResult,
   AgentVersion,
   PublishVersionRequest,
+  WorkflowDraftGenerationRequest,
+  WorkflowDraftGenerationResult,
 } from '@/types/agent'
 import type { ChatRequest, ChatResponse } from '@/types/chat'
 
@@ -50,6 +54,14 @@ export function validateAgentRuntime(data: Partial<AgentForm>) {
 
 export function debugAgentNode(data: AgentNodeDebugRequest) {
   return agentRequest.post<AgentNodeDebugResult>('/api/agent/studio/debug-node', data)
+}
+
+export function debugAgentWorkflowRun(data: AgentWorkflowDebugRunRequest) {
+  return agentRequest.post<AgentWorkflowDebugRunResult>('/api/agent/studio/debug-run', data)
+}
+
+export function generateWorkflowDraft(data: WorkflowDraftGenerationRequest) {
+  return agentRequest.post<WorkflowDraftGenerationResult>('/api/agent/studio/generate-draft', data)
 }
 
 export function executeAgent(data: ChatRequest) {

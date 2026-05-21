@@ -29,6 +29,198 @@ import static org.mockito.Mockito.when;
 class LangGraph4jRuntimeAdapterTest {
 
     @Test
+    void executesUserInputNodeAndExposesParamsVariables() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-user-input")
+                .sessionId("session-user-input")
+                .message("fallback question")
+                .runtimeOptions(Map.of("params", Map.of(
+                        "question", "How do I transfer?",
+                        "upload_document", "file-001")))
+                .agentDefinition(AgentDefinition.builder()
+                        .id("agent-1")
+                        .name("User Input Agent")
+                        .type("single")
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .graphSpec(AgentGraphSpec.builder()
+                                .code("user_input_graph")
+                                .entry("user_input")
+                                .finishNode("answer")
+                                .node(AgentGraphSpec.Node.builder()
+                                        .id("user_input")
+                                        .type("USER_INPUT")
+                                        .config(Map.of(
+                                                "outputAlias", "params",
+                                                "fields", List.of(
+                                                        Map.of("name", "question", "type", "string", "required", true),
+                                                        Map.of("name", "upload_document", "type", "file", "required", true))))
+                                        .build())
+                                .node(AgentGraphSpec.Node.builder()
+                                        .id("answer")
+                                        .type("ANSWER")
+                                        .config(Map.of("template", "{{ params.question }} / {{ params.upload_document }}"))
+                                        .build())
+                                .edge(AgentGraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                                .edge(AgentGraphSpec.Edge.builder().from("user_input").to("answer").condition("always").build())
+                                .edge(AgentGraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                                .build())
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("How do I transfer? / file-001", result.getAnswer());
+        assertTrue(result.getMetadata().containsKey("graphNodes"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void debugRunExposesResolvedInputsRawOutputsAndPublishedVariables() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentDefinition definition = AgentDefinition.builder()
+                .id("agent-vars")
+                .name("Variable Contract Agent")
+                .type("single")
+                .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                .graphSpec(AgentGraphSpec.builder()
+                        .code("variable_contract_graph")
+                        .entry("user_input")
+                        .finishNode("reply")
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("user_input")
+                                .type("USER_INPUT")
+                                .config(Map.of(
+                                        "outputAlias", "params",
+                                        "fields", List.of(Map.of(
+                                                "name", "question",
+                                                "type", "string",
+                                                "required", true))))
+                                .build())
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("assign")
+                                .type("VARIABLE_ASSIGN")
+                                .inputs(List.of(AgentGraphSpec.Port.builder()
+                                        .id("question")
+                                        .name("question")
+                                        .type("string")
+                                        .required(true)
+                                        .build()))
+                                .config(Map.of(
+                                        "inputMapping", Map.of("question", "params.question"),
+                                        "assignments", Map.of("question", "params.question"),
+                                        "outputAlias", "captured"))
+                                .build())
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("reply")
+                                .type("ANSWER")
+                                .config(Map.of("template", "{{ captured.question }}"))
+                                .build())
+                        .edge(AgentGraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("user_input").to("assign").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("assign").to("reply").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("reply").to("END").condition("always").build())
+                        .build())
+                .build();
+
+        LangGraph4jRuntimeAdapter.WorkflowDebugRunResult result = adapter.debugRun(
+                definition,
+                "hello",
+                Map.of("question", "hello"),
+                Map.of());
+
+        assertTrue(result.isSuccess());
+        LangGraph4jRuntimeAdapter.WorkflowDebugStepResult assignStep = result.getSteps().stream()
+                .filter(step -> "assign".equals(step.getNodeId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Map.of("question", "hello"), assignStep.getResolvedInput());
+        assertEquals(Map.of("question", "hello"), assignStep.getRawOutput());
+        Map<String, Object> published = assignStep.getPublishedVariables();
+        assertEquals(Map.of("question", "hello"), published.get("captured"));
+        assertEquals(Map.of("question", "hello"), published.get("var.captured"));
+        assertEquals(Map.of("question", "hello"), ((Map<String, Object>) result.getFinalState().get("captured")));
+    }
+
+    @Test
+    void debugRunReturnsWorkflowStepsAndBranchRoute() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentDefinition definition = AgentDefinition.builder()
+                .id("agent-debug")
+                .name("Debug Workflow")
+                .type("single")
+                .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                .graphSpec(AgentGraphSpec.builder()
+                        .code("debug_graph")
+                        .entry("user_input")
+                        .finishNode("metro_answer")
+                        .finishNode("unknown_reply")
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("user_input")
+                                .type("USER_INPUT")
+                                .name("用户输入")
+                                .config(Map.of(
+                                        "outputAlias", "params",
+                                        "fields", List.of(Map.of(
+                                                "name", "question",
+                                                "type", "string",
+                                                "required", true))))
+                                .build())
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("intent_classifier")
+                                .type("INTENT_CLASSIFIER")
+                                .name("意图识别")
+                                .config(Map.of(
+                                        "inputExpression", "params.question",
+                                        "classes", List.of(Map.of(
+                                                "id", "metro_question",
+                                                "label", "地铁相关",
+                                                "keywords", List.of("地铁"))),
+                                        "defaultRoute", "irrelevant"))
+                                .build())
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("metro_answer")
+                                .type("ANSWER")
+                                .name("地铁问题回答")
+                                .config(Map.of("template", "metro: {{ params.question }}"))
+                                .build())
+                        .node(AgentGraphSpec.Node.builder()
+                                .id("unknown_reply")
+                                .type("ANSWER")
+                                .name("回复不知道")
+                                .config(Map.of("template", "我不知道"))
+                                .build())
+                        .edge(AgentGraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("user_input").to("intent_classifier").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("intent_classifier").to("metro_answer").condition("route:metro_question").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("intent_classifier").to("unknown_reply").condition("route:irrelevant").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("metro_answer").to("END").condition("always").build())
+                        .edge(AgentGraphSpec.Edge.builder().from("unknown_reply").to("END").condition("always").build())
+                        .build())
+                .build();
+
+        LangGraph4jRuntimeAdapter.WorkflowDebugRunResult result = adapter.debugRun(
+                definition,
+                "今天天气怎么样",
+                Map.of("question", "今天天气怎么样"),
+                Map.of());
+
+        assertFalse(result.getRunId().isBlank());
+        assertFalse(result.getTraceId().isBlank());
+        assertEquals("SUCCESS", result.getStatus());
+        assertEquals("我不知道", result.getAnswer());
+        assertEquals(3, result.getSteps().size());
+        assertEquals("user_input", result.getSteps().get(0).getNodeId());
+        assertEquals("intent_classifier", result.getSteps().get(1).getNodeId());
+        assertEquals("irrelevant", result.getSteps().get(1).getRoute());
+        assertEquals("unknown_reply", result.getSteps().get(1).getNextNodeId());
+        assertEquals("unknown_reply", result.getSteps().get(2).getNodeId());
+        assertEquals("我不知道", result.getFinalState().get("answer"));
+    }
+
+    @Test
     void executesSingleAgentThroughLangGraph4j() {
         ToolCallLogService logService = mock(ToolCallLogService.class);
         LangGraph4jRuntimeAdapter adapter = adapter(logService);

@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 public enum EafGraphNodeType {
 
     LLM("LLM", "llm", "action"),
+    USER_INPUT("USER_INPUT", "userInput", "input", "user_input", "input", "form_input"),
     TOOL("TOOL", "tool", "action"),
     CAPABILITY("CAPABILITY", "skill", "action"),
     IF_ELSE("IF_ELSE", "condition", "flow", "if_else", "condition"),

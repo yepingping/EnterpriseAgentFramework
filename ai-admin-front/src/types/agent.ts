@@ -31,6 +31,7 @@ export interface AgentGraphNode {
   id: string
   type:
     | 'LLM'
+    | 'USER_INPUT'
     | 'TOOL'
     | 'CAPABILITY'
     | 'IF_ELSE'
@@ -55,6 +56,8 @@ export interface AgentGraphNode {
   ref?: AgentGraphCapabilityRef
   inputs?: AgentGraphPort[]
   outputs?: AgentGraphPort[]
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
   retry?: AgentGraphRetryPolicy
   errorPolicy?: AgentGraphErrorPolicy
   layout?: AgentGraphNodeLayout
@@ -118,6 +121,42 @@ export interface AgentGraphNodeLayout {
 export interface AgentGraphEdgeLayout {
   label?: string
   style?: string
+}
+
+export interface WorkflowDraftResource {
+  kind: 'TOOL' | 'SKILL' | 'CAPABILITY' | 'KNOWLEDGE' | string
+  name: string
+  qualifiedName?: string | null
+  definitionId?: number | null
+  projectCode?: string | null
+  description?: string | null
+}
+
+export interface WorkflowDraftPlaceholder {
+  nodeId: string
+  kind: string
+  label: string
+  reason: string
+}
+
+export interface WorkflowDraftGenerationRequest {
+  agentId?: string
+  agentName?: string
+  requirement: string
+  projectCode?: string | null
+  modelInstanceId?: string
+  currentCanvas?: Record<string, unknown>
+  tools?: WorkflowDraftResource[]
+  capabilities?: WorkflowDraftResource[]
+  knowledgeBases?: WorkflowDraftResource[]
+}
+
+export interface WorkflowDraftGenerationResult {
+  provider: string
+  canvasSnapshot: Record<string, unknown>
+  graphSpec: AgentGraphSpec
+  warnings: string[]
+  placeholderNodes: WorkflowDraftPlaceholder[]
 }
 
 export interface AgentGraphNodeTypeDescriptor {
@@ -331,6 +370,44 @@ export interface AgentNodeDebugResult {
   errorCode?: string
   errorMessage?: string
   traceId?: string
+}
+
+export interface AgentWorkflowDebugRunRequest {
+  agentDefinition: Partial<AgentForm>
+  message?: string
+  inputParams?: Record<string, unknown>
+  debugOptions?: Record<string, unknown>
+}
+
+export interface AgentWorkflowDebugStepResult {
+  index: number
+  nodeId: string
+  nodeType?: string
+  nodeName?: string
+  status: 'SUCCESS' | 'ERROR' | 'WAITING' | string
+  startedAt?: string
+  endedAt?: string
+  elapsedMs?: number
+  input?: Record<string, unknown>
+  output?: unknown
+  statePatch?: Record<string, unknown>
+  route?: string
+  condition?: string
+  nextNodeId?: string
+  errorCode?: string
+  errorMessage?: string
+}
+
+export interface AgentWorkflowDebugRunResult {
+  runId: string
+  traceId?: string
+  success: boolean
+  status: 'SUCCESS' | 'ERROR' | 'WAITING' | string
+  answer?: string
+  steps: AgentWorkflowDebugStepResult[]
+  finalState?: Record<string, unknown>
+  errorCode?: string
+  errorMessage?: string
 }
 
 /** 发布请求体 */

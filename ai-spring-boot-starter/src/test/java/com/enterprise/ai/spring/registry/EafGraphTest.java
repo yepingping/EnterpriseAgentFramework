@@ -60,7 +60,10 @@ class EafGraphTest {
         assertEquals(3, ((Map<String, Object>) tool.get("retry")).get("maxAttempts"));
         assertEquals("CONTINUE", ((Map<String, Object>) tool.get("errorPolicy")).get("strategy"));
         assertEquals("orderNo", ((List<Map<String, Object>>) tool.get("inputs")).get(0).get("id"));
+        assertEquals("$.message.orderNo", ((List<Map<String, Object>>) tool.get("inputs")).get(0).get("source"));
         assertEquals("order", ((List<Map<String, Object>>) tool.get("outputs")).get(0).get("id"));
+        assertEquals("object", ((Map<String, Object>) tool.get("inputSchema")).get("type"));
+        assertEquals("object", ((Map<String, Object>) tool.get("outputSchema")).get("type"));
         assertEquals("$.message.orderNo", ((Map<String, String>) config.get("inputMapping")).get("orderNo"));
         List<Map<String, Object>> edges = (List<Map<String, Object>>) spec.get("edges");
         Map<String, Object> classified = edges.stream()
@@ -202,6 +205,39 @@ class EafGraphTest {
         List<Map<String, Object>> fields = (List<Map<String, Object>>) extract.get("fields");
         assertEquals("integer", fields.get(0).get("type"));
         assertEquals(0, fields.get(0).get("defaultValue"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void builderEmitsUserInputNodeAndSchemaVariables() {
+        EafAgentGraph graph = EafGraph.agent("document_assistant")
+                .modelInstanceId("llm-1")
+                .userInput("user_input")
+                .inputField("upload_document", "file", true, "Upload Document")
+                .inputField("question", "string", false, "Question")
+                .outputAlias("params")
+                .documentExtract("extract")
+                .documentField("text", EafVars.params("upload_document"))
+                .llm("answer")
+                .llmPrompt("Answer by document.", "Question: {{ params.question }}")
+                .edge("user_input", "extract").always()
+                .edge("extract", "answer").always()
+                .build();
+
+        Map<String, Object> spec = graph.graphSpec();
+        Map<String, Object> inputSchema = (Map<String, Object>) spec.get("inputSchema");
+        List<Map<String, Object>> fields = (List<Map<String, Object>>) inputSchema.get("fields");
+        assertEquals("upload_document", fields.get(0).get("name"));
+        assertEquals("file", fields.get(0).get("type"));
+
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) spec.get("nodes");
+        Map<String, Object> userInput = nodes.stream()
+                .filter(node -> "USER_INPUT".equals(node.get("type")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> config = (Map<String, Object>) userInput.get("config");
+        assertEquals("params", config.get("outputAlias"));
+        assertEquals(fields, config.get("fields"));
     }
 
     @Test

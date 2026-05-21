@@ -700,6 +700,13 @@ public class AiRegistryService {
                     "modelInstanceId", firstText(stringValue(config.get("modelInstanceId")), ""),
                     "fields", config.getOrDefault("fields", List.of())
             ));
+        } else if ("userInput".equals(kind)) {
+            String outputAlias = firstText(stringValue(config.get("outputAlias")), "params");
+            data.put("outputAlias", outputAlias);
+            data.put("userInputConfig", Map.of(
+                    "outputAlias", outputAlias,
+                    "fields", config.getOrDefault("fields", List.of())
+            ));
         } else if ("http".equals(kind)) {
             data.put("httpConfig", Map.of(
                     "method", firstText(stringValue(config.get("method")), "GET"),

@@ -25,6 +25,7 @@
           <span>{{ saveBadgeText }}</span>
         </span>
         <el-button @click="handleDebug" :icon="VideoPlay">调试</el-button>
+        <el-button :icon="MagicStick" :disabled="studioReadOnly" @click="openAiDraftDialog">AI 生成流程</el-button>
         <el-dropdown trigger="click" @command="handleHeaderCommand">
           <el-button :icon="MoreFilled">更多</el-button>
           <template #dropdown>
@@ -178,6 +179,25 @@
               </button>
             </div>
           </template>
+          <template #node-userInput="nodeProps">
+            <div class="studio-node user-input-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed }]">
+              <Handle type="target" :position="Position.Left" />
+              <Handle type="source" :position="Position.Right" />
+              <div class="node-icon"><el-icon><SetUp /></el-icon></div>
+              <div class="node-head">
+                <span class="node-kind">用户输入</span>
+                <span class="node-state">{{ nodeProps.data.userInputConfig?.outputAlias || nodeProps.data.outputAlias || 'params' }}</span>
+              </div>
+              <div class="node-label">{{ nodeProps.data.label || nodeProps.id }}</div>
+              <div class="node-desc">{{ userInputFieldCount(nodeProps.data) }} 个输入字段，写入 params</div>
+              <div class="node-port-row">{{ portSummary(nodeProps.data.outputs, '变量') }}</div>
+              <div v-if="nodeProps.data.outputAlias" class="node-alias">输出别名：{{ nodeProps.data.outputAlias }}</div>
+              <button v-if="nodeDebugState(nodeProps.id)" class="node-runtime" @click.stop="openNodeTrace(nodeProps.id)">
+                <span class="runtime-dot"></span>
+                <span>{{ nodeRunLabel(nodeProps.id) }}</span>
+              </button>
+            </div>
+          </template>
           <template #node-end="nodeProps">
             <div class="studio-node end-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed }]">
               <Handle type="target" :position="Position.Left" />
@@ -230,7 +250,7 @@
             </div>
           </template>
           <template #node-tool="nodeProps">
-            <div class="studio-node tool-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed }]">
+            <div class="studio-node tool-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed, 'needs-config': nodeProps.data.needsConfiguration }]">
               <Handle type="target" :position="Position.Left" />
               <Handle type="source" :position="Position.Right" />
               <div class="node-icon"><el-icon><Tools /></el-icon></div>
@@ -998,7 +1018,7 @@
           :knowledge-options="knowledgeOptions"
           :tool-options="availableTools"
           :capability-options="availableCapabilities"
-          :variable-options="graphVariables.map((item) => item.name)"
+          :variable-options="variablePickerOptions"
           :credential-options="credentialOptions"
           :param-source-hints="paramHints"
           :project-id="form.projectId"
@@ -1084,6 +1104,97 @@
       </div>
     </el-dialog>
 
+    <el-dialog v-model="aiDraftDialogOpen" title="AI 生成流程草稿" width="760px" class="ai-draft-dialog">
+      <div class="ai-draft-body">
+        <el-alert
+          type="info"
+          :closable="false"
+          title="生成结果只替换当前前端草稿，不会自动保存或发布。占位节点需要补全后才能通过发布校验。"
+        />
+        <div class="ai-draft-model-row">
+          <span>生成模型</span>
+          <el-select
+            v-model="aiDraftModelInstanceId"
+            filterable
+            clearable
+            placeholder="选择用于生成和 LLM 节点的模型"
+            :disabled="aiDraftGenerating"
+          >
+            <el-option
+              v-for="item in aiDraftModelOptions"
+              :key="item.id"
+              :label="modelOptionLabel(item)"
+              :value="item.id"
+            />
+          </el-select>
+        </div>
+        <el-input
+          v-model="aiDraftRequirement"
+          type="textarea"
+          :rows="4"
+          maxlength="1000"
+          show-word-limit
+          placeholder="例如：查询订单状态，如果订单已完成就回复物流信息，否则提示当前处理进度。"
+        />
+        <div class="ai-draft-actions">
+          <span>{{ availableTools.length }} 个工具 / {{ availableCapabilities.length }} 个能力 / {{ knowledgeOptions.length }} 个知识库可供匹配</span>
+          <el-button type="primary" :loading="aiDraftGenerating" @click="handleGenerateWorkflowDraft">
+            生成预览
+          </el-button>
+        </div>
+        <div v-if="aiDraftPreview" class="ai-draft-preview">
+          <div class="ai-draft-preview-head">
+            <div>
+              <strong>{{ aiDraftPreview.graphSpec?.name || 'AI 生成流程' }}</strong>
+              <span>{{ aiDraftPreview.provider }} / {{ aiDraftPreviewNodes.length }} 个节点</span>
+            </div>
+            <el-tag :type="aiDraftPreview.placeholderNodes.length ? 'warning' : 'success'" size="small">
+              {{ aiDraftPreview.placeholderNodes.length ? '含占位节点' : '可编辑草稿' }}
+            </el-tag>
+          </div>
+          <el-alert
+            v-if="aiDraftPreview.warnings.length"
+            type="warning"
+            :closable="false"
+            class="ai-draft-warning"
+          >
+            <template #title>
+              <span v-for="item in aiDraftPreview.warnings" :key="item">{{ item }}</span>
+            </template>
+          </el-alert>
+          <div v-if="aiDraftPreview.placeholderNodes.length" class="ai-draft-placeholders">
+            <el-tag
+              v-for="item in aiDraftPreview.placeholderNodes"
+              :key="item.nodeId"
+              type="warning"
+              effect="plain"
+            >
+              {{ item.label }}：{{ item.reason }}
+            </el-tag>
+          </div>
+          <div v-if="aiDraftPreviewEdges.length" class="ai-draft-edge-list">
+            <div v-for="edge in aiDraftPreviewEdges" :key="edge.id" class="ai-draft-edge">
+              <span>{{ previewNodeLabel(edge.source) }}</span>
+              <el-tag size="small" effect="plain">{{ previewEdgeLabel(edge) }}</el-tag>
+              <span>{{ previewNodeLabel(edge.target) }}</span>
+            </div>
+          </div>
+          <div class="ai-draft-node-list">
+            <div v-for="node in aiDraftPreviewNodes" :key="node.id" class="ai-draft-node">
+              <strong>{{ node.data?.label || node.id }}</strong>
+              <span>{{ studioNodeLabel(node.data?.kind) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="aiDraftDialogOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!aiDraftPreview" @click="handleApplyWorkflowDraft">
+          替换当前草稿
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 发布弹窗 -->
     <el-dialog v-model="publishDialogOpen" title="发布智能体版本" width="640px">
       <div v-if="releaseErrors.length || releaseWarnings.length" class="release-check-panel">
@@ -1144,63 +1255,139 @@
       </template>
     </el-dialog>
 
-    <!-- 调试抽屉：发布端点执行 + TraceTimeline 详情 -->
-    <el-drawer v-model="debugOpen" title="智能体调试（发布端点）" size="55%" direction="rtl">
+    <!-- 调试抽屉：当前草稿逐节点执行 + 发布端点验证 -->
+    <el-drawer
+      v-model="debugOpen"
+      class="studio-debug-drawer"
+      modal-class="studio-debug-drawer-overlay"
+      title="工作流调试台（当前草稿）"
+      size="34%"
+      direction="rtl"
+      :modal="false"
+      :modal-penetrable="true"
+      :lock-scroll="false"
+    >
       <div class="debug-body">
-        <el-input
-          v-model="debugMessage"
-          type="textarea"
-          :rows="3"
-          placeholder="输入测试消息..."
-        />
-        <div class="debug-actions">
-          <el-button type="primary" :loading="debugLoading" @click="handleRunDebug">
-            通过发布端点执行
-          </el-button>
-          <el-button :loading="recentRunsLoading" @click="loadRecentStudioRuns">
-            刷新最近运行
-          </el-button>
-        </div>
-        <div class="trace-replay-panel">
-          <div class="trace-replay-row">
-            <el-input
-              v-model="replayTraceInput"
-              clearable
-              placeholder="输入 traceId 回放到画布"
-              @keyup.enter="handleLoadTraceReplay()"
-            />
-            <el-button type="primary" plain :loading="traceReplayLoading" @click="handleLoadTraceReplay()">
-              回放
-            </el-button>
-            <el-button :disabled="!currentTraceId" @click="clearTraceReplay">
-              清除
-            </el-button>
+        <section class="debug-input-card">
+          <div class="debug-section-head">
+            <div>
+              <strong>调试输入</strong>
+              <span>优先读取用户输入节点字段，运行时写入 params</span>
+            </div>
+            <el-tag v-if="debugInputFields.length" size="small" type="success">
+              {{ debugInputFields.length }} 个输入字段
+            </el-tag>
+            <el-tag v-else size="small" type="info">自由消息</el-tag>
           </div>
-          <el-select
-            v-model="selectedRecentTraceId"
-            filterable
-            clearable
-            placeholder="选择最近运行"
-            style="width: 100%"
-            @change="handleRecentTraceChange"
-          >
-            <el-option
-              v-for="run in studioRecentRuns"
-              :key="run.traceId"
-              :label="recentRunLabel(run)"
-              :value="run.traceId"
-            />
-          </el-select>
+          <div v-if="debugInputFields.length" class="debug-field-grid">
+            <el-form-item
+              v-for="field in debugInputFields"
+              :key="field.name"
+              :label="debugFieldLabel(field)"
+            >
+              <el-switch
+                v-if="field.type === 'boolean'"
+                v-model="debugInputParams[field.name]"
+              />
+              <el-input-number
+                v-else-if="field.type === 'number' || field.type === 'integer'"
+                v-model="debugInputParams[field.name]"
+                style="width: 100%"
+              />
+              <el-input
+                v-else-if="field.type === 'object' || field.type === 'array'"
+                v-model="debugInputParams[field.name]"
+                type="textarea"
+                :rows="3"
+                :placeholder="field.description || '输入 JSON 或文本'"
+              />
+              <el-input
+                v-else
+                v-model="debugInputParams[field.name]"
+                :placeholder="field.description || '输入字段值'"
+              />
+            </el-form-item>
+          </div>
+          <el-input
+            v-else
+            v-model="debugMessage"
+            type="textarea"
+            :rows="3"
+            placeholder="输入测试消息..."
+          />
+        </section>
+        <div class="debug-actions">
+          <el-button type="primary" :loading="debugLoading" @click="handleRunDraftDebug">
+            运行当前草稿
+          </el-button>
+          <el-button :loading="debugLoading" @click="handleRunPublishedDebug">
+            发布端点验证
+          </el-button>
         </div>
-        <el-divider>结果</el-divider>
-        <div class="result-section">
-          <strong>变量映射预览：</strong>
-          <pre>{{ JSON.stringify(variablePreview, null, 2) }}</pre>
-        </div>
+        <el-divider>执行结果</el-divider>
         <div class="debug-result">
-          <div v-if="debugResult">
+          <div v-if="debugRunResult" class="debug-console-layout">
+            <section class="debug-answer-card" :class="debugStepStatusClass(debugRunResult.status)">
+              <div>
+                <span>最终回答</span>
+                <strong>{{ debugRunResult.answer || debugRunResult.errorMessage || '-' }}</strong>
+              </div>
+              <div class="debug-run-meta">
+                <el-tag :type="debugRunResult.success ? 'success' : 'danger'" size="small">
+                  {{ debugRunStatusText(debugRunResult.status) }}
+                </el-tag>
+                <span>{{ debugRunResult.steps?.length || 0 }} 个节点</span>
+                <span v-if="debugRunResult.traceId">Trace {{ debugRunResult.traceId }}</span>
+              </div>
+            </section>
+
+            <section class="workflow-debug-steps">
+              <article
+                v-for="(step, index) in debugRunResult.steps"
+                :key="step.nodeId + ':' + index"
+                class="workflow-debug-step-card"
+                :class="[debugStepStatusClass(step.status), { selected: selectedDebugStepIndex === index }]"
+              >
+                <button
+                  class="workflow-debug-step"
+                  :class="debugStepStatusClass(step.status)"
+                  @click="selectDebugStep(index)"
+                >
+                  <span class="step-index">{{ index + 1 }}</span>
+                  <span class="step-main">
+                    <strong>{{ step.nodeName || step.nodeId }}</strong>
+                    <em>{{ step.nodeType || '-' }}</em>
+                  </span>
+                  <span class="step-route">
+                    <template v-if="step.route">路由 {{ step.route }}</template>
+                    <template v-else>直连</template>
+                    <small v-if="step.nextNodeId">→ {{ step.nextNodeId }}</small>
+                  </span>
+                  <span class="step-time">{{ formatElapsed(step.elapsedMs) }}</span>
+                </button>
+                <div v-if="selectedDebugStepIndex === index" class="debug-step-inline">
+                  <el-tabs>
+                    <el-tab-pane label="输入">
+                      <pre>{{ stringifyDebugPayload(step.input) }}</pre>
+                    </el-tab-pane>
+                    <el-tab-pane label="输出">
+                      <pre>{{ stringifyDebugPayload(step.output ?? step.statePatch) }}</pre>
+                    </el-tab-pane>
+                    <el-tab-pane label="状态变化">
+                      <pre>{{ stringifyDebugPayload(step.statePatch) }}</pre>
+                    </el-tab-pane>
+                    <el-tab-pane v-if="step.errorMessage" label="错误">
+                      <pre>{{ step.errorCode }} {{ step.errorMessage }}</pre>
+                    </el-tab-pane>
+                  </el-tabs>
+                </div>
+              </article>
+            </section>
+
+          </div>
+          <div v-else-if="debugResult">
             <div class="result-section">
-              <strong>回答：</strong>
+              <strong>发布端点回答：</strong>
               <div>{{ debugResult.answer }}</div>
             </div>
             <div class="result-section" v-if="debugOpsItems.length">
@@ -1225,8 +1412,77 @@
               <strong>元数据：</strong>
               <pre>{{ JSON.stringify(debugResult.metadata, null, 2) }}</pre>
             </div>
-            <div v-if="currentTraceId" class="result-section">
-              <el-divider>链路详情（追踪 ID: {{ currentTraceId }}）</el-divider>
+          </div>
+          <el-empty v-else description="运行当前草稿后，会按节点顺序展示执行路径" />
+        </div>
+
+        <el-collapse class="debug-advanced-collapse">
+          <el-collapse-item name="variables">
+            <template #title>
+              <span class="debug-collapse-title">高级调试：变量与状态快照</span>
+            </template>
+            <div class="result-section">
+              <strong>变量映射合同：</strong>
+              <pre>{{ JSON.stringify(variablePreview, null, 2) }}</pre>
+            </div>
+            <div v-if="debugRunResult" class="result-section">
+              <strong>最终状态快照：</strong>
+              <pre>{{ stringifyDebugPayload(debugRunResult.finalState) }}</pre>
+            </div>
+          </el-collapse-item>
+
+          <el-collapse-item name="trace">
+            <template #title>
+              <span class="debug-collapse-title">高级调试：Trace 回放与生产运行</span>
+            </template>
+            <div class="trace-replay-panel">
+              <div class="trace-replay-row">
+                <el-input
+                  v-model="replayTraceInput"
+                  clearable
+                  placeholder="输入 traceId 回放到画布"
+                  @keyup.enter="handleLoadTraceReplay()"
+                />
+                <el-button type="primary" plain :loading="traceReplayLoading" @click="handleLoadTraceReplay()">
+                  回放
+                </el-button>
+                <el-button :disabled="!currentTraceId" @click="clearTraceReplay">
+                  清除
+                </el-button>
+              </div>
+              <div class="trace-replay-row">
+                <el-select
+                  v-model="selectedRecentTraceId"
+                  filterable
+                  clearable
+                  placeholder="选择最近运行"
+                  style="width: 100%"
+                  @change="handleRecentTraceChange"
+                >
+                  <el-option
+                    v-for="run in studioRecentRuns"
+                    :key="run.traceId"
+                    :label="recentRunLabel(run)"
+                    :value="run.traceId"
+                  />
+                </el-select>
+                <el-button :loading="recentRunsLoading" @click="loadRecentStudioRuns">
+                  刷新
+                </el-button>
+              </div>
+            </div>
+            <div v-if="currentTraceId" class="result-section trace-detail-section">
+              <div class="debug-section-head">
+                <div>
+                  <strong>链路详情</strong>
+                  <span>{{ currentTraceId }}</span>
+                </div>
+                <el-button
+                  type="primary"
+                  size="small"
+                  @click="router.push('/runops/' + currentTraceId)"
+                >查看运行详情</el-button>
+              </div>
               <div v-if="workflowReplaySummary.length" class="runtime-insights workflow-replay-summary">
                 <div v-for="item in workflowReplaySummary" :key="item.label" class="runtime-insight">
                   <span>{{ item.label }}</span>
@@ -1268,17 +1524,12 @@
                   @click="handleExtractCapabilityDraft"
                   :loading="extracting"
                 >抽取为能力草稿</el-button>
-                <el-button
-                  type="primary"
-                  size="small"
-                  @click="router.push('/runops/' + currentTraceId)"
-                >查看运行详情</el-button>
               </div>
               <TraceTimeline :nodes="traceNodes" />
             </div>
-          </div>
-          <el-empty v-else description="尚未执行" />
-        </div>
+            <el-empty v-else description="需要排查生产调用时，再输入 traceId 回放" />
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </el-drawer>
   </div>
@@ -1331,9 +1582,9 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/minimap/dist/style.css'
 
-import type { AgentForm, AgentReleaseValidationItem, AgentVersion, AgentDefinition, AgentNodeDebugResult, AgentGraphNodeTypeDescriptor } from '@/types/agent'
-import type { CanvasNode, CanvasEdge, CanvasNodeKind } from '@/types/studio'
-import { getAgent, updateAgent, publishAgentVersion, validateAgentRelease, gatewayChat, listAgentVersions, debugAgentNode, getAgentGraphNodeTypes } from '@/api/agent'
+import type { AgentForm, AgentReleaseValidationItem, AgentVersion, AgentDefinition, AgentNodeDebugResult, AgentGraphNodeTypeDescriptor, WorkflowDraftGenerationResult, WorkflowDraftResource, AgentWorkflowDebugRunResult, AgentWorkflowDebugStepResult } from '@/types/agent'
+import type { CanvasNode, CanvasEdge, CanvasNodeKind, StudioFieldSchema, StudioVariableOption } from '@/types/studio'
+import { getAgent, updateAgent, publishAgentVersion, validateAgentRelease, gatewayChat, listAgentVersions, debugAgentNode, debugAgentWorkflowRun, getAgentGraphNodeTypes, generateWorkflowDraft } from '@/api/agent'
 import { getTools } from '@/api/tool'
 import { listCapabilities } from '@/api/capability'
 import type { ToolInfo } from '@/types/tool'
@@ -1369,7 +1620,8 @@ const router = useRouter()
 const agentId = route.params.id as string
 const isNew = agentId === 'new'
 
-const { screenToFlowCoordinate, fitView, setCenter, zoomIn, zoomOut } = useVueFlow()
+const { screenToFlowCoordinate, fitView, setCenter, zoomIn, zoomOut, getViewport } = useVueFlow()
+const DEBUG_DRAWER_WIDTH_RATIO = 0.34
 
 const saving = ref(false)
 const publishing = ref(false)
@@ -1381,6 +1633,11 @@ const debugOpen = ref(false)
 const debugLoading = ref(false)
 const debugMessage = ref('这是一条测试消息')
 const debugResult = ref<ChatResponse | null>(null)
+const debugRunResult = ref<AgentWorkflowDebugRunResult | null>(null)
+const selectedDebugStepIndex = ref<number | null>(null)
+const currentDebugNodeId = ref('')
+const debugPlaybackToken = ref(0)
+const debugInputParams = reactive<Record<string, unknown>>({})
 const nodeDebugLoading = ref(false)
 const nodeDebugMessage = ref('这是一条节点测试消息')
 const nodeDebugStateText = ref('{\n  "input": "这是一条节点测试消息"\n}')
@@ -1396,6 +1653,11 @@ const recentRuns = ref<RunSummary[]>([])
 const traceToolPick = ref<string[]>([])
 const extracting = ref(false)
 const canvasExtracting = ref(false)
+const aiDraftDialogOpen = ref(false)
+const aiDraftGenerating = ref(false)
+const aiDraftRequirement = ref('')
+const aiDraftModelInstanceId = ref('')
+const aiDraftPreview = ref<WorkflowDraftGenerationResult | null>(null)
 const traceToolNames = computed(() => {
   const names = traceNodes.value
     .map((n) => (n.toolName || '').trim())
@@ -1419,6 +1681,23 @@ type NodeTraceState = {
 
 const nodeTraceStates = computed<Record<string, NodeTraceState>>(() => {
   const states: Record<string, NodeTraceState> = {}
+  const debugSteps = debugRunResult.value?.steps || []
+  if (debugSteps.length) {
+    for (const step of debugSteps) {
+      states[step.nodeId] = {
+        nodeId: step.nodeId,
+        status: debugStepStatus(step.status),
+        elapsedMs: step.elapsedMs,
+        spanType: 'STUDIO_DEBUG_STEP',
+        input: stringifyDebugPayload(step.input),
+        output: stringifyDebugPayload(step.output ?? step.statePatch),
+        errorCode: step.errorCode,
+        route: step.route,
+        createdAt: step.startedAt,
+      }
+    }
+    return states
+  }
   const runSpans = runOpsDetail.value?.spans ?? []
   if (runSpans.length) {
     const orderedSpans = [...runSpans].sort((a, b) => dateMs(a.startedAt) - dateMs(b.startedAt))
@@ -1473,6 +1752,9 @@ const nodeTraceStates = computed<Record<string, NodeTraceState>>(() => {
 const workflowPath = computed<WorkflowPathItem[]>(() => runOpsDetail.value?.workflowPath ?? [])
 const workflowPathSourceNodeIds = computed(() => {
   const ids = new Set<string>()
+  for (const step of debugRunResult.value?.steps || []) {
+    ids.add(step.nodeId)
+  }
   for (const item of workflowPath.value) {
     if (item.fromNodeId) ids.add(item.fromNodeId)
   }
@@ -1480,6 +1762,11 @@ const workflowPathSourceNodeIds = computed(() => {
 })
 const workflowHitEdgeKeys = computed(() => {
   const keys = new Set<string>()
+  for (const step of debugRunResult.value?.steps || []) {
+    if (step.nextNodeId) {
+      keys.add(edgeKey(step.nodeId, step.nextNodeId))
+    }
+  }
   for (const item of workflowPath.value) {
     if (item.fromNodeId && item.toNodeId) {
       keys.add(edgeKey(item.fromNodeId, item.toNodeId))
@@ -1540,6 +1827,25 @@ const availableTools = computed(() =>
 const availableCapabilities = computed(() =>
   capabilityOptions.value.filter((s) => s.enabled && s.agentVisible && !s.draft),
 )
+const aiDraftModelOptions = computed(() => {
+  const llmOptions = modelOptions.value.filter((item) => item.modelType === 'LLM')
+  return llmOptions.length ? llmOptions : modelOptions.value
+})
+const aiDraftPreviewNodes = computed(() => {
+  const snapshot = aiDraftPreview.value?.canvasSnapshot as { nodes?: unknown } | undefined
+  return Array.isArray(snapshot?.nodes) ? snapshot.nodes as CanvasNode[] : []
+})
+const aiDraftPreviewEdges = computed(() => {
+  const snapshot = aiDraftPreview.value?.canvasSnapshot as { edges?: unknown } | undefined
+  return Array.isArray(snapshot?.edges) ? snapshot.edges as CanvasEdge[] : []
+})
+const aiDraftPreviewNodeLabels = computed(() => {
+  const labels = new Map<string, string>()
+  for (const node of aiDraftPreviewNodes.value) {
+    labels.set(node.id, node.data?.label || node.id)
+  }
+  return labels
+})
 
 const form = reactive<AgentForm>({
   keySlug: '',
@@ -1616,6 +1922,11 @@ const sdkPublishState = computed(() => {
 
 const nodes = ref<CanvasNode[]>([])
 const edges = ref<CanvasEdge[]>([])
+const debugInputFields = computed<StudioFieldSchema[]>(() => {
+  const userInputNode = nodes.value.find((node) => node.data.kind === 'userInput')
+  return (userInputNode?.data.userInputConfig?.fields || [])
+    .filter((field) => !!field.name?.trim())
+})
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
 const nodeSearchKeyword = ref('')
@@ -1732,6 +2043,8 @@ const runtimeContextEntries = computed(() => {
   const state = nodeDebugResult.value?.outputState || debugResult.value?.metadata || {}
   return Object.entries(state)
     .filter(([key]) => ['input', 'answer', 'lastOutput', 'lastError', 'lastSuccess', 'lastRoute'].includes(key)
+      || key === 'params'
+      || key === 'sys'
       || key.startsWith('nodeOutput.')
       || key.startsWith('var.'))
     .map(([key, value]) => ({
@@ -1813,6 +2126,35 @@ const graphLintItems = computed<GraphLintItem[]>(() => {
     if ((node.data.kind === 'tool' || node.data.kind === 'skill') && !node.data.toolConfig?.ref) {
       items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 未选择引用能力` })
     }
+    const mapping = nodeInputMapping(node.data)
+    for (const input of node.data.inputs || []) {
+      const target = input.id || input.name || ''
+      if (input.required && target && !mapping[target] && !input.source) {
+        items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 必填输入未绑定：${target}` })
+      }
+      const source = mapping[target] || input.source || ''
+      if (source && isProbablyVariableReference(source) && !isKnownVariableReference(source, node.id)) {
+        items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 引用了不存在的变量：${source}` })
+      }
+    }
+    if (node.data.kind === 'userInput') {
+      const fields = node.data.userInputConfig?.fields || []
+      if (!fields.length) {
+        items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 没有输入字段` })
+      }
+      const seenFields = new Set<string>()
+      for (const field of fields) {
+        const name = field.name?.trim()
+        if (!name) {
+          items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 存在未命名输入字段` })
+          continue
+        }
+        if (seenFields.has(name)) {
+          items.push({ level: 'error', nodeId: node.id, message: `${node.data.label || node.id} 输入字段重复：${name}` })
+        }
+        seenFields.add(name)
+      }
+    }
     if (node.data.kind === 'knowledge' && !(node.data.knowledgeConfig?.knowledgeBaseCodes || []).length) {
       items.push({ level: 'warning', nodeId: node.id, message: `${node.data.label || node.id} 未配置知识库` })
     }
@@ -1869,26 +2211,147 @@ const graphLintErrors = computed(() => graphLintItems.value.filter((item) => ite
 const graphLintWarnings = computed(() => graphLintItems.value.filter((item) => item.level === 'warning'))
 
 const graphVariables = computed(() => {
-  const vars: { name: string; source: string; nodeId: string }[] = []
+  const vars: { name: string; source: string; nodeId: string; label?: string; group?: string; description?: string }[] = []
   for (const node of nodes.value) {
     if (node.data.kind === 'start' || node.data.kind === 'end') continue
+    if (node.data.kind === 'userInput') {
+      const alias = node.data.userInputConfig?.outputAlias || node.data.outputAlias || 'params'
+      const nodeLabel = node.data.label || node.id
+      vars.push({ name: alias, source: nodeLabel, nodeId: node.id, label: `${nodeLabel} · 全部输入`, group: '用户输入', description: alias })
+      for (const field of node.data.userInputConfig?.fields || []) {
+        const name = field.name?.trim()
+        if (name) {
+          vars.push({
+            name: `${alias}.${name}`,
+            source: nodeLabel,
+            nodeId: node.id,
+            label: `${nodeLabel} · ${field.description || field.name}`,
+            group: '用户输入',
+            description: `${alias}.${name}`,
+          })
+        }
+      }
+      continue
+    }
     if (node.data.outputAlias) {
-      vars.push({ name: node.data.outputAlias, source: node.data.label || node.id, nodeId: node.id })
+      vars.push({
+        name: node.data.outputAlias,
+        source: node.data.label || node.id,
+        nodeId: node.id,
+        label: `${node.data.label || node.id} · 输出`,
+        group: '节点输出',
+        description: `业务别名：${node.data.outputAlias}`,
+      })
     }
     for (const key of Object.keys(node.data.assignments || {})) {
-      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id })
+      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id, label: `${node.data.label || node.id} · ${key}`, group: '节点输出', description: key })
     }
     for (const key of (node.data.parameterConfig?.fields || []).map((field) => field.name).filter(Boolean)) {
-      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id })
+      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id, label: `${node.data.label || node.id} · ${key}`, group: '节点输出', description: key })
     }
     for (const key of Object.keys(node.data.codeConfig?.outputs || {})) {
-      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id })
+      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id, label: `${node.data.label || node.id} · ${key}`, group: '节点输出', description: key })
     }
     for (const key of (node.data.aggregateConfig?.items || []).map((item) => item.name).filter(Boolean)) {
-      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id })
+      vars.push({ name: key, source: node.data.label || node.id, nodeId: node.id, label: `${node.data.label || node.id} · ${key}`, group: '节点输出', description: key })
+    }
+    for (const port of node.data.outputs || []) {
+      const id = port.id || port.name
+      if (!id) continue
+      vars.push({
+        name: id,
+        source: node.data.label || node.id,
+        nodeId: node.id,
+        label: `${node.data.label || node.id} · ${port.name || port.id}`,
+        group: '节点输出',
+        description: id,
+      })
     }
   }
-  return vars
+  const seen = new Set<string>()
+  return vars.filter((item) => {
+    const key = `${item.name}@${item.nodeId}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
+
+function nodeInputMapping(data: CanvasNode['data']) {
+  if (data.kind === 'tool' || data.kind === 'skill') return data.toolConfig?.inputMapping || data.inputMapping || {}
+  if (data.kind === 'mcp') return data.mcpConfig?.inputMapping || data.inputMapping || {}
+  return data.inputMapping || {}
+}
+
+function isProbablyVariableReference(source: string) {
+  const value = source.trim()
+  if (!value || value.startsWith('const:') || value.startsWith('"') || value.startsWith("'")) return false
+  if (['true', 'false', 'null'].includes(value)) return false
+  return Number.isNaN(Number(value))
+}
+
+function isKnownVariableReference(source: string, currentNodeId?: string) {
+  const value = source.trim().replace(/^\$/, '')
+  if (!value) return true
+  if (['input', 'answer', 'lastOutput', 'previousOutput', 'lastRoute', 'lastSuccess', 'lastError', 'params', 'sys'].includes(value)) return true
+  if (value.startsWith('params.') || value.startsWith('sys.')) return true
+  if (value.startsWith('nodeOutput.')) {
+    const nodeId = value.slice('nodeOutput.'.length).split('.', 1)[0]
+    return nodes.value.some((node) => node.id === nodeId)
+  }
+  if (value.startsWith('var.')) {
+    const alias = value.slice('var.'.length).split('.', 1)[0]
+    return graphVariables.value.some((item) => item.name === alias)
+  }
+  const alias = value.split('.', 1)[0]
+  return graphVariables.value.some((item) => item.name === alias || item.nodeId === alias) || alias === currentNodeId
+}
+
+const variablePickerOptions = computed<StudioVariableOption[]>(() => {
+  const options: StudioVariableOption[] = [
+    { value: 'params', label: '用户输入 · 全部参数', group: '用户输入', description: '用户输入节点写入的 params 对象' },
+    { value: 'sys.userId', label: '系统变量 · 当前用户 ID', group: '系统变量', description: '运行上下文用户标识' },
+    { value: 'sys.tenantId', label: '系统变量 · 租户 ID', group: '系统变量', description: '运行上下文租户标识' },
+    { value: 'sys.roles', label: '系统变量 · 用户角色', group: '系统变量', description: '当前用户角色列表' },
+    { value: 'input', label: '运行态 · 原始输入消息', group: '运行态变量', description: '本次运行的原始消息' },
+    { value: 'answer', label: '运行态 · 最终回答', group: '运行态变量', description: '当前已生成的 answer' },
+    { value: 'lastOutput', label: '运行态 · 上一步输出', group: '运行态变量', description: '便捷变量，适合快速串联原型' },
+    { value: 'lastRoute', label: '运行态 · 命中分支', group: '运行态变量', description: '条件或意图分类节点最近一次路由' },
+  ]
+  for (const item of graphVariables.value) {
+    options.push({
+      value: item.name,
+      label: item.label || `${item.source} · ${item.name}`,
+      group: item.group || '节点输出',
+      description: item.description || item.name,
+      nodeId: item.nodeId,
+      source: item.source,
+    })
+    if (item.group !== '用户输入' && !item.name.startsWith('nodeOutput.')) {
+      options.push({
+        value: `var.${item.name}`,
+        label: `${item.source} · 业务别名 ${item.name}`,
+        group: '节点输出',
+        description: `var.${item.name}`,
+        nodeId: item.nodeId,
+        source: item.source,
+      })
+    }
+    options.push({
+      value: `nodeOutput.${item.nodeId}`,
+      label: `${item.source} · 节点原始输出`,
+      group: '节点输出',
+      description: `nodeOutput.${item.nodeId}`,
+      nodeId: item.nodeId,
+      source: item.source,
+    })
+  }
+  const seen = new Set<string>()
+  return options.filter((item) => {
+    if (!item.value || seen.has(item.value)) return false
+    seen.add(item.value)
+    return true
+  })
 })
 
 const canvasSearchMatches = computed(() => {
@@ -1962,7 +2425,11 @@ const variablePreview = computed(() => {
       kind: n.data.kind,
       ref: n.data.toolConfig?.ref || '',
       outputAlias: n.data.outputAlias || '',
-      inputMapping: n.data.toolConfig?.inputMapping || {},
+      inputSchema: n.data.inputSchema || {},
+      outputSchema: n.data.outputSchema || {},
+      inputFields: n.data.userInputConfig?.fields || [],
+      inputMapping: n.data.toolConfig?.inputMapping || n.data.mcpConfig?.inputMapping || n.data.inputMapping || {},
+      outputs: n.data.outputs || [],
       assignments: n.data.assignments || {},
       parameters: n.data.parameterConfig?.fields || [],
     }))
@@ -1982,6 +2449,7 @@ type PaletteGroup = { title: string; icon: Component; items: PaletteItem[] }
 const nodeIconMap: Record<CanvasNodeKind, Component> = {
   start: ArrowLeft,
   end: Finished,
+  userInput: SetUp,
   llm: Cpu,
   skill: Briefcase,
   tool: Tools,
@@ -2208,6 +2676,9 @@ function toggleSelectedNodeCollapsed() {
 }
 
 function defaultOutputAlias(kind: CanvasNodeKind, index: number) {
+  if (kind === 'userInput') {
+    return 'params'
+  }
   if (kind !== 'start' && kind !== 'end' && kind !== 'llm' && kind !== 'condition') {
     return `${kind}_${index}`
   }
@@ -2383,9 +2854,17 @@ function nodeDebugState(nodeId: string) {
 
 function nodeRunClass(nodeId: string) {
   const state = nodeDebugState(nodeId)
-  if (!state) return ''
-  if (state.status === 'waiting') return 'run-waiting'
-  return state.status === 'success' ? 'run-success' : 'run-error'
+  const classes: string[] = []
+  if (currentDebugNodeId.value === nodeId) {
+    classes.push('run-current')
+  }
+  if (!state) return classes.join(' ')
+  if (state.status === 'waiting') {
+    classes.push('run-waiting')
+  } else {
+    classes.push(state.status === 'success' ? 'run-success' : 'run-error')
+  }
+  return classes.join(' ')
 }
 
 function nodeRunLabel(nodeId: string) {
@@ -2408,6 +2887,12 @@ function nodeTraceTagType(status: NodeTraceState['status']) {
 function openNodeTrace(nodeId: string) {
   selectedNodeId.value = nodeId
   selectedEdgeId.value = null
+  currentDebugNodeId.value = nodeId
+  focusDebugNode(nodeId)
+  const debugStepIndex = debugRunResult.value?.steps?.findIndex((step) => step.nodeId === nodeId) ?? -1
+  if (debugStepIndex >= 0) {
+    selectedDebugStepIndex.value = debugStepIndex
+  }
 }
 
 function formatElapsed(value?: number) {
@@ -2593,6 +3078,10 @@ function updateSelectedHeaders(text: string) {
 
 function assignmentCount(assignments?: Record<string, string>) {
   return assignments ? Object.keys(assignments).length : 0
+}
+
+function userInputFieldCount(data: CanvasNode['data']) {
+  return data.userInputConfig?.fields?.filter((field) => !!field.name?.trim()).length || 0
 }
 
 function conditionRoutePills(data: CanvasNode['data']) {
@@ -3065,6 +3554,23 @@ function spanStatus(status?: string): NodeTraceState['status'] {
   return 'success'
 }
 
+function debugStepStatus(status?: string): NodeTraceState['status'] {
+  const normalized = (status || '').trim().toUpperCase()
+  if (normalized === 'WAITING') return 'waiting'
+  if (normalized === 'ERROR' || normalized === 'FAILED' || normalized === 'FAILURE') return 'error'
+  return 'success'
+}
+
+function debugStepStatusClass(status?: string) {
+  return `is-${debugStepStatus(status)}`
+}
+
+function debugRunStatusText(status?: string) {
+  const normalized = debugStepStatus(status)
+  if (normalized === 'waiting') return '等待中'
+  return normalized === 'error' ? '失败' : '成功'
+}
+
 function workflowItemStatus(item: WorkflowPathItem): NodeTraceState['status'] {
   const status = (item.status || item.workflowStatus || '').trim().toUpperCase()
   if (status === 'WAITING') return 'waiting'
@@ -3185,6 +3691,10 @@ async function handleLoadTraceReplay(traceId = replayTraceInput.value) {
   replayTraceInput.value = value
   selectedRecentTraceId.value = value
   debugResult.value = null
+  debugRunResult.value = null
+  selectedDebugStepIndex.value = null
+  currentDebugNodeId.value = ''
+  debugPlaybackToken.value += 1
   try {
     await loadTraceArtifacts(value)
     if (!runOpsDetail.value && !traceNodes.value.length) {
@@ -3213,6 +3723,10 @@ function clearTraceReplay() {
   traceNodes.value = []
   runOpsDetail.value = null
   debugResult.value = null
+  debugRunResult.value = null
+  selectedDebugStepIndex.value = null
+  currentDebugNodeId.value = ''
+  debugPlaybackToken.value += 1
   refreshEdgeRuntimeClasses()
 }
 
@@ -3223,7 +3737,153 @@ function recentRunLabel(run: RunSummary) {
   return `${status} · ${name} · ${time} · ${run.traceId}`
 }
 
-async function handleRunDebug() {
+function buildDebugInputParams() {
+  const params: Record<string, unknown> = {}
+  for (const field of debugInputFields.value) {
+    const raw = debugInputParams[field.name]
+    if (field.type === 'number' || field.type === 'integer') {
+      params[field.name] = raw === '' || raw === undefined || raw === null ? undefined : Number(raw)
+    } else if (field.type === 'boolean') {
+      params[field.name] = Boolean(raw)
+    } else if (field.type === 'object' || field.type === 'array') {
+      params[field.name] = parseDebugJsonLike(raw)
+    } else {
+      params[field.name] = raw === undefined || raw === null ? '' : String(raw)
+    }
+  }
+  if (!debugInputFields.value.length) {
+    params.input = debugMessage.value
+    params.question = debugMessage.value
+  }
+  return params
+}
+
+function parseDebugJsonLike(value: unknown) {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (!text) return ''
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+function debugMessageFromParams(params: Record<string, unknown>) {
+  const preferred = params.question ?? params.input ?? params.message
+  if (preferred !== undefined && preferred !== null && String(preferred).trim()) {
+    return String(preferred)
+  }
+  const firstValue = Object.values(params).find((value) => value !== undefined && value !== null && String(value).trim())
+  return firstValue === undefined ? debugMessage.value : String(firstValue)
+}
+
+function debugFieldLabel(field: StudioFieldSchema) {
+  return `${field.name}${field.required ? ' *' : ''}`
+}
+
+function selectDebugStep(index: number) {
+  selectedDebugStepIndex.value = index
+  const step = debugRunResult.value?.steps?.[index]
+  if (step?.nodeId) {
+    selectedNodeId.value = step.nodeId
+    selectedEdgeId.value = null
+    currentDebugNodeId.value = step.nodeId
+    focusDebugNode(step.nodeId)
+  }
+}
+
+function focusDebugNode(nodeId: string, duration = 320) {
+  const node = nodes.value.find((item) => item.id === nodeId)
+  if (!node) return
+  const viewport = getViewport()
+  const zoom = viewport.zoom || 1
+  const drawerOffset = debugOpen.value && typeof window !== 'undefined'
+    ? (window.innerWidth * DEBUG_DRAWER_WIDTH_RATIO / 2) / zoom
+    : 0
+  const nodeCenterX = node.position.x + 125
+  const nodeCenterY = node.position.y + 70
+  setCenter(nodeCenterX + drawerOffset, nodeCenterY, {
+    zoom: Math.max(zoom, 0.85),
+    duration,
+  })
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function replayDebugSteps(steps: AgentWorkflowDebugStepResult[] = []) {
+  const token = debugPlaybackToken.value + 1
+  debugPlaybackToken.value = token
+  await nextTick()
+  for (let index = 0; index < steps.length; index += 1) {
+    if (debugPlaybackToken.value !== token) return
+    const step = steps[index]
+    selectedDebugStepIndex.value = index
+    currentDebugNodeId.value = step.nodeId
+    selectedNodeId.value = step.nodeId
+    selectedEdgeId.value = null
+    focusDebugNode(step.nodeId, 360)
+    await sleep(420)
+  }
+  if (debugPlaybackToken.value === token) {
+    currentDebugNodeId.value = ''
+  }
+}
+
+function stringifyDebugPayload(value: unknown) {
+  if (value === undefined || value === null || value === '') return '{}'
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
+  return JSON.stringify(value, null, 2)
+}
+
+async function handleRunDraftDebug() {
+  const inputParams = buildDebugInputParams()
+  const message = debugMessageFromParams(inputParams)
+  if (!message.trim()) {
+    ElMessage.warning('请输入测试消息或用户输入字段')
+    return
+  }
+  debugLoading.value = true
+  currentTraceId.value = ''
+  traceNodes.value = []
+  runOpsDetail.value = null
+  debugResult.value = null
+  debugRunResult.value = null
+  selectedDebugStepIndex.value = null
+  currentDebugNodeId.value = ''
+  debugPlaybackToken.value += 1
+  try {
+    const payload = canvasToDefinition(form, { version: 2, nodes: nodes.value, edges: edges.value })
+    const { data } = await debugAgentWorkflowRun({
+      agentDefinition: payload,
+      message,
+      inputParams,
+      debugOptions: {},
+    })
+    debugRunResult.value = data
+    currentTraceId.value = data.traceId || ''
+    replayTraceInput.value = data.traceId || ''
+    selectedRecentTraceId.value = data.traceId || ''
+    refreshEdgeRuntimeClasses()
+    await replayDebugSteps(data.steps || [])
+    selectedDebugStepIndex.value = data.steps?.length ? data.steps.length - 1 : null
+    ElMessage[data.success ? 'success' : 'error'](data.success ? '当前草稿调试完成' : '当前草稿调试失败')
+  } catch (err) {
+    ElMessage.error('草稿调试失败：' + (err as Error).message)
+  } finally {
+    debugLoading.value = false
+  }
+}
+
+async function handleRunPublishedDebug() {
   const key = form.keySlug || agentId
   if (!debugMessage.value) {
     ElMessage.warning('请输入测试消息')
@@ -3233,6 +3893,10 @@ async function handleRunDebug() {
   currentTraceId.value = ''
   traceNodes.value = []
   runOpsDetail.value = null
+  debugRunResult.value = null
+  selectedDebugStepIndex.value = null
+  currentDebugNodeId.value = ''
+  debugPlaybackToken.value += 1
   try {
     const { data } = await gatewayChat(key, {
       message: debugMessage.value,
@@ -3259,8 +3923,133 @@ async function handleRunDebug() {
 
 function handleDebug() {
   debugOpen.value = true
+  for (const field of debugInputFields.value) {
+    if (!(field.name in debugInputParams)) {
+      debugInputParams[field.name] = field.defaultValue ?? (field.name === 'question' ? debugMessage.value : '')
+    }
+  }
   if (!recentRuns.value.length) {
     loadRecentStudioRuns()
+  }
+}
+
+function openAiDraftDialog() {
+  if (studioReadOnly.value) {
+    ElMessage.info('SDK 托管图当前只读，请从代码侧更新后同步')
+    return
+  }
+  aiDraftModelInstanceId.value = aiDraftModelInstanceId.value || form.modelInstanceId || aiDraftModelOptions.value[0]?.id || ''
+  aiDraftRequirement.value = aiDraftRequirement.value || form.description || form.systemPrompt || ''
+  aiDraftPreview.value = null
+  aiDraftDialogOpen.value = true
+}
+
+async function handleGenerateWorkflowDraft() {
+  const requirement = aiDraftRequirement.value.trim()
+  if (!requirement) {
+    ElMessage.warning('请先输入流程需求')
+    return
+  }
+  aiDraftGenerating.value = true
+  try {
+    const { data } = await generateWorkflowDraft({
+      agentId,
+      agentName: form.name,
+      requirement,
+      projectCode: form.projectCode,
+      modelInstanceId: aiDraftModelInstanceId.value || form.modelInstanceId,
+      currentCanvas: { version: 2, nodes: nodes.value, edges: edges.value },
+      tools: availableTools.value.map(toolToDraftResource),
+      capabilities: availableCapabilities.value.map(capabilityToDraftResource),
+      knowledgeBases: knowledgeOptions.value.map(knowledgeToDraftResource),
+    })
+    aiDraftPreview.value = data
+    ElMessage.success('流程草稿预览已生成')
+  } catch (err) {
+    ElMessage.error('生成流程草稿失败：' + (err as Error).message)
+  } finally {
+    aiDraftGenerating.value = false
+  }
+}
+
+function handleApplyWorkflowDraft() {
+  const preview = aiDraftPreview.value
+  const snapshot = normalizeGeneratedCanvas(preview?.canvasSnapshot)
+  if (!preview || !snapshot) {
+    ElMessage.warning('请先生成可用的流程草稿预览')
+    return
+  }
+  const normalized = definitionToCanvas({
+    ...(form as unknown as AgentDefinition),
+    graphSpec: preview.graphSpec,
+    canvasJson: JSON.stringify(snapshot),
+  })
+  nodes.value = normalized.nodes
+  edges.value = normalized.edges
+  decorateEdges()
+  form.graphSpec = preview.graphSpec
+  form.canvasJson = JSON.stringify({ version: 2, nodes: nodes.value, edges: edges.value })
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  aiDraftDialogOpen.value = false
+  pushHistorySnapshot()
+  nextTick(() => fitView({ padding: 0.2, duration: 300 }))
+  ElMessage.success('已替换为 AI 生成的前端草稿，请检查后再保存')
+}
+
+function normalizeGeneratedCanvas(raw: unknown) {
+  if (!raw || typeof raw !== 'object') return null
+  const snapshot = raw as { nodes?: unknown; edges?: unknown }
+  if (!Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.edges)) return null
+  return {
+    version: 2 as const,
+    nodes: snapshot.nodes as CanvasNode[],
+    edges: snapshot.edges as CanvasEdge[],
+  }
+}
+
+function modelOptionLabel(item: ModelInstance) {
+  return `${item.name || item.id} / ${item.provider || '-'} / ${item.modelName || '-'}`
+}
+
+function previewNodeLabel(nodeId: string) {
+  return aiDraftPreviewNodeLabels.value.get(nodeId) || nodeId
+}
+
+function previewEdgeLabel(edge: CanvasEdge) {
+  const condition = edge.condition || edge.label || 'always'
+  if (condition === 'always') return '连线'
+  if (condition === 'else') return '默认分支'
+  if (condition.startsWith('route:')) return `分支：${condition.slice('route:'.length) || edge.sourceHandle || '未命名'}`
+  return condition
+}
+
+function toolToDraftResource(tool: ToolInfo): WorkflowDraftResource {
+  return {
+    kind: 'TOOL',
+    name: tool.name,
+    qualifiedName: tool.qualifiedName,
+    projectCode: tool.projectCode,
+    description: tool.aiDescription || tool.description,
+  }
+}
+
+function capabilityToDraftResource(capability: CapabilityInfo): WorkflowDraftResource {
+  return {
+    kind: 'SKILL',
+    name: capability.name,
+    qualifiedName: capability.qualifiedName,
+    projectCode: capability.projectCode,
+    description: capability.aiDescription || capability.description,
+  }
+}
+
+function knowledgeToDraftResource(knowledge: KnowledgeBase): WorkflowDraftResource {
+  return {
+    kind: 'KNOWLEDGE',
+    name: knowledge.code,
+    projectCode: knowledge.projectCode,
+    description: knowledge.description || knowledge.name,
   }
 }
 
@@ -3411,6 +4200,24 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleStudioShortcut)
 })
+
+watch(
+  debugInputFields,
+  (fields) => {
+    const names = new Set(fields.map((field) => field.name))
+    for (const key of Object.keys(debugInputParams)) {
+      if (!names.has(key)) {
+        delete debugInputParams[key]
+      }
+    }
+    for (const field of fields) {
+      if (!(field.name in debugInputParams)) {
+        debugInputParams[field.name] = field.defaultValue ?? (field.name === 'question' ? debugMessage.value : '')
+      }
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 watch(
   () => (selectedNode.value?.data.kind || '') + ':' + (selectedNode.value?.data.toolConfig?.ref || ''),
@@ -4743,6 +5550,14 @@ watch(
     border-color: rgba(245, 158, 11, 0.62);
     box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2), 0 16px 38px rgba(15, 23, 42, 0.13);
   }
+
+  &.run-current {
+    border-color: rgba(99, 102, 241, 0.76);
+    box-shadow:
+      0 0 0 3px rgba(99, 102, 241, 0.22),
+      0 18px 42px rgba(15, 23, 42, 0.16);
+    transform: translateY(-2px);
+  }
 }
 
 .node-runtime {
@@ -4888,6 +5703,12 @@ watch(
   --node-color: #0d9488;
   --node-soft: rgba(13, 148, 136, 0.1);
   --node-line: rgba(13, 148, 136, 0.24);
+}
+
+.user-input-node {
+  --node-color: #10b981;
+  --node-soft: rgba(16, 185, 129, 0.1);
+  --node-line: rgba(16, 185, 129, 0.24);
 }
 
 .condition-node {
@@ -5385,11 +6206,213 @@ watch(
   padding: 0 16px;
 }
 
+:global(.studio-debug-drawer-overlay) {
+  pointer-events: none;
+}
+
+:global(.studio-debug-drawer-overlay .studio-debug-drawer) {
+  pointer-events: auto;
+}
+
 .debug-actions {
   margin-top: 12px;
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.debug-input-card,
+.debug-answer-card {
+  padding: 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.debug-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  span {
+    margin-top: 3px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
+.debug-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.debug-console-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.debug-result {
+  min-height: 180px;
+}
+
+.debug-advanced-collapse {
+  margin-top: 14px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.debug-collapse-title {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.debug-answer-card {
+  display: grid;
+  align-items: flex-start;
+  gap: 10px;
+  border-left: 4px solid #22c55e;
+
+  &.is-error {
+    border-left-color: #ef4444;
+  }
+
+  &.is-waiting {
+    border-left-color: #f59e0b;
+  }
+
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+
+  strong {
+    display: block;
+    margin-top: 6px;
+    color: var(--el-text-color-primary);
+    line-height: 1.6;
+    word-break: break-word;
+  }
+}
+
+.debug-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.workflow-debug-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-debug-step-card {
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-light);
+  border-left: 4px solid #22c55e;
+  border-radius: 8px;
+  background: #fff;
+
+  &.selected {
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.16);
+  }
+
+  &.is-error {
+    border-left-color: #ef4444;
+  }
+
+  &.is-waiting {
+    border-left-color: #f59e0b;
+  }
+}
+
+.workflow-debug-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  background: #fff;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workflow-debug-step .step-route {
+  grid-column: 2 / -1;
+}
+
+.workflow-debug-step .step-time {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.step-index {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.step-main,
+.step-route {
+  min-width: 0;
+
+  strong,
+  em,
+  small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  em,
+  small {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    font-style: normal;
+  }
+}
+
+.step-time {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: right;
+}
+
+.debug-step-inline {
+  padding: 0 10px 10px 38px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.debug-step-inline pre,
+.debug-console-layout :deep(.el-collapse-item__content) pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f4f4f5;
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .trace-replay-panel {
@@ -5400,6 +6423,11 @@ watch(
   border: 1px solid var(--el-border-color-light);
   border-radius: 8px;
   background: var(--el-fill-color-lighter);
+}
+
+.debug-advanced-collapse .trace-replay-panel {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 .trace-replay-row {
@@ -5473,6 +6501,10 @@ watch(
   margin-bottom: 12px;
 }
 
+.trace-detail-section {
+  margin-top: 12px;
+}
+
 .result-section {
   margin-bottom: 12px;
 
@@ -5509,6 +6541,119 @@ watch(
   strong {
     color: var(--el-text-color-primary);
     word-break: break-word;
+  }
+}
+
+.studio-node.needs-config {
+  border-style: dashed;
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.ai-draft-body {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-draft-model-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+
+  > span {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+.ai-draft-actions,
+.ai-draft-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-draft-actions span,
+.ai-draft-preview-head span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.ai-draft-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+}
+
+.ai-draft-warning span {
+  display: block;
+}
+
+.ai-draft-placeholders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-draft-edge-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-draft-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  background: #fff;
+
+  span {
+    overflow: hidden;
+    color: var(--el-text-color-regular);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    text-align: right;
+  }
+}
+
+.ai-draft-node-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-draft-node {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: #fff;
+
+  strong,
+  span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    margin-top: 4px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
   }
 }
 

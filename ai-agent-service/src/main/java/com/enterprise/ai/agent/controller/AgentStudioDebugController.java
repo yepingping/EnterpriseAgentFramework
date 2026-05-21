@@ -32,11 +32,31 @@ public class AgentStudioDebugController {
                 request.getState()));
     }
 
+    @PostMapping("/debug-run")
+    public ResponseEntity<LangGraph4jRuntimeAdapter.WorkflowDebugRunResult> debugRun(@RequestBody DebugRunRequest request) {
+        if (request == null || request.getAgentDefinition() == null) {
+            throw new IllegalArgumentException("agentDefinition is required");
+        }
+        return ResponseEntity.ok(langGraph4jRuntimeAdapter.debugRun(
+                request.getAgentDefinition(),
+                request.getMessage(),
+                request.getInputParams(),
+                request.getDebugOptions()));
+    }
+
     @Data
     public static class NodeDebugRequest {
         private AgentDefinition agentDefinition;
         private String nodeId;
         private String message;
         private Map<String, Object> state;
+    }
+
+    @Data
+    public static class DebugRunRequest {
+        private AgentDefinition agentDefinition;
+        private String message;
+        private Map<String, Object> inputParams;
+        private Map<String, Object> debugOptions;
     }
 }

@@ -39,6 +39,7 @@ public final class EafGraph {
         private String visibility = "PROJECT";
         private final List<NodeDraft> nodes = new ArrayList<>();
         private final List<EdgeDraft> edges = new ArrayList<>();
+        private final List<Map<String, Object>> inputFields = new ArrayList<>();
         private final Map<String, Object> metadata = new LinkedHashMap<>();
         private final Map<String, Object> layout = new LinkedHashMap<>();
         private NodeDraft currentNode;
@@ -101,6 +102,30 @@ public final class EafGraph {
             if (modelInstanceId != null) {
                 currentNode.config.put("modelInstanceId", modelInstanceId);
             }
+            return this;
+        }
+
+        public Builder userInput(String id) {
+            currentNode = addNode(id, EafGraphNodeType.USER_INPUT.type());
+            currentNode.config.put("outputAlias", "params");
+            currentNode.output("params", "object", false);
+            return this;
+        }
+
+        @SuppressWarnings("unchecked")
+        public Builder inputField(String name, String type, boolean required, String label) {
+            if (!StringUtils.hasText(name)) {
+                return this;
+            }
+            NodeDraft node = requireCurrentNode();
+            Map<String, Object> field = inputFieldMap(name, type, required, label);
+            List<Map<String, Object>> fields = (List<Map<String, Object>>) node.config.computeIfAbsent(
+                    "fields", ignored -> new ArrayList<Map<String, Object>>());
+            fields.add(field);
+            if (EafGraphNodeType.USER_INPUT.type().equals(node.type)) {
+                inputFields.add(field);
+            }
+            node.output(field.get("name").toString(), String.valueOf(field.get("type")), required);
             return this;
         }
 
@@ -309,6 +334,7 @@ public final class EafGraph {
             Map<String, String> inputMapping = (Map<String, String>) node.config.computeIfAbsent(
                     "inputMapping", ignored -> new LinkedHashMap<String, String>());
             inputMapping.put(targetPath.trim(), expression.trim());
+            node.bindInput(targetPath.trim(), expression.trim());
             return this;
         }
 
@@ -776,6 +802,11 @@ public final class EafGraph {
             graphSpec.put("name", name);
             graphSpec.put("mode", "WORKFLOW");
             graphSpec.put("runtimeHint", runtimeType);
+            if (!inputFields.isEmpty()) {
+                graphSpec.put("inputSchema", Map.of(
+                        "type", "object",
+                        "fields", List.copyOf(inputFields)));
+            }
             graphSpec.put("layout", layout.isEmpty() ? Map.of("engine", "sdk", "direction", "LR") : Map.copyOf(layout));
             graphSpec.put("nodes", nodes.stream().map(NodeDraft::toMap).toList());
             graphSpec.put("edges", normalizedEdges.stream().map(EdgeDraft::toMap).toList());
@@ -800,6 +831,17 @@ public final class EafGraph {
             NodeDraft node = new NodeDraft(id.trim(), type);
             nodes.add(node);
             return node;
+        }
+
+        private Map<String, Object> inputFieldMap(String name, String type, boolean required, String label) {
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name.trim());
+            field.put("type", StringUtils.hasText(type) ? type.trim().toLowerCase(Locale.ROOT) : "string");
+            field.put("required", required);
+            if (StringUtils.hasText(label)) {
+                field.put("label", label.trim());
+            }
+            return field;
         }
 
         private NodeDraft requireCurrentNode() {
@@ -1039,9 +1081,11 @@ public final class EafGraph {
             }
             if (!inputs.isEmpty()) {
                 out.put("inputs", inputs);
+                out.put("inputSchema", Map.of("type", "object", "fields", inputs));
             }
             if (!outputs.isEmpty()) {
                 out.put("outputs", outputs);
+                out.put("outputSchema", Map.of("type", "object", "fields", outputs));
             }
             if (retry != null && !retry.isEmpty()) {
                 out.put("retry", retry);
@@ -1060,6 +1104,18 @@ public final class EafGraph {
 
         private void input(String id, String type, boolean required) {
             inputs.add(port(id, type, required));
+        }
+
+        private void bindInput(String id, String source) {
+            for (Map<String, Object> input : inputs) {
+                if (id.equals(input.get("id"))) {
+                    input.put("source", source);
+                    return;
+                }
+            }
+            Map<String, Object> port = port(id, "any", false);
+            port.put("source", source);
+            inputs.add(port);
         }
 
         private void output(String id, String type, boolean required) {

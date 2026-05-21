@@ -43,6 +43,16 @@ export const STUDIO_NODE_REGISTRY: Record<CanvasNodeKind, StudioNodeRegistryItem
     category: 'system',
     color: { bg: '#f0f9eb', border: '#67c23a' },
   },
+  userInput: {
+    kind: 'userInput',
+    label: '用户输入',
+    defaultLabel: '用户输入',
+    meta: '表单入口',
+    hint: '定义工作流入口字段，运行时写入 params，后续节点可通过 params.xxx 引用。',
+    group: '娴佺▼鎺у埗涓庡彉閲?',
+    category: 'flow',
+    color: { bg: '#ecfdf5', border: '#10b981' },
+  },
   llm: {
     kind: 'llm',
     label: '大模型节点',

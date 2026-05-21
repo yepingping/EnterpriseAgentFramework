@@ -72,6 +72,10 @@ public class AgentGraphSpec {
         @Singular
         private List<Port> outputs;
 
+        private Map<String, Object> inputSchema;
+
+        private Map<String, Object> outputSchema;
+
         private RetryPolicy retry;
 
         private ErrorPolicy errorPolicy;

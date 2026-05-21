@@ -65,6 +65,7 @@ jishi:
 agent:
   max-steps: 5
   default-timeout: 60000
+  workflow-credential-secret: ${WORKFLOW_CREDENTIAL_SECRET:dev-only-change-me-please-32-bytes}
   definitions:
     file: ${AGENT_DEF_FILE:agent-definitions.json}
   agents:

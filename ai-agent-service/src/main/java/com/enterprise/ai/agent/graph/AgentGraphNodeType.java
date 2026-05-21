@@ -14,6 +14,8 @@ import java.util.stream.Collectors;
 public enum AgentGraphNodeType {
 
     LLM("LLM", "llm", "action", NodeFamily.LLM, true, "llm", "model"),
+    USER_INPUT("USER_INPUT", "userInput", "input", NodeFamily.FLOW, false,
+            "user_input", "input", "form_input"),
     TOOL("TOOL", "tool", "action", NodeFamily.TOOL, true, "tool"),
     CAPABILITY("CAPABILITY", "skill", "action", NodeFamily.TOOL, true, "capability", "skill"),
     IF_ELSE("IF_ELSE", "condition", "flow", NodeFamily.FLOW, false, "if_else", "condition"),

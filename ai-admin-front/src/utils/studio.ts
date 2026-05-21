@@ -22,6 +22,7 @@ import type {
   StudioRetryPolicy,
   StudioFieldSchema,
   ToolNodeConfig,
+  UserInputNodeConfig,
   VariableAggregateNodeConfig,
 } from '@/types/studio'
 
@@ -111,6 +112,23 @@ function canvasToGraphSpec(base: AgentForm, snapshot: CanvasSnapshot): AgentGrap
 
 function canvasNodeToGraphNode(node: CanvasNode, base: AgentForm): AgentGraphNode {
   const common = commonNodeConfig(node)
+  if (node.data.kind === 'userInput') {
+    const userInput = node.data.userInputConfig || defaultUserInputConfig()
+    const outputAlias = userInput.outputAlias || node.data.outputAlias || 'params'
+    return {
+      id: node.id,
+      type: 'USER_INPUT',
+      name: node.data.label,
+      ...graphNodeChrome(node),
+      outputs: userInputOutputPorts(userInput.fields || [], outputAlias),
+      config: {
+        ...common,
+        fields: userInput.fields || [],
+        outputAlias,
+        userInputConfig: { fields: userInput.fields || [], outputAlias },
+      },
+    }
+  }
   if (node.data.kind === 'llm') {
     const llm = node.data.llmConfig || defaultLlmConfig(base)
     return {
@@ -409,7 +427,10 @@ function canvasNodeToGraphNode(node: CanvasNode, base: AgentForm): AgentGraphNod
 function commonNodeConfig(node: CanvasNode): Record<string, unknown> {
   return {
     configVersion: 2,
+    inputMapping: node.data.inputMapping || {},
     outputAlias: node.data.outputAlias,
+    needsConfiguration: node.data.needsConfiguration === true,
+    placeholderReason: node.data.placeholderReason,
     description: node.data.description,
     source: node.data.source || 'CANVAS',
     category: node.data.category,
@@ -424,6 +445,8 @@ function graphNodeChrome(node: CanvasNode) {
     description: node.data.description,
     inputs: node.data.inputs || defaultPorts(node.data.kind, 'input'),
     outputs: dynamicOutputs || node.data.outputs || defaultPorts(node.data.kind, 'output', node.data.outputAlias),
+    inputSchema: node.data.inputSchema,
+    outputSchema: node.data.outputSchema,
     retry: node.data.retry,
     errorPolicy: node.data.errorPolicy,
     layout: {
@@ -461,6 +484,8 @@ function graphSpecToCanvas(graphSpec: AgentGraphSpec, def: AgentDefinition): Can
     data.description = node.description || data.description
     data.inputs = portValue(node.inputs) || data.inputs
     data.outputs = portValue(node.outputs) || data.outputs
+    data.inputSchema = node.inputSchema || data.inputSchema
+    data.outputSchema = node.outputSchema || data.outputSchema
     if (node.retry) data.retry = node.retry as NonNullable<CanvasNode['data']['retry']>
     if (node.errorPolicy) data.errorPolicy = node.errorPolicy as NonNullable<CanvasNode['data']['errorPolicy']>
     data.collapsed = node.layout?.collapsed === true || data.collapsed
@@ -504,6 +529,8 @@ function graphConfigToNodeData(
     configVersion: 2 as const,
     description: stringValue(config.description),
     outputAlias: stringValue(config.outputAlias),
+    needsConfiguration: config.needsConfiguration === true,
+    placeholderReason: stringValue(config.placeholderReason),
     source: isSdkDefinition(def) ? 'SDK' as const : 'CANVAS' as const,
     category: nodeCategory(kind),
     collapsed: config.ui && typeof config.ui === 'object'
@@ -511,8 +538,24 @@ function graphConfigToNodeData(
       : false,
     inputs: defaultPorts(kind, 'input'),
     outputs: defaultPorts(kind, 'output', stringValue(config.outputAlias)),
+    inputSchema: objectRecordValue(config.inputSchema),
+    outputSchema: objectRecordValue(config.outputSchema),
+    inputMapping: stringRecord(config.inputMapping),
     retry: defaultRetryPolicy(kind),
     errorPolicy: defaultErrorPolicy(),
+  }
+  if (kind === 'userInput') {
+    const fields = schemaValue(config.fields)
+    const outputAlias = stringValue(config.outputAlias) || 'params'
+    return {
+      ...common,
+      outputAlias,
+      outputs: userInputOutputPorts(fields, outputAlias),
+      userInputConfig: {
+        fields,
+        outputAlias,
+      } satisfies UserInputNodeConfig,
+    }
   }
   if (kind === 'llm') {
     return {
@@ -711,10 +754,22 @@ export function createDefaultNodeData(kind: CanvasNodeKind, label: string, base?
     category: nodeCategory(kind),
     inputs: defaultPorts(kind, 'input'),
     outputs: defaultPorts(kind, 'output', defaultOutputAlias(kind)),
+    inputSchema: {},
+    outputSchema: {},
+    inputMapping: {},
     retry: defaultRetryPolicy(kind),
     errorPolicy: defaultErrorPolicy(),
     collapsed: false,
     outputAlias: defaultOutputAlias(kind),
+  }
+  if (kind === 'userInput') {
+    const userInputConfig = defaultUserInputConfig()
+    return {
+      ...common,
+      outputAlias: userInputConfig.outputAlias,
+      outputs: userInputOutputPorts(userInputConfig.fields, userInputConfig.outputAlias),
+      userInputConfig,
+    }
   }
   if (kind === 'llm') return { ...common, llmConfig: defaultLlmConfig(base) }
   if (kind === 'tool' || kind === 'skill') return { ...common, toolConfig: defaultToolConfig() }
@@ -794,6 +849,15 @@ function defaultParameterConfig(): ParameterNodeConfig {
   return {
     mode: 'expression',
     fields: [{ name: 'value', type: 'string', required: false, source: 'lastOutput' }],
+  }
+}
+
+function defaultUserInputConfig(): UserInputNodeConfig {
+  return {
+    outputAlias: 'params',
+    fields: [
+      { name: 'question', type: 'string', required: true, description: '用户问题', source: 'input.message' },
+    ],
   }
 }
 
@@ -899,6 +963,7 @@ function defaultToolConfig(): ToolNodeConfig {
 }
 
 function defaultOutputAlias(kind: CanvasNodeKind) {
+  if (kind === 'userInput') return 'params'
   if (kind !== 'start' && kind !== 'end' && kind !== 'llm' && kind !== 'condition' && kind !== 'answer') return `${kind}_output`
   return ''
 }
@@ -935,6 +1000,7 @@ function canvasEndpoint(endpoint: string) {
 }
 
 function graphNodeKindToCanvas(type: AgentGraphNode['type']): CanvasNodeKind {
+  if (type === 'USER_INPUT') return 'userInput'
   if (type === 'LLM') return 'llm'
   if (type === 'CAPABILITY') return 'skill'
   if (type === 'IF_ELSE') return 'condition'
@@ -1035,6 +1101,9 @@ function defaultPorts(kind: CanvasNodeKind, direction: 'input' | 'output', alias
     return [{ id: 'input', name: 'input', type: 'message', required: false, source: '$input' }]
   }
   const output = alias || defaultOutputAlias(kind) || 'output'
+  if (kind === 'userInput') {
+    return [{ id: output, name: output, type: 'object' }]
+  }
   if (kind === 'approval') {
     return [
       { id: 'approved', name: 'approved', type: 'boolean' },
@@ -1066,10 +1135,35 @@ function syncDynamicPorts(data: CanvasNode['data']): CanvasNode['data'] {
 }
 
 function dynamicOutputPorts(data: CanvasNode['data']): StudioPort[] | null {
+  if (data.kind === 'userInput') {
+    const config = data.userInputConfig || defaultUserInputConfig()
+    return userInputOutputPorts(config.fields || [], config.outputAlias || data.outputAlias || 'params')
+  }
   if (data.kind === 'classifier') {
     return classifierOutputPorts(data.classifierConfig || defaultClassifierConfig())
   }
   return null
+}
+
+export function userInputOutputPorts(fields: StudioFieldSchema[], outputAlias = 'params'): StudioPort[] {
+  const alias = outputAlias || 'params'
+  const ports: StudioPort[] = [{ id: alias, name: alias, type: 'object', required: false }]
+  const seen = new Set<string>([alias])
+  for (const field of fields || []) {
+    const name = field.name?.trim()
+    if (!name) continue
+    const id = `${alias}.${name}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    ports.push({
+      id,
+      name: id,
+      type: field.type || 'string',
+      required: field.required === true,
+      source: alias,
+    })
+  }
+  return ports
 }
 
 export function classifierOutputPorts(config: IntentClassifierNodeConfig): StudioPort[] {
@@ -1139,6 +1233,11 @@ function arrayValue(value: unknown) {
 function recordValue(value: unknown): Record<string, string | number | boolean> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return value as Record<string, string | number | boolean>
+}
+
+function objectRecordValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
 }
 
 function stringRecord(value: unknown): Record<string, string> {
