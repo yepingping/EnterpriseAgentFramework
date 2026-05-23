@@ -5,7 +5,11 @@
 <h1 align="center">睿池 ReachAI</h1>
 
 <p align="center">
-  <strong>让 Java 企业系统，像注册服务一样注册 AI 能力。</strong>
+  <strong>面向 Java 企业系统的 AI 能力中台</strong>
+</p>
+
+<p align="center">
+  让 Spring Boot 业务系统像注册微服务一样注册 AI 能力，并在进入 Agent 前完成治理、编排、发布、审计和开放。
 </p>
 
 <p align="center">
@@ -16,29 +20,59 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
 </p>
 
-睿池 ReachAI 是面向 Java / Spring Boot 企业系统的 AI 能力注册、治理与 Agent 编排平台。它不要求你把业务系统重写成新的 AI 应用，而是让已有接口、领域能力、知识库和业务流程，以 SDK 注册的方式进入一个可编排、可治理、可审计、可开放的 AI 中台。
+![项目注册中心](docs/系统截图/01项目注册中心.png)
 
-> 推荐新系统和核心系统使用 `ai-spring-boot-starter` 主动注册；平台侧扫描保留给存量系统和低改造场景。
+## 为什么需要 ReachAI
 
-![首页](docs/系统截图/首页.png)
-![项目列表](docs/系统截图/项目列表.png)
-## 为什么做这个项目
+企业 AI 落地真正困难的不是接入一个大模型，而是让模型安全、稳定、可控地调用企业已有能力。
 
-企业 AI 落地真正难的不是“接一个大模型”，而是让模型安全、稳定、可控地调用企业能力：
+在真实业务系统里，接口和领域方法早已存在，但它们通常缺少面向 Agent 的语义、权限、审计和变更治理：
 
-- 哪些接口可以被 Agent 调用，哪些必须审批？
-- 同名 Tool、同名能力、不同项目和环境之间如何隔离？
-- 能力参数变化后，怎么知道影响了哪些 Agent？
-- 业务系统上线、下线、扩容后，AI 平台如何感知实例状态？
-- MCP、A2A、Gateway、Trace、ACL、限流、人工确认如何放进同一条生产链路？
+- 哪些接口可以被 Agent 调用，哪些必须人工审批？
+- 一个接口参数变更后，哪些 Agent、工作流和外部调用会受影响？
+- 同名 Tool、同名能力、不同项目、不同环境之间如何隔离？
+- AI 生成的流程如何发布、回滚、评测和追踪？
+- MCP、A2A、Gateway、Trace、ACL、Guard、人工确认如何放到同一条生产链路里？
 
-睿池 ReachAI 把这些问题收敛成一套 Java 原生基础设施：业务系统注册能力，平台治理能力，Agent Studio 编排能力，运行时安全调用能力。
+ReachAI 试图解决的是这一层：**把 Java 企业系统中的接口、领域方法、知识、模型和流程，沉淀为可治理、可编排、可开放的 AI 能力资产。**
 
-## 核心体验
+## 核心闭环
 
-### 1. SDK 注册优先
+ReachAI 的主线不是单纯的 Workflow Builder，也不是只扫描历史项目生成 Tool，而是一条从业务系统到生产 Agent 的完整链路。
 
-业务系统引入 Starter 后，启动时自动注册项目、实例和能力快照。你只需要用 Java 注解补充业务语义：
+```mermaid
+flowchart LR
+  app["Spring Boot 业务系统"] --> anno["@AiCapability / @AiParam"]
+  anno --> starter["ai-spring-boot-starter"]
+  starter --> registry["注册中心"]
+  registry --> snapshot["能力快照"]
+  snapshot --> diff["字段级 Diff"]
+  diff --> review["评审 Apply / Ignore"]
+  review --> catalog["能力目录"]
+  catalog --> studio["Agent Studio 编排"]
+  studio --> version["版本发布"]
+  version --> runtime["GraphSpec / Runtime Adapter"]
+  runtime --> open["Gateway / MCP / A2A"]
+  runtime --> runops["RunOps / Trace 复盘"]
+```
+
+推荐新系统和核心系统使用 `ai-spring-boot-starter` 主动注册；平台侧 OpenAPI / Controller / DTO 扫描保留给存量系统和低改造场景。
+
+## 你可以用它做什么
+
+| 场景 | ReachAI 解决的问题 |
+| --- | --- |
+| Java 系统 AI 化 | 将 Spring Boot 接口和领域方法声明为 Agent 可理解、可调用、可治理的能力 |
+| 能力注册中心 | 管理项目、实例、能力快照、字段级 diff、评审记录和稳定引用 |
+| Agent Studio | 用可视化画布和 AI 指令编排 Tool、Capability、Knowledge、HTTP、MCP 和人工审批节点 |
+| 生产治理 | 在能力进入 Agent 前加入 ACL、副作用等级、不可逆调用闸口、Preflight、Trace 和审计 |
+| 运行时解耦 | 用统一 `GraphSpec` 连接 Studio、AI 生成/修改、SDK 图同步、发布校验和 Runtime Adapter |
+| 能力开放 | 通过 Gateway、MCP、A2A 把已治理的 Agent 和 Capability 暴露给 IDE、外部 Agent 或业务系统 |
+| 企业上下文 | 管理模型实例、知识库、业务索引、领域归属和市场资产，让 Agent 使用可信上下文 |
+
+## 从代码注册一个能力
+
+业务系统引入 Starter 后，可以用 Java 注解补充业务语义。ReachAI 会在应用启动时同步项目、实例、能力快照和 SDK 图。
 
 ```java
 @AiCapability(
@@ -48,7 +82,8 @@
     domain = "contract",
     module = "contract-query",
     tags = {"合同", "审批"},
-    sideEffect = SideEffectLevel.READ_ONLY
+    sideEffect = SideEffectLevel.READ_ONLY,
+    requiredRoles = {"contract.reader"}
 )
 @GetMapping("/contracts/{contractNo}")
 public ContractDTO queryContract(
@@ -77,69 +112,72 @@ eaf:
     sync-on-startup: true
 ```
 
-启动后，睿池 ReachAI 会自动完成：
+同步后，平台不会直接覆盖生产能力目录，而是形成可评审的治理链路：
 
-- 注册业务项目与运行实例
-- 上报实例心跳、版本、host、port、SDK 版本
-- 读取 Spring MVC Mapping、`@AiCapability`、`@AiParam`
-- 生成能力快照和字段级 diff
-- 进入评审流后再 apply 到正式能力目录
-- 使用 HMAC 签名保护注册、心跳和同步请求
+1. 注册业务项目和运行实例。
+2. 上报实例心跳、版本、host、port、SDK 版本。
+3. 扫描 Spring MVC Mapping、`@AiCapability`、`@AiParam` 和请求体结构。
+4. 生成能力快照和字段级 diff。
+5. 经评审后 apply 到正式能力目录。
+6. 通过 HMAC 签名保护注册、心跳和同步请求。
 
-### 2. 能力先治理，再编排
+## Agent Studio 与 Runtime
 
-SDK 上报不是简单覆盖生产 Tool。每次变更都会形成快照和 diff，平台可以逐条评审、应用或忽略，让能力变更有迹可循。
+![Workflow 编排](docs/系统截图/04workflow编排.png)
 
-```mermaid
-flowchart LR
-  app["Java 业务系统"] --> starter["ai-spring-boot-starter"]
-  starter --> registry["AI 注册中心"]
-  registry --> snapshot["能力快照"]
-  snapshot --> diff["字段级 Diff"]
-  diff --> review["评审 Apply / Ignore"]
-  review --> catalog["能力目录"]
-  catalog --> studio["Agent Studio"]
-  studio --> runtime["受控 Agent Runtime"]
-  runtime --> trace["Trace Center"]
-  runtime --> open["MCP / A2A / Gateway"]
-```
+Agent Studio 是把能力资产组织成可发布 Agent 的工作台。它的重点不是只画一个流程图，而是把可视化画布、AI 生成工作流、AI 修改工作流、SDK 图同步、发布校验和 Runtime 执行收敛到统一 `GraphSpec`。
 
-### 3. 存量系统仍可扫描接入
+当前已支持的 Studio 节点包括：
 
-如果历史系统暂时无法改造，仍然可以通过平台侧 OpenAPI / Controller / DTO 扫描生成 Tool。扫描能力是迁移起点，不是唯一主线：当系统进入长期运营，建议逐步切换为 SDK 注册，让业务语义、权限建议、副作用等级和参数说明都回到代码侧维护。
+- LLM、Tool、Capability、HTTP 请求、MCP 调用。
+- 用户输入、参数提取、条件、循环、变量赋值、变量聚合。
+- 知识检索、知识写入、文档抽取。
+- 人工审批、代码节点、最终回答。
 
-## 你能用它做什么
+后端 Runtime 通过 `AgentRuntimeAdapter` 屏蔽具体框架差异。当前主线包括 AgentScope 自主智能体和基于 `GraphSpec` / LangGraph4j 的工作流智能体；OpenAI Agents、Cursor Code Agent 等适配器保留为扩展边界。
 
-| 场景 | 价值 |
+## 运行治理与开放协议
+
+![RunOps 运行中心](docs/系统截图/07RunOps 运行中心.png)
+
+ReachAI 把“能力能不能被调用、由谁调用、为什么允许或拒绝、出了问题如何复盘”作为平台核心能力之一。
+
+| 能力 | 当前覆盖 |
 | --- | --- |
-| 企业 AI 中台 | 统一管理项目、能力、Agent、知识、模型、协议和治理策略 |
-| Java 系统 AI 化 | 让 Spring Boot 接口和领域方法逐步变成 Agent 可调用能力 |
-| Agent Studio | 通过可视化画布编排 Tool、Capability、Knowledge 和多步业务流 |
-| 生产治理 | 引入 ACL、副作用等级、限流、Trace、审计、人工确认和回滚 |
-| 能力开放 | 通过 MCP / A2A / Gateway 把企业能力开放给 IDE、外部 Agent 和业务系统 |
-| RAG 与模型网关 | 管理知识库、向量检索、多模型 Provider 和 OpenAI 兼容代理 |
-
-## 平台能力一览
-
-| 能力 | 说明 |
-| --- | --- |
-| AI 注册中心 | 项目注册、实例心跳、能力同步、快照评审、稳定引用、项目隔离 |
-| SDK 接入 | `ai-spring-boot-starter` 自动注册 Spring Boot 应用能力 |
-| 能力目录 | 支持 Tool、SubAgent Capability、Interactive Form Capability、Augmented Tool |
-| Agent Studio | 画布编排、调试、发布、版本快照、灰度和回滚 |
-| Tool Runtime | 动态 HTTP Tool、语义检索、参数 Schema、调用日志 |
-| 治理护栏 | Tool ACL、副作用等级、IRREVERSIBLE 闸口、限流、Preflight、Trace Center |
-| 开放协议 | MCP JSON-RPC、A2A AgentCard / JSON-RPC、AI Gateway |
-| 知识与检索 | 文档入库、Milvus 向量检索、业务索引、知识标签 |
-| 模型网关 | 多 Provider 路由、Chat / Embedding、OpenAI 兼容代理 |
-| 接口图谱 | API、字段、DTO、模块关系图谱，辅助 Agent 参数理解和影响分析 |
+| Tool ACL | 角色、项目、目标能力、权限、启停和 explain 决策 |
+| Guard / Preflight | 发布或运行前检查能力可用性、项目边界、副作用等级和不可逆调用授权 |
+| Trace / RunOps | 聚合 Tool log、节点 span、Guard 决策、版本快照和 GraphSpec |
+| Gateway | 暴露可调用 Agent 和公开/共享能力目录 |
+| MCP | 管理 Client 凭证、可见性白名单和调用流水 |
+| A2A | 管理 AgentCard endpoint、调用日志和任务状态 |
 
 ## 产品截图
 
-| Agent Studio 与治理 | 能力与接口资产 |
+| 智能体管理 | Runtime 纳管 |
 | --- | --- |
-| ![交互式卡片](docs/系统截图/交互式卡片.png) | ![项目详情](docs/系统截图/项目详情.png) |
-| ![智能体执行链路追踪](docs/系统截图/智能体执行链路追踪.png)| ![接口图谱](docs/系统截图/接口图谱1.png) |
+| ![智能体管理](docs/系统截图/02智能体管理.png) | ![Runtime 纳管](docs/系统截图/03Runtime纳管.png) |
+| AI 生成 Workflow 草稿 | Workflow 智能体自动测评 |
+| ![AI 生成 Workflow 草稿](docs/系统截图/05AI自动生成workflow草稿.png) | ![Workflow 智能体自动测评](docs/系统截图/06Workflow智能体自动测评.png) |
+
+## 当前已落地
+
+- `ai-spring-boot-starter` 主动注册项目、实例、能力和 SDK 图。
+- `@AiCapability`、`@AiParam`、`@AiOutput` 能力声明契约。
+- 能力快照、字段级 diff、评审 apply、稳定引用和项目隔离。
+- Agent Studio 画布、AI 生成流程、AI 局部修改流程、调试、发布和评测入口。
+- 统一 `AgentGraphSpec`，区分画布布局和运行时语义。
+- AgentScope 与 LangGraph4j Runtime Adapter，支持中心、本地、混合运行边界。
+- 模型实例、知识库、业务索引、领域归属和市场资产基础能力。
+- Tool ACL、Guard 决策日志、Trace、RunOps、Gateway、MCP、A2A 基础入口。
+- 聚合 SQL 基线 `sql/init.sql`，覆盖注册中心、能力、Agent、知识、模型、治理和开放协议数据表。
+
+## 仍在推进
+
+- 更完整的 GuardRuntime：限流、熔断、人工确认、跨协议统一策略和成本归集。
+- 更清晰的示例业务系统：例如合同中心或订单中心，从 SDK 注册跑通到 Gateway 调用。
+- 更成熟的资产市场：版本、依赖影响分析、跨项目复用和审批流。
+- 更稳定的用户操作手册：围绕注册、评审、编排、发布、追踪形成完整教程。
+- 历史 `Skill` 命名继续向产品语义 `Capability / 能力` 收敛，同时保留存储和接口兼容。
 
 ## 快速开始
 
@@ -177,7 +215,7 @@ mvn clean install -DskipTests
 cd ai-model-service
 mvn spring-boot:run
 
-# RAG、知识库与扫描基础能力，默认 8602
+# RAG、知识库、扫描和语义基础能力，默认 8602
 cd ../ai-skills-service
 mvn spring-boot:run
 
@@ -194,21 +232,22 @@ npm install
 npm run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000)。
+访问 [http://localhost:5200](http://localhost:5200)。
 
 ## 模块结构
 
 | 模块 | 说明 | 默认端口 |
 | --- | --- | --- |
 | `ai-skill-sdk` | 能力声明注解与 Tool / Capability 开发契约 | - |
-| `ai-spring-boot-starter` | 业务系统接入 SDK，支持注册、心跳、能力同步和 `EafAgentClient` | - |
-| `ai-agent-service` | Agent 编排、AI 注册中心、治理、MCP、A2A、Gateway、Trace | 8603 |
-| `ai-skills-service` | RAG、知识库、向量检索、扫描与语义上下文采集 | 8602 |
-| `ai-model-service` | 统一模型网关、Embedding、OpenAI 兼容代理 | 8601 |
+| `ai-spring-boot-starter` | 业务系统接入 SDK，支持注册、心跳、能力同步、SDK 图同步和嵌入式 Runtime | - |
+| `ai-agent-service` | Agent、注册中心、能力目录、Studio、Runtime、RunOps、MCP/A2A、治理与市场 | 8603 |
+| `ai-skills-service` | 知识库、文档处理、RAG、业务索引、扫描器和向量化辅助 | 8602 |
+| `ai-model-service` | 模型实例、Chat、Embedding、Rerank、OpenAI 兼容代理 | 8601 |
 | `ai-common` | 公共 DTO、异常、配置 | - |
-| `ai-admin-front` | Vue 3 管理端 | 3000 |
+| `ai-admin-front` | Vue 3 管理端，承载注册中心、Agent、知识、模型、治理和开放协议页面 | 5200 |
 | `deploy` | Docker Compose、Kubernetes、Dockerfile | - |
-| `docs` | 架构设计、路线图和阶段验收文档 | - |
+| `sql` | 聚合初始化脚本，当前以 `sql/init.sql` 作为统一 SQL 基线 | - |
+| `docs` | 当前系统权威知识库和产品截图 | - |
 
 ```text
 EnterpriseAgentFramework/
@@ -220,7 +259,7 @@ EnterpriseAgentFramework/
 ├─ ai-admin-front/           管理端
 ├─ deploy/                   部署配置
 ├─ sql/                      聚合初始化脚本
-└─ docs/                     设计与产品文档
+└─ docs/                     当前文档与产品截图
 ```
 
 ## 技术栈
@@ -228,55 +267,34 @@ EnterpriseAgentFramework/
 | 层级 | 技术 |
 | --- | --- |
 | 后端 | Java 17、Spring Boot 3.4、Spring Cloud 2024、Spring Cloud Alibaba |
-| AI | Spring AI 1.0、Spring AI Alibaba、AgentScope |
+| AI | Spring AI 1.0、Spring AI Alibaba、AgentScope、LangGraph4j |
 | 数据 | MySQL 8、Redis 7、Milvus 2.4 |
 | ORM | MyBatis-Plus |
 | 文档与扫描 | JavaParser、Apache POI、PDFBox |
 | 前端 | Vue 3、Vite 6、Element Plus、TypeScript、Pinia、Vue Flow、AntV G6 |
 | 部署 | Docker、Kubernetes |
 
-## 设计原则
-
-1. **注册优先**：核心系统走 SDK 主动注册，扫描保留给存量系统。
-2. **治理前置**：能力进入 Agent Studio 前，先明确项目边界、可见性、ACL、副作用和稳定引用。
-3. **变更可审计**：能力同步进入快照、diff、评审、apply 流程，而不是直接覆盖生产配置。
-4. **Java 原生**：面向 Spring / Java 企业团队，不要求业务团队迁移到 Python 技术栈。
-5. **渐进生产化**：从一个接口开始，到能力目录、Agent 编排、开放协议、治理审计逐步演进。
-
-## 路线图
-
-- 更完整的注册中心凭证轮换、吊销、白名单与审计事件
-- 租户、环境、项目级隔离策略增强
-- 可配置限流、熔断、HITL 和统一 GuardRuntime
-- Trace Center 聚合成本、风险、治理决策和调用时间线
-- CLI、MCP stdio 桥、接入诊断和能力市场产品化
-
 ## 文档导航
 
 | 文档 | 内容 |
 | --- | --- |
-| [AI 注册中心企业级改造设计](docs/AI注册中心企业级改造设计.md) | 注册中心、项目隔离、Starter 主动注册、评审流 |
-| [AiCapability 能力声明与扫描入库设计](docs/AiCapability能力声明与扫描入库设计.md) | `@AiCapability`、`@AiParam`、语义来源和扫描策略 |
-| [企业 Agent 开发与 Java 业务融合定位](docs/企业Agent开发与Java业务融合定位.md) | Java 业务系统接入 Agent 的整体定位 |
-| [产品演进路线](docs/产品演进路线-Skill-AgentStudio-护栏.md) | Capability、Agent Studio、护栏与 Trace 的阶段路线 |
-| [Phase3.0 Agent Studio](docs/Phase3.0-AgentStudio-落地验收清单.md) | 画布编排、版本快照、灰度、回滚与调试链路 |
-| [Phase3.1 Tool ACL](docs/Phase3.1-ToolACL-落地验收清单.md) | Tool ACL、决策服务、运行时过滤与管理端页面 |
-| [Phase4.1 接口图谱智能反哺](docs/Phase4.1-接口图谱智能反哺设计.md) | API / FIELD / DTO / MODULE 图谱与参数提示 |
-| [Phase4.2 生产护栏与 TraceCenter](docs/Phase4.2-生产护栏与TraceCenter设计.md) | GuardRuntime、RateLimit、Breaker、Preflight、Trace Center |
+| [文档入口](docs/README.md) | 当前系统权威知识库入口和阅读顺序 |
+| [平台定位与架构总览](docs/01-平台定位与架构总览.md) | 系统定位、服务边界、管理端功能地图和统一 SQL 基线 |
+| [项目注册与能力资产](docs/02-项目注册与能力资产.md) | 扫描、SDK 注册、能力同步、Tool/Capability 资产模型 |
+| [Agent Studio 与 Runtime](docs/03-Agent-Studio与Runtime.md) | Agent Studio、GraphSpec、发布、评测、多 Runtime 和变量映射 |
+| [运行治理与开放协议](docs/04-运行治理与开放协议.md) | Trace、RunOps、ACL、Guard、MCP、A2A、Gateway |
+| [知识模型与企业资产](docs/05-知识模型与企业资产.md) | 模型实例、知识库、业务索引、领域、市场资产 |
 
 ## 命名说明
 
-- 产品语义中，“可编排的粗粒度单元”统一称为 **Capability / 能力**。
-- 历史代码、接口和数据库中仍可能出现 `skill`、`skills`、`skill_draft` 等命名，这是 legacy storage/API naming。
-- `ai-skills-service` 主要承载知识检索、扫描与语义基础能力，模块名暂不强制 rename。
-
-## 参与贡献
-
-欢迎通过 Issue 反馈企业 AI 落地场景、使用问题和改进建议，也欢迎提交 Pull Request。贡献前可以先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 产品语义中，可编排、可治理的粗粒度业务单元统一称为 **Capability / 能力**。
+- 历史代码、接口和数据表中仍可能出现 `skill`、`skills`、`skill_draft`、`skill_interaction` 等命名，这是 legacy storage/API naming。
+- `ai-skills-service` 主要承载知识检索、扫描和语义基础能力，模块名暂不强制 rename。
 
 ## 交流
 
-- 如果你也在做 Java + AI、企业 AI 中台、Agent 治理平台，欢迎交流。
+如果你也在做 Java + AI、企业 AI 中台、Agent 治理平台，欢迎交流：
+
 - QQ 群：1073839193
 
 ## 开源协议
