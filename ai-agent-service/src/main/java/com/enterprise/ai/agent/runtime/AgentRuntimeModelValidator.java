@@ -2,11 +2,15 @@ package com.enterprise.ai.agent.runtime;
 
 import com.enterprise.ai.agent.agent.AgentDefinition;
 import com.enterprise.ai.agent.client.ModelServiceClient;
+import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.graph.GraphSpec;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -22,6 +26,9 @@ public class AgentRuntimeModelValidator {
         AgentDefinition definition = request == null ? null : request.getAgentDefinition();
         String modelInstanceId = definition == null ? null : definition.getModelInstanceId();
         if (modelInstanceId == null || modelInstanceId.isBlank()) {
+            if (!requiresModelInstance(definition)) {
+                return null;
+            }
             throw new IllegalStateException("modelInstanceId is required for runtime selection");
         }
 
@@ -51,6 +58,45 @@ public class AgentRuntimeModelValidator {
 
     private static String normalize(String value) {
         return nullToEmpty(value).trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean requiresModelInstance(AgentDefinition definition) {
+        if (definition == null) {
+            return false;
+        }
+        String runtimeType = normalize(definition.getRuntimeType());
+        if (!AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE.equals(runtimeType)) {
+            return true;
+        }
+        GraphSpec graph = definition.getGraphSpec();
+        List<GraphSpec.Node> nodes = graph == null || graph.getNodes() == null ? List.of() : graph.getNodes();
+        return nodes.stream().anyMatch(this::nodeRequiresModel);
+    }
+
+    private boolean nodeRequiresModel(GraphSpec.Node node) {
+        if (node == null) {
+            return false;
+        }
+        String type = AgentGraphNodeType.normalize(node.getType());
+        if ("LLM".equals(type)) {
+            return true;
+        }
+        if ("PARAMETER_EXTRACT".equals(type)) {
+            return "LLM".equals(normalize(text(config(node).get("extractMode"))));
+        }
+        return false;
+    }
+
+    private Map<String, Object> config(GraphSpec.Node node) {
+        return node == null || node.getConfig() == null ? Map.of() : node.getConfig();
+    }
+
+    private String text(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        return StringUtils.hasText(text) ? text : "";
     }
 
     private static String nullToEmpty(String value) {

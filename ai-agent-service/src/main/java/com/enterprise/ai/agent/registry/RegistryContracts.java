@@ -21,6 +21,9 @@ public final class RegistryContracts {
             String contextPath,
             String appKey,
             String appSecret,
+            List<String> allowedOrigins,
+            List<String> allowedAgentIds,
+            Integer tokenTtlSeconds,
             Map<String, Object> metadata
     ) {
     }

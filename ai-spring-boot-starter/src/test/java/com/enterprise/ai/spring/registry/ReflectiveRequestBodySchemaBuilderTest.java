@@ -4,6 +4,8 @@ import com.enterprise.ai.skill.AiParam;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -52,6 +54,18 @@ class ReflectiveRequestBodySchemaBuilderTest {
         assertEquals("ex1", id.metadata().get("example"));
     }
 
+    @Test
+    void jdkDateTypesStayScalarOnJava17() {
+        SdkDescriptionSourceSettingsHolder holder = new SdkDescriptionSourceSettingsHolder();
+        RuntimeCapabilityMetadataResolver resolver = new RuntimeCapabilityMetadataResolver(holder);
+        ReflectiveRequestBodySchemaBuilder builder = new ReflectiveRequestBodySchemaBuilder(resolver);
+        List<EafCapabilityParameter> rows = builder.expand(DateBody.class);
+
+        assertEquals(2, rows.size());
+        assertTrue(rows.stream().anyMatch(r -> "bizDate".equals(r.name()) && r.children().isEmpty()));
+        assertTrue(rows.stream().anyMatch(r -> "createdAt".equals(r.name()) && r.children().isEmpty()));
+    }
+
     static class RootDto {
         @JsonProperty("renamedTitle")
         String title;
@@ -69,5 +83,10 @@ class ReflectiveRequestBodySchemaBuilderTest {
     static class AnnotatedLeaf {
         @AiParam(description = "业务主键", required = true, example = "ex1")
         String id;
+    }
+
+    static class DateBody {
+        LocalDate bizDate;
+        Date createdAt;
     }
 }

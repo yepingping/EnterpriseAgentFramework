@@ -7,6 +7,7 @@ import java.util.Map;
 public record RuntimeRegistryEntry(
         String id,
         String source,
+        String runtimeRole,
         String runtimeType,
         String displayName,
         String description,

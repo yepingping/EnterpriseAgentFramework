@@ -24,7 +24,6 @@
             <el-icon><DataAnalysis /></el-icon>
             <span class="menu-label">
               <span class="menu-cn">概览</span>
-              <span class="menu-en">Dashboard</span>
             </span>
           </el-menu-item>
 
@@ -34,25 +33,21 @@
               <el-icon><Connection /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">注册中心</span>
-                <span class="menu-en">Registry</span>
               </span>
             </template>
             <el-menu-item index="/registry/projects">
               <span class="menu-label leaf">
                 <span class="menu-cn">项目管理</span>
-                <span class="menu-en">Projects</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/registry/capability-sync">
               <span class="menu-label leaf">
                 <span class="menu-cn">能力变更评审</span>
-                <span class="menu-en">Capability Review</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/registry/runtimes">
               <span class="menu-label leaf">
                 <span class="menu-cn">Runtime 纳管</span>
-                <span class="menu-en">Runtimes</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -62,7 +57,6 @@
             <el-icon><Cpu /></el-icon>
             <span class="menu-label">
               <span class="menu-cn">智能体</span>
-              <span class="menu-en">Agent</span>
             </span>
           </el-menu-item>
 
@@ -72,31 +66,26 @@
               <el-icon><Aim /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">能力内核</span>
-                <span class="menu-en">Kernel</span>
               </span>
             </template>
             <el-menu-item index="/capability">
               <span class="menu-label leaf">
                 <span class="menu-cn">能力模块</span>
-                <span class="menu-en">Modules</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/capability/compositions">
               <span class="menu-label leaf">
                 <span class="menu-cn">组合</span>
-                <span class="menu-en">Compositions</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/capability/tools">
               <span class="menu-label leaf">
                 <span class="menu-cn">工具</span>
-                <span class="menu-en">Tools</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/capability/interactions">
               <span class="menu-label leaf">
                 <span class="menu-cn">交互</span>
-                <span class="menu-en">Interactions</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -107,25 +96,21 @@
               <el-icon><SetUp /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">工具</span>
-                <span class="menu-en">Tool</span>
               </span>
             </template>
             <el-menu-item index="/tool">
               <span class="menu-label leaf">
                 <span class="menu-cn">工具列表</span>
-                <span class="menu-en">Tool List</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/tool/retrieval">
               <span class="menu-label leaf">
                 <span class="menu-cn">工具检索测试</span>
-                <span class="menu-en">Retrieval Test</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/settings/tool-acl">
               <span class="menu-label leaf">
                 <span class="menu-cn">工具权限</span>
-                <span class="menu-en">Tool ACL</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -138,31 +123,26 @@
               <el-icon><Collection /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">知识检索</span>
-                <span class="menu-en">Knowledge</span>
               </span>
             </template>
             <el-menu-item index="/knowledge">
               <span class="menu-label leaf">
                 <span class="menu-cn">知识库管理</span>
-                <span class="menu-en">Knowledge Bases</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/knowledge/import">
               <span class="menu-label leaf">
                 <span class="menu-cn">文件入库</span>
-                <span class="menu-en">Import</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/retrieval">
               <span class="menu-label leaf">
                 <span class="menu-cn">检索测试</span>
-                <span class="menu-en">Retrieval</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/biz-index">
               <span class="menu-label leaf">
                 <span class="menu-cn">业务索引</span>
-                <span class="menu-en">Business Index</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -173,19 +153,16 @@
               <el-icon><Coin /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">模型管理</span>
-                <span class="menu-en">Models</span>
               </span>
             </template>
             <el-menu-item index="/model/instances">
               <span class="menu-label leaf">
                 <span class="menu-cn">模型实例</span>
-                <span class="menu-en">Instances</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/model/playground">
               <span class="menu-label leaf">
                 <span class="menu-cn">模型调试台</span>
-                <span class="menu-en">Playground</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -198,102 +175,96 @@
               <el-icon><Share /></el-icon>
               <span class="menu-label">
                 <span class="menu-cn">对外开放</span>
-                <span class="menu-en">Open API</span>
               </span>
             </template>
             <el-menu-item index="/mcp/visibility">
               <span class="menu-label leaf">
                 <span class="menu-cn">暴露白名单</span>
-                <span class="menu-en">MCP Visibility</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/mcp/clients">
               <span class="menu-label leaf">
                 <span class="menu-cn">客户端凭证</span>
-                <span class="menu-en">MCP Clients</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/mcp/monitor">
               <span class="menu-label leaf">
                 <span class="menu-cn">调用流水</span>
-                <span class="menu-en">MCP Monitor</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/mcp/onboarding">
               <span class="menu-label leaf">
                 <span class="menu-cn">接入向导</span>
-                <span class="menu-en">MCP Onboarding</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/a2a/endpoints">
               <span class="menu-label leaf">
                 <span class="menu-cn">智能体暴露</span>
-                <span class="menu-en">A2A Endpoints</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/a2a/monitor">
               <span class="menu-label leaf">
                 <span class="menu-cn">会话监控</span>
-                <span class="menu-en">A2A Monitor</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
 
-          <!-- 9 治理与运维 -->
-          <el-sub-menu index="/domain-group">
+          <!-- 9 用户管理 -->
+          <el-sub-menu index="/user-mgmt-group">
             <template #title>
-              <el-icon><Compass /></el-icon>
+              <el-icon><User /></el-icon>
               <span class="menu-label">
-                <span class="menu-cn">治理运维</span>
-                <span class="menu-en">Governance</span>
+                <span class="menu-cn">用户管理</span>
               </span>
             </template>
-            <el-menu-item index="/domain">
-              <span class="menu-label leaf">
-                <span class="menu-cn">领域定义</span>
-                <span class="menu-en">Domains</span>
-              </span>
-            </el-menu-item>
             <el-menu-item index="/settings/platform-users">
               <span class="menu-label leaf">
                 <span class="menu-cn">平台用户</span>
-                <span class="menu-en">Platform Users</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/settings/business-users">
               <span class="menu-label leaf">
                 <span class="menu-cn">业务用户</span>
-                <span class="menu-en">Business Users</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/settings/auth-providers">
               <span class="menu-label leaf">
                 <span class="menu-cn">认证源</span>
-                <span class="menu-en">Auth Providers</span>
+              </span>
+            </el-menu-item>
+          </el-sub-menu>
+
+          <!-- 10 治理与运维 -->
+          <el-sub-menu index="/domain-group">
+            <template #title>
+              <el-icon><Compass /></el-icon>
+              <span class="menu-label">
+                <span class="menu-cn">治理运维</span>
+              </span>
+            </template>
+            <el-menu-item index="/domain">
+              <span class="menu-label leaf">
+                <span class="menu-cn">领域定义</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/settings/embed-ops">
               <span class="menu-label leaf">
                 <span class="menu-cn">嵌入审计</span>
-                <span class="menu-en">Embed Ops</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/runops">
               <span class="menu-label leaf">
                 <span class="menu-cn">运行中心</span>
-                <span class="menu-en">RunOps</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/domain/board">
               <span class="menu-label leaf">
                 <span class="menu-cn">归属画布</span>
-                <span class="menu-en">Assignment Board</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/domain/classifier-test">
               <span class="menu-label leaf">
                 <span class="menu-cn">分类器测试</span>
-                <span class="menu-en">Classifier Test</span>
               </span>
             </el-menu-item>
           </el-sub-menu>
@@ -369,8 +340,26 @@ const { theme, toggleTheme } = useTheme()
 const route = useRoute()
 const projectStore = useProjectStore()
 
-/** 默认展开的侧边栏分组，可按需填入 index，如 '/registry-group' */
-const defaultOpenMenuGroups: string[] = []
+/** 进入子路由时自动展开对应侧边栏分组 */
+const defaultOpenMenuGroups = computed(() => {
+  const path = route.path
+  const open: string[] = []
+  if (
+    path.startsWith('/settings/platform-users')
+    || path.startsWith('/settings/business-users')
+    || path.startsWith('/settings/auth-providers')
+  ) {
+    open.push('/user-mgmt-group')
+  }
+  if (
+    path.startsWith('/domain')
+    || path.startsWith('/runops')
+    || path.startsWith('/settings/embed-ops')
+  ) {
+    open.push('/domain-group')
+  }
+  return open
+})
 
 const activeMenu = computed(() => {
   const path = route.path
@@ -542,18 +531,6 @@ watch(
   z-index: 1;
   border-bottom: 1px solid rgba(148, 163, 184, 0.10);
 
-  &::after {
-    content: 'Enterprise AI';
-    position: absolute;
-    left: 72px;
-    bottom: 13px;
-    font-size: 10px;
-    line-height: 1;
-    font-weight: 700;
-    color: rgba(148, 163, 184, 0.64);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
 }
 
 .logo-icon-wrap {
@@ -819,15 +796,7 @@ watch(
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-}
-
-.menu-cn,
-.menu-en {
-  display: block;
-  min-width: 0;
+  align-items: center;
 }
 
 .menu-cn {
@@ -836,42 +805,8 @@ watch(
   font-weight: 700;
 }
 
-.menu-en {
-  color: rgba(148, 163, 184, 0.72);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: none;
-}
-
-.menu-label.leaf {
-  gap: 2px;
-
-  .menu-cn {
-    font-size: 12.5px;
-    font-weight: 700;
-  }
-
-  .menu-en {
-    font-size: 9.5px;
-    color: rgba(148, 163, 184, 0.64);
-  }
-}
-
-.sidebar-menu {
-  :deep(.el-menu-item:hover),
-  :deep(.el-sub-menu__title:hover),
-  :deep(.el-sub-menu.is-opened > .el-sub-menu__title) {
-    .menu-en {
-      color: rgba(219, 234, 254, 0.76);
-    }
-  }
-
-  :deep(.el-menu-item.is-active) {
-    .menu-en {
-      color: rgba(255, 255, 255, 0.78);
-    }
-  }
+.menu-label.leaf .menu-cn {
+  font-size: 12.5px;
 }
 
 .topbar {

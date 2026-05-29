@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">Runtime Control Plane</p>
         <h1>Runtime 纳管</h1>
-        <p class="hero-desc">统一查看中台内置 Runtime Adapter 与业务系统 SDK 心跳实例，作为后续本地 / 混合运行治理入口。</p>
+        <p class="hero-desc">统一查看中台 Agent Runtime 与业务系统 Capability Host，区分 JDK17 运行侧和 JDK8 接入侧。</p>
       </div>
       <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadRuntimes">刷新</el-button>
     </section>
@@ -26,18 +26,31 @@
           <div class="filters">
             <el-select v-model="sourceFilter" clearable placeholder="来源" style="width: 150px">
               <el-option label="平台内置" value="PLATFORM" />
-              <el-option label="业务实例" value="PROJECT_INSTANCE" />
+              <el-option label="业务接入" value="PROJECT_INSTANCE" />
+            </el-select>
+            <el-select v-model="roleFilter" clearable placeholder="角色" style="width: 170px">
+              <el-option
+                v-for="item in RUNTIME_ROLE_SELECT_OPTIONS"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
             <el-select v-model="placementFilter" clearable placeholder="运行位置" style="width: 150px">
-              <el-option label="CENTRAL" value="CENTRAL" />
-              <el-option label="EMBEDDED" value="EMBEDDED" />
-              <el-option label="HYBRID" value="HYBRID" />
+              <el-option
+                v-for="item in RUNTIME_PLACEMENT_SELECT_OPTIONS"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
             <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 150px">
-              <el-option label="ONLINE" value="ONLINE" />
-              <el-option label="OFFLINE" value="OFFLINE" />
-              <el-option label="DISABLED" value="DISABLED" />
-              <el-option label="STALE" value="STALE" />
+              <el-option
+                v-for="item in INSTANCE_STATUS_SELECT_OPTIONS"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
           </div>
         </div>
@@ -55,33 +68,46 @@
         <el-table-column label="来源" width="130">
           <template #default="{ row }">
             <el-tag :type="row.source === 'PLATFORM' ? 'primary' : 'success'" effect="plain">
-              {{ row.source === 'PLATFORM' ? '平台内置' : '业务实例' }}
+              {{ row.source === 'PLATFORM' ? '平台内置' : '业务接入' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="runtimeRole" label="角色" width="150">
+          <template #default="{ row }">
+            <el-tag :type="row.runtimeRole === 'CAPABILITY_HOST' ? 'success' : 'primary'" effect="plain">
+              {{ formatRuntimeRoleLabel(row.runtimeRole) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="runtimePlacement" label="运行位置" width="130">
           <template #default="{ row }">
-            <el-tag effect="plain">{{ row.runtimePlacement }}</el-tag>
+            <el-tag effect="plain">{{ formatRuntimePlacementLabel(row.runtimePlacement) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="130">
           <template #default="{ row }">
             <span class="status-pill" :class="row.status.toLowerCase()">
               <i />
-              {{ row.status }}
+              {{ formatInstanceStatusLabel(row.status) }}
             </span>
           </template>
         </el-table-column>
         <el-table-column label="能力" min-width="280">
           <template #default="{ row }">
             <div class="capability-tags">
-              <el-tag v-if="row.supportsGraph" size="small" type="warning" effect="plain">Graph</el-tag>
-              <el-tag v-if="row.supportsTools" size="small" type="info" effect="plain">Tool</el-tag>
-              <el-tag v-if="row.supportsAutonomous" size="small" type="success" effect="plain">Autonomous</el-tag>
-              <el-tag v-if="row.supportsWorkflow" size="small" type="primary" effect="plain">Workflow</el-tag>
-              <el-tag v-if="row.supportsEmbeddedExecution" size="small" effect="plain">Embedded</el-tag>
-              <el-tag v-if="row.supportsHybridExecution" size="small" effect="plain">Hybrid</el-tag>
-              <span v-if="!hasCapability(row)" class="muted">-</span>
+              <el-tag
+                v-for="feat in formatRuntimeFeatureLabels(row)"
+                :key="feat"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                {{ feat }}
+              </el-tag>
+              <el-tag size="small" type="success" effect="plain">
+                {{ formatRuntimeTypeLabel(row.runtimeType) }}
+              </el-tag>
+              <span v-if="!formatRuntimeFeatureLabels(row).length && !row.runtimeType" class="muted">-</span>
             </div>
           </template>
         </el-table-column>
@@ -91,7 +117,7 @@
               <strong>{{ row.projectCode || '-' }}</strong>
               <span>{{ row.instanceId || '-' }}</span>
             </div>
-            <span v-else class="muted">平台 Runtime</span>
+            <span v-else class="muted">平台 Agent Runtime</span>
           </template>
         </el-table-column>
         <el-table-column label="地址" min-width="220" show-overflow-tooltip>
@@ -204,6 +230,16 @@ import {
 import { listRuntimeRegistry } from '@/api/runtime'
 import type { RuntimeRegistryEntry } from '@/types/agent'
 import type { ProjectInstance } from '@/types/registry'
+import {
+  formatInstanceStatusLabel,
+  formatRuntimeFeatureLabels,
+  formatRuntimePlacementLabel,
+  formatRuntimeRoleLabel,
+  formatRuntimeTypeLabel,
+  INSTANCE_STATUS_SELECT_OPTIONS,
+  RUNTIME_PLACEMENT_SELECT_OPTIONS,
+  RUNTIME_ROLE_SELECT_OPTIONS,
+} from '@/utils/registryLabels'
 
 const router = useRouter()
 const loading = ref(false)
@@ -213,6 +249,7 @@ const policyDrawerVisible = ref(false)
 const selectedRuntime = ref<RuntimeRegistryEntry | null>(null)
 const runtimes = ref<RuntimeRegistryEntry[]>([])
 const sourceFilter = ref('')
+const roleFilter = ref('')
 const placementFilter = ref('')
 const statusFilter = ref('')
 const policyForm = ref({
@@ -226,6 +263,7 @@ const policyForm = ref({
 const filteredRuntimes = computed(() =>
   runtimes.value.filter((item) => {
     if (sourceFilter.value && item.source !== sourceFilter.value) return false
+    if (roleFilter.value && item.runtimeRole !== roleFilter.value) return false
     if (placementFilter.value && item.runtimePlacement !== placementFilter.value) return false
     if (statusFilter.value && item.status !== statusFilter.value) return false
     return true
@@ -236,8 +274,8 @@ const metrics = computed(() => {
   const all = runtimes.value
   return [
     { label: '全部 Runtime', value: all.length },
-    { label: '平台内置', value: all.filter((item) => item.source === 'PLATFORM').length },
-    { label: '业务实例', value: all.filter((item) => item.source === 'PROJECT_INSTANCE').length },
+    { label: 'Agent Runtime', value: all.filter((item) => item.runtimeRole === 'AGENT_RUNTIME').length },
+    { label: 'Capability Host', value: all.filter((item) => item.runtimeRole === 'CAPABILITY_HOST').length },
     { label: '在线', value: all.filter((item) => item.status === 'ONLINE').length },
   ]
 })
@@ -255,15 +293,6 @@ async function loadRuntimes() {
   } finally {
     loading.value = false
   }
-}
-
-function hasCapability(row: RuntimeRegistryEntry) {
-  return row.supportsGraph ||
-    row.supportsTools ||
-    row.supportsAutonomous ||
-    row.supportsWorkflow ||
-    row.supportsEmbeddedExecution ||
-    row.supportsHybridExecution
 }
 
 function openProject(row: RuntimeRegistryEntry) {
@@ -289,7 +318,7 @@ async function setRuntimeStatus(row: RuntimeRegistryEntry, status: ProjectInstan
       instanceId: row.instanceId,
       status,
     })
-    ElMessage.success(status === 'DISABLED' ? 'Runtime 实例已禁用' : 'Runtime 实例已启用')
+    ElMessage.success(status === 'DISABLED' ? '实例已禁用' : '实例已启用')
     await loadRuntimes()
   } catch (error) {
     ElMessage.error((error as Error).message || '更新 Runtime 实例状态失败')

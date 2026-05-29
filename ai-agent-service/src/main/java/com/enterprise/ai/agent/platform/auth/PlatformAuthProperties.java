@@ -31,7 +31,7 @@ public class PlatformAuthProperties {
     public static class BootstrapAdmin {
         private String username = "admin";
         private String password = "admin123";
-        private String displayName = "Platform Admin";
+        private String displayName = "平台管理员";
     }
 
     @Data

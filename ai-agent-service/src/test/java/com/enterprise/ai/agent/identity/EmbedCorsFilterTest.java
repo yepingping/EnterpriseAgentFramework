@@ -34,7 +34,7 @@ class EmbedCorsFilterTest {
 
         assertEquals(204, response.getStatus());
         assertEquals("https://orders.corp.example.com", response.getHeader("Access-Control-Allow-Origin"));
-        assertEquals("Authorization,Content-Type,Accept,X-EAF-App-Key,X-EAF-Timestamp,X-EAF-Nonce,X-EAF-Signature",
+        assertEquals("Authorization,Content-Type,Accept,X-ReachAI-App-Key,X-ReachAI-Timestamp,X-ReachAI-Nonce,X-ReachAI-Signature,X-EAF-App-Key,X-EAF-Timestamp,X-EAF-Nonce,X-EAF-Signature",
                 response.getHeader("Access-Control-Allow-Headers"));
     }
 

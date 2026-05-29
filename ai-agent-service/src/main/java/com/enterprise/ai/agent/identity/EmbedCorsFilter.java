@@ -43,7 +43,7 @@ public class EmbedCorsFilter extends OncePerRequestFilter {
             response.setHeader("Access-Control-Allow-Credentials", "false");
             response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
             response.setHeader("Access-Control-Allow-Headers",
-                    "Authorization,Content-Type,Accept,X-EAF-App-Key,X-EAF-Timestamp,X-EAF-Nonce,X-EAF-Signature");
+                    "Authorization,Content-Type,Accept,X-ReachAI-App-Key,X-ReachAI-Timestamp,X-ReachAI-Nonce,X-ReachAI-Signature,X-EAF-App-Key,X-EAF-Timestamp,X-EAF-Nonce,X-EAF-Signature");
             response.setHeader("Access-Control-Expose-Headers", "Content-Type");
             response.setHeader("Access-Control-Max-Age", "600");
         }

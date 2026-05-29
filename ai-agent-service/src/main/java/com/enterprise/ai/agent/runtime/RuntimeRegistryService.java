@@ -41,6 +41,7 @@ public class RuntimeRegistryService {
         return new RuntimeRegistryEntry(
                 "platform:" + runtimeType,
                 "PLATFORM",
+                "AGENT_RUNTIME",
                 runtimeType,
                 c.getDisplayName(),
                 c.getDescription(),
@@ -82,6 +83,7 @@ public class RuntimeRegistryService {
             runtimeTypes = List.of("EMBEDDED_RUNTIME");
         }
         String placement = firstText(asString(metadata.get("runtimePlacement")), "EMBEDDED").toUpperCase(Locale.ROOT);
+        String runtimeRole = runtimeRole(placement, runtimeTypes, metadata);
         String status = firstText(entity.getStatus(), "UNKNOWN").toUpperCase(Locale.ROOT);
         boolean available = "ONLINE".equals(status);
         boolean supportsGraph = bool(metadata.get("supportsGraph"));
@@ -92,9 +94,10 @@ public class RuntimeRegistryService {
         return new RuntimeRegistryEntry(
                 "instance:" + entity.getProjectCode() + ":" + entity.getInstanceId(),
                 "PROJECT_INSTANCE",
+                runtimeRole,
                 runtimeTypes.get(0),
-                entity.getProjectCode() + " / " + entity.getHost(),
-                "业务系统 SDK 心跳上报的 Runtime 实例",
+                displayName(entity, runtimeRole),
+                description(runtimeRole),
                 placement,
                 status,
                 available,
@@ -121,6 +124,37 @@ public class RuntimeRegistryService {
                 runtimeTypes,
                 metadata
         );
+    }
+
+    private String runtimeRole(String placement, List<String> runtimeTypes, Map<String, Object> metadata) {
+        String explicit = asString(metadata.get("runtimeRole"));
+        if (explicit != null && !explicit.isBlank()) {
+            return explicit.trim().toUpperCase(Locale.ROOT);
+        }
+        if ("CAPABILITY_HOST".equals(placement)) {
+            return "CAPABILITY_HOST";
+        }
+        for (String runtimeType : runtimeTypes) {
+            String normalized = runtimeType == null ? "" : runtimeType.toUpperCase(Locale.ROOT);
+            if (normalized.contains("CAPABILITY_HOST")) {
+                return "CAPABILITY_HOST";
+            }
+        }
+        return "AGENT_RUNTIME";
+    }
+
+    private String displayName(ProjectInstanceEntity entity, String runtimeRole) {
+        if ("CAPABILITY_HOST".equals(runtimeRole)) {
+            return "Capability Host";
+        }
+        return entity.getProjectCode() + " / " + entity.getHost();
+    }
+
+    private String description(String runtimeRole) {
+        if ("CAPABILITY_HOST".equals(runtimeRole)) {
+            return "业务系统通过 ReachAI JDK8 接入 SDK 暴露的 Capability Host";
+        }
+        return "业务系统 SDK 心跳上报的 Agent Runtime 实例";
     }
 
     private Map<String, Object> parseMetadata(String json) {

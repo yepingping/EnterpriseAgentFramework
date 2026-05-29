@@ -9,7 +9,8 @@ export interface CapabilityReference {
 }
 
 export type AgentRuntimeType = 'AGENTSCOPE' | 'LANGGRAPH4J' | 'OPENAI_AGENTS' | 'CURSOR_CODE_AGENT'
-export type AgentRuntimePlacement = 'CENTRAL' | 'EMBEDDED' | 'HYBRID'
+export type AgentRuntimePlacement = 'CENTRAL' | 'EMBEDDED' | 'HYBRID' | 'CAPABILITY_HOST'
+export type RuntimeRegistryRole = 'AGENT_RUNTIME' | 'CAPABILITY_HOST' | string
 export type AgentMode = 'AUTONOMOUS' | 'WORKFLOW' | 'CODE' | 'EXTERNAL'
 export type AgentConfigurationSurface = 'FORM' | 'STUDIO' | 'CODE_WORKSPACE' | 'EXTERNAL_CONSOLE' | string
 
@@ -327,6 +328,7 @@ export interface AgentRuntimeValidationResult {
 export interface RuntimeRegistryEntry {
   id: string
   source: 'PLATFORM' | 'PROJECT_INSTANCE'
+  runtimeRole: RuntimeRegistryRole
   runtimeType: string
   displayName?: string
   description?: string

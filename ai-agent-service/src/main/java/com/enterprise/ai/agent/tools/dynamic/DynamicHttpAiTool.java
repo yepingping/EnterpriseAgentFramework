@@ -35,6 +35,9 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
 
     private static final TypeReference<List<ToolDefinitionParameter>> PARAMETER_LIST_TYPE = new TypeReference<>() {
     };
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+    };
+    private static final String REACHAI_CAPABILITY_INVOKE_PROTOCOL = "REACHAI_CAPABILITY_HTTP";
 
     /**
      * 每次调用附加的 HTTP 头与查询参数（例如扫描项目级 API Key）。
@@ -144,7 +147,9 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
             methodName = "GET";
         }
         HttpMethod httpMethod = HttpMethod.valueOf(methodName);
-        Object requestBody = Objects.requireNonNull(shouldSendBody(httpMethod) ? normalizeBody(body) : Map.of());
+        Object requestBody = Objects.requireNonNull(shouldSendBody(httpMethod)
+                ? resolveRequestBody(safeArgs, body)
+                : Map.of());
 
         try {
             var spec = restClient.method(httpMethod).uri(uri);
@@ -173,17 +178,22 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
             return Map.of();
         }
         Map<String, String> headers = new LinkedHashMap<>();
-        putHeader(headers, "X-EAF-Project-Code", context.getProjectCode());
-        putHeader(headers, "X-EAF-Agent-Id", firstNonBlank(context.getAgentId(), context.getAgentName()));
-        putHeader(headers, "X-EAF-Trace-Id", context.getTraceId());
-        putHeader(headers, "X-EAF-Session-Id", context.getSessionId());
-        putHeader(headers, "X-EAF-User-Id", firstNonBlank(context.getExternalUserId(), context.getUserId()));
-        putHeader(headers, "X-EAF-Global-User-Id", context.getGlobalUserId());
-        putHeader(headers, "X-EAF-Roles", joinRoles(context.getRoles()));
-        putHeader(headers, "X-EAF-Tenant-Id", context.getTenantId());
-        putHeader(headers, "X-EAF-App-Id", context.getAppId());
-        putHeader(headers, "X-EAF-Page-Instance-Id", context.getPageInstanceId());
+        putContextHeader(headers, "Project-Code", context.getProjectCode());
+        putContextHeader(headers, "Agent-Id", firstNonBlank(context.getAgentId(), context.getAgentName()));
+        putContextHeader(headers, "Trace-Id", context.getTraceId());
+        putContextHeader(headers, "Session-Id", context.getSessionId());
+        putContextHeader(headers, "User-Id", firstNonBlank(context.getExternalUserId(), context.getUserId()));
+        putContextHeader(headers, "Global-User-Id", context.getGlobalUserId());
+        putContextHeader(headers, "Roles", joinRoles(context.getRoles()));
+        putContextHeader(headers, "Tenant-Id", context.getTenantId());
+        putContextHeader(headers, "App-Id", context.getAppId());
+        putContextHeader(headers, "Page-Instance-Id", context.getPageInstanceId());
         return headers;
+    }
+
+    private void putContextHeader(Map<String, String> headers, String suffix, String value) {
+        putHeader(headers, "X-ReachAI-" + suffix, value);
+        putHeader(headers, "X-EAF-" + suffix, value);
     }
 
     private void putHeader(Map<String, String> headers, String name, String value) {
@@ -253,6 +263,29 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
             }
         }
         return body == null ? Map.of() : body;
+    }
+
+    private Object resolveRequestBody(Map<String, Object> safeArgs, Object body) {
+        if (isReachAiCapabilityHostProtocol()) {
+            return safeArgs;
+        }
+        return normalizeBody(body);
+    }
+
+    private boolean isReachAiCapabilityHostProtocol() {
+        String metadataJson = definition.getCapabilityMetadataJson();
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return false;
+        }
+        try {
+            Map<String, Object> metadata = objectMapper.readValue(metadataJson, MAP_TYPE);
+            Object invokeProtocol = metadata.get("invokeProtocol");
+            return invokeProtocol != null
+                    && REACHAI_CAPABILITY_INVOKE_PROTOCOL.equalsIgnoreCase(invokeProtocol.toString());
+        } catch (Exception ex) {
+            log.warn("[DynamicHttpAiTool] capability metadata parse failed: name={}", definition.getName(), ex);
+            return false;
+        }
     }
 
     private List<ToolDefinitionParameter> parseParameters(String parametersJson) {

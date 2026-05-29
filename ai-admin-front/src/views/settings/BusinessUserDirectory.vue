@@ -18,9 +18,12 @@
       />
       <el-input v-model="filters.tenantId" clearable placeholder="租户，如 default" @keyup.enter="search" />
       <el-select v-model="filters.status" clearable placeholder="状态" style="width: 140px">
-        <el-option label="ACTIVE" value="ACTIVE" />
-        <el-option label="DISABLED" value="DISABLED" />
-        <el-option label="DELETED" value="DELETED" />
+        <el-option
+          v-for="item in BUSINESS_USER_STATUS_SELECT_OPTIONS"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value"
+        />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
     </div>
@@ -41,7 +44,7 @@
       <el-table-column prop="tenantId" label="租户" width="110" />
       <el-table-column prop="status" label="状态" width="110">
         <template #default="{ row }">
-          <el-tag size="small" :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+          <CommonStatusTag :status="row.status" />
         </template>
       </el-table-column>
       <el-table-column label="外部身份" min-width="220">
@@ -58,7 +61,7 @@
         <template #default="{ row }">
           <div class="tag-list">
             <el-tag v-for="item in row.roleCodes" :key="item" size="small">
-              {{ item }}
+              {{ formatPlatformRoleLabel(item) }}
             </el-tag>
             <span v-if="!row.roleCodes?.length" class="muted">无</span>
           </div>
@@ -99,9 +102,12 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="editingUser.status">
-            <el-option label="ACTIVE" value="ACTIVE" />
-            <el-option label="DISABLED" value="DISABLED" />
-            <el-option label="DELETED" value="DELETED" />
+            <el-option
+              v-for="item in BUSINESS_USER_STATUS_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
       </el-form>
@@ -135,7 +141,7 @@
             <template #default="{ row }">
               <div class="tag-list">
                 <el-tag v-for="role in row.roles" :key="role.id" size="small">
-                  {{ role.roleCode }}
+                  {{ formatPlatformRoleLabel(role.roleCode, role.roleName) }}
                 </el-tag>
               </div>
             </template>
@@ -167,9 +173,12 @@
             </el-form-item>
             <el-form-item label="状态">
               <el-select v-model="identityForm.status">
-                <el-option label="ACTIVE" value="ACTIVE" />
-                <el-option label="DISABLED" value="DISABLED" />
-                <el-option label="DELETED" value="DELETED" />
+                <el-option
+                  v-for="item in BUSINESS_USER_STATUS_SELECT_OPTIONS"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
               </el-select>
             </el-form-item>
             <el-form-item>
@@ -187,6 +196,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
+import CommonStatusTag from '@/components/CommonStatusTag.vue'
+import { BUSINESS_USER_STATUS_SELECT_OPTIONS, formatPlatformRoleLabel } from '@/utils/uiLabels'
 import {
   listBusinessUserIdentities,
   listBusinessUsers,
@@ -225,13 +236,6 @@ const identityForm = reactive({
   status: 'ACTIVE',
   rolesRaw: '',
 })
-
-function statusTagType(status: string) {
-  if (status === 'ACTIVE') return 'success'
-  if (status === 'DISABLED') return 'warning'
-  if (status === 'DELETED') return 'danger'
-  return 'info'
-}
 
 async function reload() {
   loading.value = true

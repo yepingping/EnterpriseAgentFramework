@@ -2,9 +2,11 @@ package com.enterprise.ai.agent.runtime;
 
 import com.enterprise.ai.agent.agent.AgentDefinition;
 import com.enterprise.ai.agent.client.ModelServiceClient;
+import com.enterprise.ai.agent.graph.GraphSpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +19,25 @@ class AgentRuntimeModelValidatorTest {
         AgentRuntimeModelValidator validator = new AgentRuntimeModelValidator(client(instance("LLM", "ACTIVE", 200)));
 
         assertDoesNotThrow(() -> validator.validate(request("model-1"), capability("LLM")));
+    }
+
+    @Test
+    void skipsModelLookupWhenLangGraphDoesNotRequireLlm() {
+        AgentRuntimeModelValidator validator = new AgentRuntimeModelValidator(failingClient());
+        AgentRuntimeRequest request = AgentRuntimeRequest.builder()
+                .agentDefinition(AgentDefinition.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .graphSpec(GraphSpec.builder()
+                                .node(GraphSpec.Node.builder()
+                                        .id("search-action")
+                                        .type("PAGE_ACTION")
+                                        .config(Map.of("action", "search"))
+                                        .build())
+                                .build())
+                        .build())
+                .build();
+
+        assertDoesNotThrow(() -> validator.validate(request, capability("LLM")));
     }
 
     @Test
@@ -98,6 +119,25 @@ class AgentRuntimeModelValidatorTest {
             @Override
             public ModelInstanceResult getModelInstance(String id) {
                 return result;
+            }
+        };
+    }
+
+    private ModelServiceClient failingClient() {
+        return new ModelServiceClient() {
+            @Override
+            public ModelChatResult chat(ModelChatRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ModelEmbeddingResult embed(ModelEmbeddingRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ModelInstanceResult getModelInstance(String id) {
+                throw new AssertionError("model service should not be called for model-free graph");
             }
         };
     }

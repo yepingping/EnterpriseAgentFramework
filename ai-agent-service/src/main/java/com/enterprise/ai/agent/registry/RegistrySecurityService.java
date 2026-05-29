@@ -1,6 +1,7 @@
 package com.enterprise.ai.agent.registry;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -21,6 +23,7 @@ public class RegistrySecurityService {
     private static final long MAX_CLOCK_SKEW_SECONDS = 300;
 
     private final RegistryCredentialMapper credentialMapper;
+    private final ObjectMapper objectMapper;
 
     public void upsertCredential(Long projectId, String projectCode, String appKey, String appSecret) {
         if (!StringUtils.hasText(appKey) || !StringUtils.hasText(appSecret)) {
@@ -43,6 +46,34 @@ public class RegistrySecurityService {
         if (entity.getId() == null) {
             credentialMapper.insert(entity);
         } else {
+            credentialMapper.updateById(entity);
+        }
+    }
+
+    public void updateEmbedPolicy(String projectCode,
+                                  String appKey,
+                                  List<String> allowedOrigins,
+                                  List<String> allowedAgentIds,
+                                  Integer tokenTtlSeconds) {
+        RegistryCredentialEntity entity = findActiveCredential(projectCode, appKey);
+        if (entity == null) {
+            return;
+        }
+        boolean changed = false;
+        if (allowedOrigins != null && !allowedOrigins.isEmpty()) {
+            entity.setAllowedOriginsJson(writeJson(allowedOrigins));
+            changed = true;
+        }
+        if (allowedAgentIds != null && !allowedAgentIds.isEmpty()) {
+            entity.setAllowedAgentIdsJson(writeJson(allowedAgentIds));
+            changed = true;
+        }
+        if (tokenTtlSeconds != null && tokenTtlSeconds > 0) {
+            entity.setTokenTtlSeconds(tokenTtlSeconds);
+            changed = true;
+        }
+        if (changed) {
+            entity.setUpdatedAt(LocalDateTime.now());
             credentialMapper.updateById(entity);
         }
     }
@@ -151,6 +182,14 @@ public class RegistrySecurityService {
             return HexFormat.of().formatHex(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
             throw new IllegalStateException("签名计算失败", ex);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("embed policy json serialize failed", ex);
         }
     }
 

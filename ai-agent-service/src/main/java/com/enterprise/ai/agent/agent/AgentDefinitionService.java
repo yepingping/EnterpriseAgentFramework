@@ -121,7 +121,7 @@ public class AgentDefinitionService {
 
     @Transactional
     public AgentDefinition create(AgentDefinition def) {
-        def.setModelInstanceId(requireModelInstanceId(def.getModelInstanceId()));
+        def.setModelInstanceId(normalizeModelInstanceId(def));
         if (def.getId() == null || def.getId().isBlank()) {
             def.setId(UUID.randomUUID().toString().replace("-", "").substring(0, 12));
         }
@@ -190,7 +190,7 @@ public class AgentDefinitionService {
         }
 
         current.setUpdatedAt(LocalDateTime.now());
-        current.setModelInstanceId(requireModelInstanceId(current.getModelInstanceId()));
+        current.setModelInstanceId(normalizeModelInstanceId(current));
         mapper.updateById(toEntity(current));
         log.info("[AgentDef] 更新: id={}, name={}", id, current.getName());
         return current;
@@ -306,11 +306,44 @@ public class AgentDefinitionService {
         log.info("[AgentDef] 已生成 {} 个默认 Agent 定义（最小安全集合）", mapper.selectCount(null));
     }
 
-    private String requireModelInstanceId(String modelInstanceId) {
-        if (modelInstanceId == null || modelInstanceId.isBlank()) {
+    private String normalizeModelInstanceId(AgentDefinition definition) {
+        String modelInstanceId = definition == null ? null : definition.getModelInstanceId();
+        if (modelInstanceId != null && !modelInstanceId.isBlank()) {
+            return modelInstanceId.trim();
+        }
+        if (requiresModelInstance(definition)) {
             throw new IllegalArgumentException("modelInstanceId is required for agent definition");
         }
-        return modelInstanceId.trim();
+        return null;
+    }
+
+    private boolean requiresModelInstance(AgentDefinition definition) {
+        if (definition == null) {
+            return false;
+        }
+        String runtimeType = definition.getRuntimeType() == null ? "AGENTSCOPE" : definition.getRuntimeType().trim().toUpperCase(Locale.ROOT);
+        if (!"LANGGRAPH4J".equals(runtimeType)) {
+            return true;
+        }
+        GraphSpec graph = definition.getGraphSpec();
+        List<GraphSpec.Node> nodes = graph == null || graph.getNodes() == null ? List.of() : graph.getNodes();
+        return nodes.stream().anyMatch(this::nodeRequiresModel);
+    }
+
+    private boolean nodeRequiresModel(GraphSpec.Node node) {
+        if (node == null) {
+            return false;
+        }
+        String type = node.getType() == null ? "" : node.getType().trim().toUpperCase(Locale.ROOT);
+        if ("LLM".equals(type)) {
+            return true;
+        }
+        if ("PARAMETER_EXTRACT".equals(type)) {
+            Map<String, Object> config = node.getConfig() == null ? Map.of() : node.getConfig();
+            Object mode = config.get("extractMode");
+            return mode != null && "LLM".equals(String.valueOf(mode).trim().toUpperCase(Locale.ROOT));
+        }
+        return false;
     }
 
     // ------------------------------------------------------------ mapping

@@ -1,6 +1,6 @@
 package com.enterprise.ai.spring.registry;
 
-import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -56,8 +57,9 @@ public class EafRegistryAutoConfiguration {
     public EafRegistryClient eafRegistryClient(EafRegistryProperties properties,
                                                EafCapabilityScanner scanner,
                                                EafAgentGraphScanner graphScanner,
-                                               SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
-        return new EafRegistryClient(properties, scanner, graphScanner, descriptionSettingsHolder);
+                                               SdkDescriptionSourceSettingsHolder descriptionSettingsHolder,
+                                               Environment environment) {
+        return new EafRegistryClient(properties, scanner, graphScanner, descriptionSettingsHolder, environment);
     }
 
     @Bean
@@ -131,7 +133,7 @@ public class EafRegistryAutoConfiguration {
         return new EafRuntimeGovernanceEndpoint(client, properties);
     }
 
-    public static class EafRegistryHeartbeat {
+    public static class EafRegistryHeartbeat implements DisposableBean {
         private final EafRegistryClient client;
         private final EafRegistryProperties properties;
 
@@ -147,8 +149,8 @@ public class EafRegistryAutoConfiguration {
             }
         }
 
-        @PreDestroy
-        public void offline() {
+        @Override
+        public void destroy() {
             client.offline();
         }
     }

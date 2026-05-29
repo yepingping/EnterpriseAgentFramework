@@ -23,6 +23,7 @@ replay_pid*
 *.iml
 .vscode/
 .worktrees/
+.cursor/playwright-output/
 .classpath
 .project
 .settings/

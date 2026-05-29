@@ -16,6 +16,7 @@ import com.enterprise.ai.agent.registry.RegistryContracts.RegistryProjectRespons
 import com.enterprise.ai.agent.registry.RegistryContracts.RuntimeGovernancePolicyUpdateRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.SdkCapabilityDescriptionSettings;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,14 +32,10 @@ public class AiRegistryController {
 
     @PostMapping("/projects/register")
     public ResponseEntity<?> registerProject(@RequestBody ProjectRegisterRequest request,
-                                             @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                             @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                             @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                             @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                             @RequestHeader HttpHeaders headers) {
         try {
             if (request != null) {
-                securityService.verifyIfConfigured(request.projectCode(),
-                        new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+                securityService.verifyIfConfigured(request.projectCode(), signatureHeaders(headers));
             }
             RegistryProjectResponse response = registryService.registerProject(request);
             return ResponseEntity.ok(response);
@@ -50,13 +47,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/instances/heartbeat")
     public ResponseEntity<?> heartbeat(@PathVariable String projectCode,
                                        @RequestBody InstanceHeartbeatRequest request,
-                                       @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                       @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                       @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                       @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                       @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             return ResponseEntity.ok(registryService.heartbeat(projectCode, request));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
@@ -65,13 +58,9 @@ public class AiRegistryController {
 
     @GetMapping("/projects/{projectCode}/capability-description-settings")
     public ResponseEntity<?> getSdkCapabilityDescriptionSettings(@PathVariable String projectCode,
-                                                                 @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                                                 @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                                                 @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                                                 @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                                                 @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             SdkCapabilityDescriptionSettings body = registryService.getSdkCapabilityDescriptionSettings(projectCode);
             return ResponseEntity.ok(body);
         } catch (IllegalArgumentException ex) {
@@ -92,13 +81,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/instances/offline")
     public ResponseEntity<?> offline(@PathVariable String projectCode,
                                      @RequestBody InstanceOfflineRequest request,
-                                     @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                     @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                     @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                     @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                     @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             registryService.offline(projectCode, request == null ? null : request.instanceId());
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException ex) {
@@ -109,13 +94,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/capabilities/sync")
     public ResponseEntity<?> syncCapabilities(@PathVariable String projectCode,
                                               @RequestBody CapabilitySyncRequest request,
-                                              @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                              @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                              @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                              @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                              @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             CapabilitySyncResponse response = registryService.sync(projectCode, request);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
@@ -126,13 +107,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/agent-graphs/sync")
     public ResponseEntity<?> syncAgentGraphs(@PathVariable String projectCode,
                                              @RequestBody AgentGraphSyncRequest request,
-                                             @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                             @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                             @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                             @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                             @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             AgentGraphSyncResponse response = registryService.syncAgentGraphs(projectCode, request);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
@@ -143,13 +120,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/capabilities/diff")
     public ResponseEntity<?> diffCapabilities(@PathVariable String projectCode,
                                               @RequestBody CapabilitySyncRequest request,
-                                              @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                              @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                              @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                              @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                              @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             CapabilitySyncResponse response = registryService.diff(projectCode, request);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
@@ -160,13 +133,9 @@ public class AiRegistryController {
     @PostMapping("/projects/{projectCode}/capabilities/apply")
     public ResponseEntity<?> applyCapabilities(@PathVariable String projectCode,
                                                @RequestBody CapabilitySyncRequest request,
-                                               @RequestHeader(value = "X-EAF-App-Key", required = false) String appKey,
-                                               @RequestHeader(value = "X-EAF-Timestamp", required = false) String timestamp,
-                                               @RequestHeader(value = "X-EAF-Nonce", required = false) String nonce,
-                                               @RequestHeader(value = "X-EAF-Signature", required = false) String signature) {
+                                               @RequestHeader HttpHeaders headers) {
         try {
-            securityService.verifyIfConfigured(projectCode,
-                    new RegistrySecurityService.RegistrySignatureHeaders(appKey, timestamp, nonce, signature));
+            securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             CapabilitySyncRequest applyRequest = new CapabilitySyncRequest(
                     request == null ? null : request.syncId(),
                     request == null ? null : request.source(),
@@ -209,6 +178,26 @@ public class AiRegistryController {
     record InstanceOfflineRequest(String instanceId) {
     }
 
+    @PostMapping("/projects/{projectCode}/instances/purge-offline")
+    public ResponseEntity<?> purgeOfflineInstances(@PathVariable String projectCode,
+                                                   @RequestBody(required = false) PurgeOfflineRequest request) {
+        try {
+            int minIdleMinutes = request == null || request.minIdleMinutes() == null
+                    ? 0
+                    : request.minIdleMinutes();
+            int removed = registryService.purgeOfflineInstances(projectCode, minIdleMinutes);
+            return ResponseEntity.ok(new PurgeOfflineResponse(removed));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    record PurgeOfflineRequest(Integer minIdleMinutes) {
+    }
+
+    record PurgeOfflineResponse(int removed) {
+    }
+
     @PostMapping("/projects/{projectCode}/instances/status")
     public ResponseEntity<?> updateInstanceStatus(@PathVariable String projectCode,
                                                   @RequestBody InstanceStatusRequest request) {
@@ -238,5 +227,21 @@ public class AiRegistryController {
     }
 
     record ApiErrorResponse(String message) {
+    }
+
+    private RegistrySecurityService.RegistrySignatureHeaders signatureHeaders(HttpHeaders headers) {
+        return new RegistrySecurityService.RegistrySignatureHeaders(
+                firstHeader(headers, "X-ReachAI-App-Key", "X-EAF-App-Key"),
+                firstHeader(headers, "X-ReachAI-Timestamp", "X-EAF-Timestamp"),
+                firstHeader(headers, "X-ReachAI-Nonce", "X-EAF-Nonce"),
+                firstHeader(headers, "X-ReachAI-Signature", "X-EAF-Signature"));
+    }
+
+    private String firstHeader(HttpHeaders headers, String primary, String fallback) {
+        if (headers == null) {
+            return null;
+        }
+        String value = headers.getFirst(primary);
+        return value == null || value.isBlank() ? headers.getFirst(fallback) : value;
     }
 }

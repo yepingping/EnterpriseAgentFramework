@@ -99,7 +99,7 @@ eaf:
       bootstrap-admin:
         username: ${EAF_AUTH_LOCAL_ADMIN_USERNAME:admin}
         password: ${EAF_AUTH_LOCAL_ADMIN_PASSWORD:admin123}
-        display-name: ${EAF_AUTH_LOCAL_ADMIN_DISPLAY_NAME:Platform Admin}
+        display-name: ${EAF_AUTH_LOCAL_ADMIN_DISPLAY_NAME:平台管理员}
     header:
       enabled: ${EAF_AUTH_HEADER_ENABLED:false}
       username-header: ${EAF_AUTH_HEADER_USERNAME:X-EAF-User}

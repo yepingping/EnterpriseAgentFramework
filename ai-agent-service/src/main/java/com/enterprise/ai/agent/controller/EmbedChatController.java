@@ -430,10 +430,18 @@ public class EmbedChatController {
 
     private RegistrySecurityService.RegistrySignatureHeaders signatureHeaders(HttpServletRequest request) {
         return new RegistrySecurityService.RegistrySignatureHeaders(
-                request.getHeader("X-EAF-App-Key"),
-                request.getHeader("X-EAF-Timestamp"),
-                request.getHeader("X-EAF-Nonce"),
-                request.getHeader("X-EAF-Signature"));
+                firstHeader(request, "X-ReachAI-App-Key", "X-EAF-App-Key"),
+                firstHeader(request, "X-ReachAI-Timestamp", "X-EAF-Timestamp"),
+                firstHeader(request, "X-ReachAI-Nonce", "X-EAF-Nonce"),
+                firstHeader(request, "X-ReachAI-Signature", "X-EAF-Signature"));
+    }
+
+    private String firstHeader(HttpServletRequest request, String primary, String fallback) {
+        if (request == null) {
+            return null;
+        }
+        String value = request.getHeader(primary);
+        return StringUtils.hasText(value) ? value : request.getHeader(fallback);
     }
 
     private void ensureOriginAllowed(RegistryCredentialEntity credential, String origin) {

@@ -137,8 +137,8 @@
                   <el-option v-for="item in TRIGGER_MODES" :key="item.value" :label="item.label" :value="item.value" />
                 </el-select>
               </el-form-item>
-              <el-form-item v-if="form.runtimePlacement !== 'CENTRAL'" label="纳管实例" class="wide">
-                <el-select v-model="selectedRuntimeInstanceId" clearable filterable placeholder="选择 Embedded Runtime 实例">
+              <el-form-item v-if="form.runtimePlacement !== 'CENTRAL'" label="Agent Runtime 实例" class="wide">
+                <el-select v-model="selectedRuntimeInstanceId" clearable filterable placeholder="选择在线 Agent Runtime 实例">
                   <el-option
                     v-for="instance in availableRuntimeInstances"
                     :key="instance.instanceId"
@@ -410,7 +410,7 @@ const filteredLlmModelInstances = computed(() =>
   llmModelInstances.value.filter((item) => item.provider === selectedLlmProvider.value),
 )
 const availableRuntimeInstances = computed(() =>
-  runtimeInstances.value.filter((item) => item.status === 'ONLINE'),
+  runtimeInstances.value.filter((item) => item.status === 'ONLINE' && !isCapabilityHostInstance(item)),
 )
 const availableTools = computed(() =>
   toolOptions.value.filter((tool) => tool.enabled && tool.agentVisible),
@@ -491,7 +491,39 @@ function assetLabel(item: ToolInfo | CompositionInfo) {
 function runtimeInstanceLabel(instance: ProjectInstance) {
   const status = instance.status === 'DISABLED' ? '已禁用' : instance.status
   const host = instance.host || instance.baseUrl || instance.instanceId
-  return `${host} · ${status} · SDK ${instance.sdkVersion || '-'}`
+  const types = runtimeTypesOf(instance).join(', ') || 'Agent Runtime'
+  return `${host} · ${types} · ${status} · SDK ${instance.sdkVersion || '-'}`
+}
+
+function isCapabilityHostInstance(instance: ProjectInstance) {
+  const metadata = parseInstanceMetadata(instance)
+  if (textValue(metadata.runtimeRole).toUpperCase() === 'CAPABILITY_HOST') return true
+  if (textValue(metadata.runtimePlacement).toUpperCase() === 'CAPABILITY_HOST') return true
+  return runtimeTypesOf(instance).some((item) => item.toUpperCase().includes('CAPABILITY_HOST'))
+}
+
+function runtimeTypesOf(instance: ProjectInstance) {
+  const metadata = parseInstanceMetadata(instance)
+  const raw = metadata.runtimeTypes
+  if (Array.isArray(raw)) {
+    return raw.map((item) => textValue(item)).filter(Boolean)
+  }
+  const single = textValue(raw)
+  return single ? [single] : []
+}
+
+function parseInstanceMetadata(instance: ProjectInstance): Record<string, unknown> {
+  if (!instance.metadataJson) return {}
+  try {
+    const parsed = JSON.parse(instance.metadataJson)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function textValue(value: unknown) {
+  return value == null ? '' : String(value).trim()
 }
 
 function embeddedRuntimeConfig() {
@@ -633,7 +665,7 @@ async function validateBeforeSave() {
     form.runtimePlacement !== 'CENTRAL'
     && !availableRuntimeInstances.value.some((item) => item.instanceId === selectedRuntimeInstanceId.value)
   ) {
-    ElMessage.error('请选择 Embedded Runtime 纳管实例')
+    ElMessage.error('请选择在线 Agent Runtime 实例，Capability Host 不能作为智能体运行目标')
     return false
   }
   try {

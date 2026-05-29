@@ -1420,6 +1420,95 @@ CALL add_col_if_absent('agent_definition', 'skill_refs_json', 'JSON DEFAULT NULL
 CALL add_idx_if_absent('agent_definition', 'idx_agent_project', '`project_id`, `enabled`');
 CALL add_idx_if_absent('agent_definition', 'idx_agent_project_code', '`project_code`, `enabled`');
 
+INSERT INTO `agent_definition`
+(`id`, `key_slug`, `name`, `description`, `agent_mode`, `project_code`, `visibility`,
+ `allowed_roles_json`, `intent_type`, `system_prompt`, `tools_json`, `skills_json`,
+ `model_instance_id`, `runtime_type`, `runtime_placement`, `runtime_config_json`,
+ `default_resource_config_json`, `graph_spec_json`, `max_steps`, `type`,
+ `pipeline_agent_ids_json`, `knowledge_base_group_id`, `prompt_template_id`,
+ `output_schema_type`, `trigger_mode`, `use_multi_agent_model`, `extra_json`,
+ `canvas_json`, `enabled`, `allow_irreversible`, `created_at`, `updated_at`)
+SELECT
+    'team_archive_agent',
+    'team-archive-assistant',
+    '班组档案助手',
+    '面向班组档案页面的嵌入式对话助手，将自然语言查询转换为页面筛选动作。',
+    'WORKFLOW',
+    'qmssmp-teams-construction-service',
+    'PROJECT',
+    '[]',
+    'TEAM_ARCHIVE_PAGE_QUERY',
+    '你是班组档案页面助手，只把用户查询意图转换为页面筛选条件，并触发页面查询。',
+    '[]',
+    '[]',
+    NULL,
+    'LANGGRAPH4J',
+    'CENTRAL',
+    NULL,
+    NULL,
+    JSON_OBJECT(
+        'code', 'team-archive-assistant',
+        'name', '班组档案助手',
+        'mode', 'WORKFLOW',
+        'runtimeHint', 'LANGGRAPH4J',
+        'entry', 'extract_filters',
+        'finish', JSON_ARRAY('apply_search'),
+        'layout', JSON_OBJECT('engine', 'seed', 'direction', 'LR'),
+        'nodes', JSON_ARRAY(
+            JSON_OBJECT(
+                'id', 'extract_filters',
+                'type', 'DOCUMENT_EXTRACT',
+                'name', '抽取班组筛选条件',
+                'config', JSON_OBJECT(
+                    'sourceExpression', 'input',
+                    'outputAlias', 'filters',
+                    'fields', JSON_ARRAY(
+                        JSON_OBJECT('name', 'managerName', 'type', 'STRING', 'source', 'regex:(?:负责人|负责人姓名)(?:为|是|叫|=|：|:)?[ ]*([^，。,. 的]+)'),
+                        JSON_OBJECT('name', 'teamName', 'type', 'STRING', 'source', 'regex:(?:班组名称|班组名|班组)(?:为|是|叫|=|：|:)[ ]*([^，。,. 的]+)'),
+                        JSON_OBJECT('name', 'memberName', 'type', 'STRING', 'source', 'regex:(?:班组成员|成员)(?:包含|包括|有|为|是|叫|=|：|:)?[ ]*([^，。,. 的]+)')
+                    )
+                )
+            ),
+            JSON_OBJECT(
+                'id', 'apply_search',
+                'type', 'PAGE_ACTION',
+                'name', '执行班组档案页面查询',
+                'config', JSON_OBJECT(
+                    'actionKey', 'qmssmp.teamArchive.search',
+                    'title', '已按你的条件查询班组档案',
+                    'confirm', false,
+                    'args', JSON_OBJECT(
+                        'managerName', 'filters.managerName',
+                        'teamName', 'filters.teamName',
+                        'memberName', 'filters.memberName'
+                    )
+                )
+            )
+        ),
+        'edges', JSON_ARRAY(
+            JSON_OBJECT('id', 'start_extract', 'from', 'START', 'to', 'extract_filters', 'condition', 'always'),
+            JSON_OBJECT('id', 'extract_search', 'from', 'extract_filters', 'to', 'apply_search', 'condition', 'always'),
+            JSON_OBJECT('id', 'search_end', 'from', 'apply_search', 'to', 'END', 'condition', 'always')
+        )
+    ),
+    3,
+    'single',
+    '[]',
+    NULL,
+    NULL,
+    NULL,
+    'all',
+    0,
+    JSON_OBJECT('source', 'seed', 'scenario', 'qmssmp-team-archive-embedded-chat'),
+    NULL,
+    1,
+    0,
+    NOW(),
+    NOW()
+WHERE NOT EXISTS (
+    SELECT 1 FROM `agent_definition` WHERE `key_slug` = 'team-archive-assistant'
+);
+
 CALL add_col_if_absent('tool_acl', 'project_id', 'BIGINT DEFAULT NULL COMMENT ''为空表示全局规则'' AFTER `role_code`');
 CALL add_col_if_absent('tool_acl', 'project_code', 'VARCHAR(96) DEFAULT NULL COMMENT ''项目编码'' AFTER `project_id`');
 CALL add_idx_if_absent('tool_acl', 'idx_acl_project_role', '`project_id`, `role_code`, `enabled`');
@@ -1836,11 +1925,11 @@ CREATE TABLE IF NOT EXISTS `platform_auth_provider` (
 
 INSERT IGNORE INTO `platform_role` (`role_code`, `role_name`, `description`, `status`)
 VALUES
-('PLATFORM_ADMIN', 'Platform Admin', 'Full platform administration', 'ACTIVE'),
-('AGENT_DESIGNER', 'Agent Designer', 'Create and edit Agents and workflows', 'ACTIVE'),
-('PROJECT_OWNER', 'Project Owner', 'Manage assigned business projects', 'ACTIVE'),
-('OPERATOR', 'Operator', 'Operate and replay runtime sessions', 'ACTIVE'),
-('AUDITOR', 'Auditor', 'Read-only audit and trace access', 'ACTIVE');
+('PLATFORM_ADMIN', '平台管理员', '平台全量管理与配置', 'ACTIVE'),
+('AGENT_DESIGNER', '智能体设计者', '创建与编辑智能体及工作流', 'ACTIVE'),
+('PROJECT_OWNER', '项目负责人', '管理已分配业务项目', 'ACTIVE'),
+('OPERATOR', '运维操作员', '运行、调试与回放会话', 'ACTIVE'),
+('AUDITOR', '审计员', '只读审计与追踪', 'ACTIVE');
 
 INSERT IGNORE INTO `platform_permission` (`permission_code`, `permission_name`, `resource_type`, `action`)
 VALUES
@@ -1866,10 +1955,10 @@ WHERE r.role_code = 'AUDITOR'
 
 INSERT IGNORE INTO `platform_auth_provider` (`provider_code`, `provider_name`, `provider_type`, `status`, `config_json`)
 VALUES
-('LOCAL', 'Local Development Login', 'LOCAL', 'ACTIVE', '{}'),
-('HEADER', 'Trusted Gateway Headers', 'HEADER', 'ACTIVE', '{}'),
-('OIDC', 'Enterprise OIDC Login', 'OIDC', 'INACTIVE', '{}'),
-('SAML', 'Enterprise SAML Login', 'SAML', 'INACTIVE', '{}');
+('LOCAL', '本地开发登录', 'LOCAL', 'ACTIVE', '{}'),
+('HEADER', '受信任网关请求头', 'HEADER', 'ACTIVE', '{}'),
+('OIDC', '企业 OIDC 登录', 'OIDC', 'INACTIVE', '{}'),
+('SAML', '企业 SAML 登录', 'SAML', 'INACTIVE', '{}');
 
 CREATE TABLE IF NOT EXISTS `agent_workflow_credential` (
     `id`             BIGINT       NOT NULL AUTO_INCREMENT,
@@ -2051,8 +2140,8 @@ CREATE TABLE IF NOT EXISTS `executable_debug_session` (
 INSERT INTO `capability_module`
 (`code`, `name`, `version`, `source_type`, `status`, `enabled`, `manifest_json`, `config_schema_json`, `config_json`)
 VALUES
-('system', 'System Built-in Capability', '1.0.0', 'BUILTIN', 'ACTIVE', 1,
- '{"code":"system","name":"System Built-in Capability"}', '{}', '{}')
+('system', '系统内置能力', '1.0.0', 'BUILTIN', 'ACTIVE', 1,
+ '{"code":"system","name":"系统内置能力"}', '{}', '{}')
 ON DUPLICATE KEY UPDATE
     `name` = VALUES(`name`),
     `version` = VALUES(`version`),
@@ -2065,7 +2154,7 @@ INSERT INTO `tool_asset`
  `input_schema_json`, `output_schema_json`, `executor_type`, `executor_ref`, `side_effect`, `enabled`, `agent_visible`)
 VALUES
 ((SELECT `id` FROM `capability_module` WHERE `code` = 'system' LIMIT 1),
- 'system', 'echo', 'Echo Tool', 'system.echo', 'Return input params for kernel verification',
+ 'system', 'echo', '回声工具', 'system.echo', '用于能力内核验证的回声工具',
  '{"type":"object","properties":{"message":{"type":"string"}}}', '{"type":"object"}',
  'ECHO', 'echo', 'READ', 1, 0)
 ON DUPLICATE KEY UPDATE
@@ -2080,7 +2169,7 @@ INSERT INTO `composition_definition`
  `graph_spec_json`, `input_schema_json`, `output_schema_json`, `side_effect`, `enabled`, `agent_visible`)
 VALUES
 ((SELECT `id` FROM `capability_module` WHERE `code` = 'system' LIMIT 1),
- 'system', 'echo_flow', 'Echo Composition', 'system.echo_flow', 'Minimal GraphSpec composition for kernel verification',
+ 'system', 'echo_flow', '回声组合', 'system.echo_flow', '用于能力内核验证的最小图组合',
  '{"entry":"input","nodes":[{"id":"input","type":"USER_INPUT","config":{"fields":[{"name":"message","required":true}]}},{"id":"echo","type":"TOOL","config":{"qualifiedName":"system.echo","inputMapping":{"message":"params.message"},"outputAlias":"echoed"}},{"id":"answer","type":"ANSWER","config":{"template":"{{ echoed.message }}"}}],"edges":[{"from":"START","to":"input","condition":"always"},{"from":"input","to":"echo","condition":"always"},{"from":"echo","to":"answer","condition":"success"},{"from":"answer","to":"END","condition":"always"}]}',
  '{"type":"object","properties":{"message":{"type":"string"}}}', '{"type":"string"}',
  'READ', 1, 1)
@@ -2095,12 +2184,12 @@ INSERT INTO `interaction_definition`
  `interaction_type`, `spec_json`, `input_schema_json`, `output_schema_json`, `enabled`, `agent_visible`)
 VALUES
 ((SELECT `id` FROM `capability_module` WHERE `code` = 'system' LIMIT 1),
- 'system', 'echo_input', 'Echo Input Interaction', 'system.echo_input', 'Collect message before calling the echo tool',
+ 'system', 'echo_input', '回声输入交互', 'system.echo_input', '调用回声工具前采集用户输入',
  'COLLECT_INPUT',
  '{"interactionType":"COLLECT_INPUT","title":"Echo Input","fields":[{"key":"message","name":"message","label":"Message","type":"string","required":true}],"behavior":{"askPolicy":"MISSING_ONLY"}}',
  '{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}', '{"type":"object"}', 1, 1),
 ((SELECT `id` FROM `capability_module` WHERE `code` = 'system' LIMIT 1),
- 'system', 'echo_result', 'Echo Result Interaction', 'system.echo_result', 'Render echo result as a detail card',
+ 'system', 'echo_result', '回声结果展示', 'system.echo_result', '以详情卡片展示回声结果',
  'PRESENT_OUTPUT',
  '{"interactionType":"PRESENT_OUTPUT","title":"Echo Result","component":"DETAIL","data":"echoed"}',
  '{"type":"object"}', '{"type":"object"}', 1, 1)
@@ -2116,7 +2205,7 @@ INSERT INTO `composition_definition`
  `graph_spec_json`, `input_schema_json`, `output_schema_json`, `side_effect`, `enabled`, `agent_visible`)
 VALUES
 ((SELECT `id` FROM `capability_module` WHERE `code` = 'system' LIMIT 1),
- 'system', 'interactive_echo', 'Interactive Echo Composition', 'system.interactive_echo', 'Interaction kernel verification flow',
+ 'system', 'interactive_echo', '交互式回声组合', 'system.interactive_echo', '用于验证交互内核的示例组合',
  '{"entry":"collect","nodes":[{"id":"collect","type":"INTERACTION","ref":{"kind":"INTERACTION","qualifiedName":"system.echo_input"},"config":{"interactionType":"COLLECT_INPUT","outputAlias":"params"}},{"id":"echo","type":"TOOL","config":{"qualifiedName":"system.echo","inputMapping":{"message":"params.message"},"outputAlias":"echoed"}},{"id":"show","type":"INTERACTION","ref":{"kind":"INTERACTION","qualifiedName":"system.echo_result"},"config":{"interactionType":"PRESENT_OUTPUT","data":"echoed","outputAlias":"presented"}},{"id":"answer","type":"ANSWER","config":{"template":"{{ echoed.message }}"}}],"edges":[{"from":"START","to":"collect","condition":"always"},{"from":"collect","to":"echo","condition":"always"},{"from":"echo","to":"show","condition":"success"},{"from":"show","to":"answer","condition":"always"},{"from":"answer","to":"END","condition":"always"}]}',
  '{"type":"object","properties":{"message":{"type":"string"}}}', '{"type":"string"}',
  'READ', 1, 1)

@@ -1,14 +1,22 @@
 package com.enterprise.ai.spring.registry;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.StringHttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -30,7 +38,13 @@ public class EafRegistryClient {
 
     private final SdkDescriptionSourceSettingsHolder descriptionSettingsHolder;
 
-    private final RestClient restClient;
+    private final RestTemplate restTemplate;
+
+    private final String registryBaseUrl;
+
+    private final Environment environment;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final String instanceId;
 
@@ -40,18 +54,28 @@ public class EafRegistryClient {
     public EafRegistryClient(EafRegistryProperties properties,
                              EafCapabilityScanner scanner,
                              SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
-        this(properties, scanner, new EafAgentGraphScanner(List.of()), descriptionSettingsHolder);
+        this(properties, scanner, new EafAgentGraphScanner(List.of()), descriptionSettingsHolder, null);
     }
 
     public EafRegistryClient(EafRegistryProperties properties,
                              EafCapabilityScanner scanner,
                              EafAgentGraphScanner graphScanner,
                              SdkDescriptionSourceSettingsHolder descriptionSettingsHolder) {
+        this(properties, scanner, graphScanner, descriptionSettingsHolder, null);
+    }
+
+    public EafRegistryClient(EafRegistryProperties properties,
+                             EafCapabilityScanner scanner,
+                             EafAgentGraphScanner graphScanner,
+                             SdkDescriptionSourceSettingsHolder descriptionSettingsHolder,
+                             Environment environment) {
         this.properties = properties;
         this.scanner = scanner;
         this.graphScanner = graphScanner;
         this.descriptionSettingsHolder = descriptionSettingsHolder;
-        this.restClient = RestClient.builder().baseUrl(trimTrailingSlash(properties.getRegistry().getUrl())).build();
+        this.environment = environment;
+        this.restTemplate = createRestTemplate();
+        this.registryBaseUrl = trimTrailingSlash(properties.getRegistry().getUrl());
         this.instanceId = resolveInstanceId();
     }
 
@@ -103,11 +127,11 @@ public class EafRegistryClient {
         }
         refreshDescriptionSettings();
         try {
-            InstanceHeartbeatResponse response = signedPost(
+            String response = signedPost(
                     "/api/registry/projects/{projectCode}/instances/heartbeat",
                     buildHeartbeatBody(),
-                    InstanceHeartbeatResponse.class);
-            RuntimeGovernancePolicy policy = response == null ? null : response.policy();
+                    String.class);
+            RuntimeGovernancePolicy policy = parseHeartbeatPolicy(response);
             RuntimeGovernanceState state = updateGovernanceState(policy);
             if (!state.localExecutionAllowed()) {
                 log.warn("[ReachAI Registry] runtime local execution restricted by control plane: status={} minSdkVersion={} sdkVersionSatisfied={} message={}",
@@ -116,6 +140,29 @@ public class EafRegistryClient {
         } catch (Exception ex) {
             // 定时任务上抛异常会刷屏；这里打日志即可，下一轮继续重试。
             logFailure("heartbeat", ex);
+        }
+    }
+
+    RuntimeGovernancePolicy parseHeartbeatPolicy(String responseBody) {
+        if (!StringUtils.hasText(responseBody)) {
+            return null;
+        }
+        try {
+            JsonNode policy = objectMapper.readTree(responseBody).path("policy");
+            if (policy.isMissingNode() || policy.isNull()) {
+                return null;
+            }
+            return new RuntimeGovernancePolicy(
+                    policy.path("disabled").asBoolean(false),
+                    textOrNull(policy, "status"),
+                    textOrNull(policy, "minSdkVersion"),
+                    booleanOrNull(policy, "allowEmbeddedExecution"),
+                    booleanOrNull(policy, "allowHybridExecution"),
+                    textOrNull(policy, "message")
+            );
+        } catch (Exception ex) {
+            log.warn("[ReachAI Registry] heartbeat policy parse failed: {}", ex.toString());
+            return null;
         }
     }
 
@@ -232,6 +279,14 @@ public class EafRegistryClient {
         body.put("instanceId", instanceId);
         body.put("baseUrl", defaultString(properties.getProject().getBaseUrl(), ""));
         body.put("host", hostName());
+        Integer port = serverPort();
+        if (port != null) {
+            body.put("port", port);
+        }
+        String appVersion = applicationVersion();
+        if (StringUtils.hasText(appVersion)) {
+            body.put("appVersion", appVersion);
+        }
         body.put("sdkVersion", sdkVersion());
         body.put("metadata", metadata);
         return body;
@@ -260,27 +315,40 @@ public class EafRegistryClient {
 
     private <T> T signedPost(String uri, Object body, Class<T> bodyType, Object... uriVariables) {
         SignatureHeaders headers = signatureHeaders();
-        return restClient.post()
-                .uri(uri, uriVariables)
-                .header("X-EAF-App-Key", headers.appKey())
-                .header("X-EAF-Timestamp", headers.timestamp())
-                .header("X-EAF-Nonce", headers.nonce())
-                .header("X-EAF-Signature", headers.signature())
-                .body(body)
-                .retrieve()
-                .body(bodyType);
+        HttpEntity<Object> entity = new HttpEntity<>(body, httpHeaders(headers));
+        return restTemplate.postForObject(registryBaseUrl + uri, entity, bodyType, uriVariables);
     }
 
     private <T> T signedGet(String uriTemplate, Class<T> bodyType) {
         SignatureHeaders headers = signatureHeaders();
-        return restClient.get()
-                .uri(uriTemplate, properties.getProject().getCode())
-                .header("X-EAF-App-Key", headers.appKey())
-                .header("X-EAF-Timestamp", headers.timestamp())
-                .header("X-EAF-Nonce", headers.nonce())
-                .header("X-EAF-Signature", headers.signature())
-                .retrieve()
-                .body(bodyType);
+        HttpEntity<Void> entity = new HttpEntity<>(httpHeaders(headers));
+        return restTemplate.exchange(
+                registryBaseUrl + uriTemplate,
+                HttpMethod.GET,
+                entity,
+                bodyType,
+                properties.getProject().getCode()
+        ).getBody();
+    }
+
+    private HttpHeaders httpHeaders(SignatureHeaders headers) {
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
+        httpHeaders.add("X-EAF-App-Key", headers.appKey());
+        httpHeaders.add("X-EAF-Timestamp", headers.timestamp());
+        httpHeaders.add("X-EAF-Nonce", headers.nonce());
+        httpHeaders.add("X-EAF-Signature", headers.signature());
+        return httpHeaders;
+    }
+
+    private RestTemplate createRestTemplate() {
+        RestTemplate template = new RestTemplate();
+        MappingJackson2HttpMessageConverter jackson = new MappingJackson2HttpMessageConverter(objectMapper);
+        template.getMessageConverters().removeIf(converter ->
+                converter.getClass().getName().contains("GsonHttpMessageConverter"));
+        template.getMessageConverters().add(0, jackson);
+        template.getMessageConverters().add(0, new StringHttpMessageConverter(StandardCharsets.UTF_8));
+        return template;
     }
 
     private void logFailure(String phase, Exception ex) {
@@ -295,8 +363,8 @@ public class EafRegistryClient {
                     phase, code, base, rre.getStatusCode().value(), body);
             return;
         }
-        log.warn("[ReachAI Registry] {} failed project={} registryUrl={}: {}",
-                phase, code, base, ex.toString());
+        log.warn("[ReachAI Registry] {} failed project={} registryUrl={}",
+                phase, code, base, ex);
     }
 
     private SignatureHeaders signatureHeaders() {
@@ -320,8 +388,79 @@ public class EafRegistryClient {
         }
     }
 
-    private String resolveInstanceId() {
-        return hostName() + "-" + ManagementFactory.getRuntimeMXBean().getName();
+    /**
+     * 计算稳定的实例 ID。优先级：
+     * <ol>
+     *     <li>{@code eaf.project.instance-id} 显式配置。</li>
+     *     <li>{@code host + ":" + appName + ":" + port}（appName 取 {@code spring.application.name}
+     *     或项目 code，port 取 {@code server.port}）。</li>
+     *     <li>退化方案：{@code host + "-" + projectCode}。</li>
+     * </ol>
+     * 全部基于配置或宿主机信息，和 JVM 进程 PID 解耦，业务系统重启不会再生成新实例记录。
+     */
+    String resolveInstanceId() {
+        String configured = properties.getProject().getInstanceId();
+        if (StringUtils.hasText(configured)) {
+            return configured.trim();
+        }
+        String host = hostName();
+        String appName = applicationName();
+        Integer port = serverPort();
+        StringBuilder sb = new StringBuilder(host);
+        if (StringUtils.hasText(appName)) {
+            sb.append(":").append(appName);
+        }
+        if (port != null) {
+            sb.append(":").append(port);
+        }
+        if (sb.length() == host.length()) {
+            sb.append("-").append(defaultString(properties.getProject().getCode(), "default"));
+        }
+        return sb.toString();
+    }
+
+    String getInstanceId() {
+        return instanceId;
+    }
+
+    private String applicationName() {
+        String fromEnv = environment == null ? null : environment.getProperty("spring.application.name");
+        if (StringUtils.hasText(fromEnv)) {
+            return fromEnv.trim();
+        }
+        String code = properties.getProject().getCode();
+        return StringUtils.hasText(code) ? code.trim() : null;
+    }
+
+    private String applicationVersion() {
+        if (environment == null) {
+            return null;
+        }
+        String version = environment.getProperty("eaf.project.app-version");
+        if (StringUtils.hasText(version)) {
+            return version.trim();
+        }
+        return environment.getProperty("info.app.version");
+    }
+
+    private Integer serverPort() {
+        if (environment == null) {
+            return null;
+        }
+        // 优先用实际监听端口（Tomcat/Jetty/Netty 启动后 local.server.port 会暴露真实值）
+        String raw = environment.getProperty("local.server.port");
+        if (!StringUtils.hasText(raw)) {
+            raw = environment.getProperty("server.port");
+        }
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            int port = Integer.parseInt(raw.trim());
+            return port > 0 ? port : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private String sdkVersion() {
@@ -400,10 +539,17 @@ public class EafRegistryClient {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private record SignatureHeaders(String appKey, String timestamp, String nonce, String signature) {
+    private String textOrNull(JsonNode node, String fieldName) {
+        JsonNode value = node.path(fieldName);
+        return value.isMissingNode() || value.isNull() ? null : value.asText();
     }
 
-    private record InstanceHeartbeatResponse(Object instance, RuntimeGovernancePolicy policy) {
+    private Boolean booleanOrNull(JsonNode node, String fieldName) {
+        JsonNode value = node.path(fieldName);
+        return value.isMissingNode() || value.isNull() ? null : value.asBoolean();
+    }
+
+    private record SignatureHeaders(String appKey, String timestamp, String nonce, String signature) {
     }
 
     record RuntimeGovernancePolicy(boolean disabled,

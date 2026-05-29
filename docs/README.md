@@ -25,6 +25,9 @@
 | [03-Agent-Studio与Runtime.md](./03-Agent-Studio与Runtime.md) | Agent Studio、GraphSpec、交互式节点、会话式调试、发布、评测、多 Runtime、变量映射如何工作 |
 | [04-运行治理与开放协议.md](./04-运行治理与开放协议.md) | Trace、RunOps、ACL、Guard、MCP、A2A、Gateway 如何保护和开放能力 |
 | [05-知识模型与企业资产.md](./05-知识模型与企业资产.md) | 模型实例、知识库、业务索引、领域、市场资产如何被 Agent 使用 |
+| [09-AI长任务代码审计提示词.md](./09-AI长任务代码审计提示词.md) | 交给长上下文 AI 执行只读全仓代码审计、死代码过滤、文档/SQL/前后端漂移检查的完整提示词 |
+| [11-ReachAI-JDK8接入SDK与JDK17-Runtime分层方案.md](./11-ReachAI-JDK8接入SDK与JDK17-Runtime分层方案.md) | JDK8 业务接入 SDK 与 JDK17 中台 Runtime 分层的当前落地模块、协议边界和验证方式 |
+| [ai-memory/README.md](./ai-memory/README.md) | 给 Cursor、Codex 等 AI 编程工具看的项目规则、记忆和历史坑位 |
 
 ## 当前已落地
 
@@ -32,6 +35,7 @@
 - 旧的里程碑交付、临时规划说明和试点说明内容已经被吸收到主文档。
 - `docs/系统截图/` 保持原路径，避免影响暂未重写的根目录 `README.md`。
 - `docs/superpowers/plans/` 保持为执行计划产物，不纳入主知识库。
+- `docs/ai-memory/` 是给 AI 编程工具看的项目记忆，不替代主知识库和对外 README。
 
 ## 仍待补齐
 
@@ -46,3 +50,4 @@
 - 所有实现说明应指向真实代码模块、前端页面、接口路径或 SQL 表。
 - 每份主文档都必须区分“当前已落地”和“仍待补齐”，避免规划与实现混在一起。
 - `docs/superpowers/plans/` 是执行计划产物，不属于主知识库。
+- `docs/ai-memory/` 只记录会影响未来 AI 编程判断的规则、决策和坑位；如果与当前代码冲突，以当前代码为准并同步更新记忆。

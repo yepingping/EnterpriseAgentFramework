@@ -181,7 +181,6 @@ class LangGraph4jRuntimeAdapterTest {
                         .name("Page Action Agent")
                         .type("single")
                         .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
-                        .modelInstanceId("llm-1")
                         .graphSpec(GraphSpec.builder()
                                 .code("page_action_graph")
                                 .entry("prepare")
@@ -221,6 +220,34 @@ class LangGraph4jRuntimeAdapterTest {
         assertEquals(true, output.get("confirm"));
         assertEquals("TI_DEMO01", ((Map<String, Object>) output.get("args")).get("teamId"));
         assertEquals(output, result.getFinalState().get("page_action_result"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void teamArchiveAssistantGraphPublishesSearchPageAction() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-team-archive")
+                .sessionId("session-team-archive")
+                .message("帮我查询一下负责人为靳圣辉的班组")
+                .metadata(Map.of("pageInstanceId", "page-team-archive"))
+                .agentDefinition(AgentDefinition.builder()
+                        .id("team_archive_agent")
+                        .name("班组档案助手")
+                        .type("single")
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .graphSpec(teamArchiveAssistantGraph())
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertNotNull(result.getUiRequest());
+        Map<String, Object> request = (Map<String, Object>) result.getUiRequest().getExtension().get("pageActionRequest");
+        assertEquals("page.action.requested", request.get("type"));
+        assertEquals("qmssmp.teamArchive.search", request.get("actionKey"));
+        assertEquals("page-team-archive", ((Map<String, Object>) request.get("target")).get("pageInstanceId"));
+        assertEquals("靳圣辉", ((Map<String, Object>) request.get("args")).get("managerName"));
     }
 
     @Test
@@ -1127,8 +1154,8 @@ class LangGraph4jRuntimeAdapterTest {
                 .type("single")
                 .modelInstanceId("llm-1")
                 .graphSpec(GraphSpec.builder()
-                        .entry("not-llm")
-                        .node(GraphSpec.Node.builder().id("not-llm").type("TOOL").build())
+                        .entry("unsupported")
+                        .node(GraphSpec.Node.builder().id("unsupported").type("UNKNOWN").build())
                         .build())
                 .build())));
     }
@@ -1575,6 +1602,45 @@ class LangGraph4jRuntimeAdapterTest {
                         .build())
                 .edge(GraphSpec.Edge.builder().from("START").to(nodeId).condition("always").build())
                 .edge(GraphSpec.Edge.builder().from(nodeId).to("END").condition("always").build())
+                .build();
+    }
+
+    private GraphSpec teamArchiveAssistantGraph() {
+        return GraphSpec.builder()
+                .code("team-archive-assistant")
+                .name("班组档案助手")
+                .runtimeHint(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                .entry("extract_filters")
+                .finishNode("apply_search")
+                .node(GraphSpec.Node.builder()
+                        .id("extract_filters")
+                        .type("DOCUMENT_EXTRACT")
+                        .name("抽取班组筛选条件")
+                        .config(Map.of(
+                                "sourceExpression", "input",
+                                "outputAlias", "filters",
+                                "fields", List.of(
+                                        Map.of("name", "managerName", "type", "STRING", "source", "regex:(?:负责人|负责人姓名)(?:为|是|叫|=|：|:)?[ ]*([^，。,. 的]+)"),
+                                        Map.of("name", "teamName", "type", "STRING", "source", "regex:(?:班组名称|班组名|班组)(?:为|是|叫|=|：|:)[ ]*([^，。,. 的]+)"),
+                                        Map.of("name", "memberName", "type", "STRING", "source", "regex:(?:班组成员|成员)(?:包含|包括|有|为|是|叫|=|：|:)?[ ]*([^，。,. 的]+)")
+                                )))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("apply_search")
+                        .type("PAGE_ACTION")
+                        .name("执行班组档案页面查询")
+                        .config(Map.of(
+                                "actionKey", "qmssmp.teamArchive.search",
+                                "title", "已按你的条件查询班组档案",
+                                "confirm", false,
+                                "args", Map.of(
+                                        "managerName", "filters.managerName",
+                                        "teamName", "filters.teamName",
+                                        "memberName", "filters.memberName")))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("extract_filters").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("extract_filters").to("apply_search").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("apply_search").to("END").condition("always").build())
                 .build();
     }
 

@@ -22,6 +22,13 @@ export function updateRegistryProjectInstanceStatus(projectCode: string, data: {
   return agentRequest.post<ProjectInstance>(`/api/registry/projects/${projectCode}/instances/status`, data)
 }
 
+export function purgeRegistryProjectOfflineInstances(projectCode: string, minIdleMinutes = 0) {
+  return agentRequest.post<{ removed: number }>(
+    `/api/registry/projects/${projectCode}/instances/purge-offline`,
+    { minIdleMinutes },
+  )
+}
+
 export function updateRegistryProjectInstanceGovernancePolicy(
   projectCode: string,
   data: RuntimeGovernancePolicyUpdateRequest,

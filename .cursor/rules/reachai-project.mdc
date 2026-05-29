@@ -1,0 +1,51 @@
+---
+description: ReachAI project rules for AI coding agents
+alwaysApply: true
+---
+
+# ReachAI AI Coding Rules
+
+进入本仓库后，先读根目录 `AGENTS.md`。它是 Codex、Cursor 和其他 AI 编程工具共享的最高优先级项目规则。
+
+## Must Follow
+
+- 以当前仓库为事实源。先查真实代码、SQL、接口、前端页面和文档，再下结论。
+- 可以修改前端、后端、SQL、文档和构建配置，但改动必须聚焦当前任务。
+- 默认不考虑旧数据兼容；当前正确设计优先。
+- 数据库变化必须同时修改 `sql/init.sql` 并新增 `sql/upgrade-YYYYMMDD-short-name.sql`。
+- 不要使用 service 目录下的历史 SQL 作为活跃迁移入口。
+- 不要回滚、格式化或重写与任务无关的用户改动。
+- 中文文件统一按 UTF-8 读写。
+
+## Project Memory
+
+给 AI 的项目记忆在 `docs/ai-memory/`：
+
+- `PROJECT-MEMORY.md`: 产品定位、模块地图和当前事实。
+- `WORKING-RULES.md`: 开发、SQL、验证和协作规则。
+- `DECISIONS.md`: 架构和命名决策。
+- `KNOWN-PITFALLS.md`: 以前踩过的坑和诊断顺序。
+- `VERIFICATION.md`: 常用验证命令。
+- `AI-TOOLS.md`: Playwright 浏览器调试和 DBHub MySQL 只读查询约定。
+
+## Core Architecture
+
+- ReachAI 是面向 Java 企业系统的 AI 能力中台，不只是 Workflow Builder。
+- 主线是 `ai-spring-boot-starter` + `@AiCapability` / `@AiParam` 注册能力，平台治理后进入 Agent Studio 和 Runtime。
+- `GraphSpec` 是运行语义，`canvas_json` 只是画布布局。
+- `AgentRuntimeAdapter` 是运行时统一执行契约。
+- `Capability / 能力` 是产品默认命名；`Skill` 多为历史命名或兼容敏感存储名，不能盲目全局替换。
+
+## Validation
+
+- 后端改动跑相关 Maven 模块测试或编译。
+- 前端改动在 `ai-admin-front` 跑 `npm run build`，必要时跑 `npx vue-tsc --noEmit`。
+- SQL 改动检查 `sql/init.sql` 和 upgrade SQL 都覆盖目标变更。
+- 文档/规则改动至少跑 `git diff --check`。
+
+## MCP Tools
+
+- 需要浏览器调试、截图、DOM 快照、console 或 network 观察时，优先使用 Playwright MCP。
+- 需要查看实时 MySQL schema 或少量只读数据时，优先使用 `dbhub_ai_mysql`。
+- `dbhub_ai_mysql` 只能用于只读诊断，不执行 DDL/DML，不导出批量数据，不读取密钥或无关业务隐私。
+- 项目级 MCP 示例在 `.cursor/mcp.json`，数据库配置模板在 `.cursor/dbhub-ai-mysql.toml`；真实数据库密码必须来自本机环境变量，不要写入仓库。

@@ -6,6 +6,7 @@ import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -136,13 +138,20 @@ class DynamicHttpAiToolLlmSchemaTest {
         Map<String, String> received = new ConcurrentHashMap<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/tool", exchange -> {
-            received.put("project", exchange.getRequestHeaders().getFirst("X-EAF-Project-Code"));
-            received.put("agent", exchange.getRequestHeaders().getFirst("X-EAF-Agent-Id"));
-            received.put("trace", exchange.getRequestHeaders().getFirst("X-EAF-Trace-Id"));
-            received.put("session", exchange.getRequestHeaders().getFirst("X-EAF-Session-Id"));
-            received.put("user", exchange.getRequestHeaders().getFirst("X-EAF-User-Id"));
-            received.put("globalUser", exchange.getRequestHeaders().getFirst("X-EAF-Global-User-Id"));
-            received.put("roles", exchange.getRequestHeaders().getFirst("X-EAF-Roles"));
+            captureHeader(received, exchange, "project", "X-EAF-Project-Code");
+            captureHeader(received, exchange, "agent", "X-EAF-Agent-Id");
+            captureHeader(received, exchange, "trace", "X-EAF-Trace-Id");
+            captureHeader(received, exchange, "session", "X-EAF-Session-Id");
+            captureHeader(received, exchange, "user", "X-EAF-User-Id");
+            captureHeader(received, exchange, "globalUser", "X-EAF-Global-User-Id");
+            captureHeader(received, exchange, "roles", "X-EAF-Roles");
+            captureHeader(received, exchange, "reachProject", "X-ReachAI-Project-Code");
+            captureHeader(received, exchange, "reachAgent", "X-ReachAI-Agent-Id");
+            captureHeader(received, exchange, "reachTrace", "X-ReachAI-Trace-Id");
+            captureHeader(received, exchange, "reachSession", "X-ReachAI-Session-Id");
+            captureHeader(received, exchange, "reachUser", "X-ReachAI-User-Id");
+            captureHeader(received, exchange, "reachGlobalUser", "X-ReachAI-Global-User-Id");
+            captureHeader(received, exchange, "reachRoles", "X-ReachAI-Roles");
             byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
@@ -175,8 +184,58 @@ class DynamicHttpAiToolLlmSchemaTest {
             assertEquals("ADMIN001", received.get("user"));
             assertEquals("emp-0001", received.get("globalUser"));
             assertEquals("admin,auditor", received.get("roles"));
+            assertEquals("bzsdk", received.get("reachProject"));
+            assertEquals("team-agent", received.get("reachAgent"));
+            assertEquals("trace-1", received.get("reachTrace"));
+            assertEquals("session-1", received.get("reachSession"));
+            assertEquals("ADMIN001", received.get("reachUser"));
+            assertEquals("emp-0001", received.get("reachGlobalUser"));
+            assertEquals("admin,auditor", received.get("reachRoles"));
         } finally {
             ToolExecutionContextHolder.clear();
+            server.stop(0);
+        }
+    }
+
+    private static void captureHeader(Map<String, String> received, HttpExchange exchange, String key, String headerName) {
+        String value = exchange.getRequestHeaders().getFirst(headerName);
+        received.put(key, value == null ? "" : value);
+    }
+
+    @Test
+    void executeSendsAllArgumentsAsBodyForReachAiCapabilityHostProtocol() throws Exception {
+        AtomicReference<String> receivedBody = new AtomicReference<>("");
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/reachai/capabilities/contract.query/invoke", exchange -> {
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] body = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            ToolDefinitionEntity entity = new ToolDefinitionEntity();
+            entity.setName("contract.query");
+            entity.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+            entity.setEndpointPath("/reachai/capabilities/contract.query/invoke");
+            entity.setHttpMethod("POST");
+            entity.setCapabilityMetadataJson("{\"invokeProtocol\":\"REACHAI_CAPABILITY_HTTP\"}");
+            entity.setParametersJson("""
+                    [
+                      {"name":"contractNo","type":"string","description":"Contract number","required":true,"location":"BODY"},
+                      {"name":"includeAttachments","type":"boolean","description":"Include attachments","required":false,"location":"BODY"}
+                    ]
+                    """);
+
+            new DynamicHttpAiTool(entity, new ObjectMapper()).execute(Map.of(
+                    "contractNo", "HT-001",
+                    "includeAttachments", true));
+
+            Map<?, ?> body = new ObjectMapper().readValue(receivedBody.get(), Map.class);
+            assertEquals("HT-001", body.get("contractNo"));
+            assertEquals(Boolean.TRUE, body.get("includeAttachments"));
+        } finally {
             server.stop(0);
         }
     }

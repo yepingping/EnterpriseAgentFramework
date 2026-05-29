@@ -2,6 +2,8 @@ package com.enterprise.ai.agent.agent;
 
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.registry.AiRegistryService;
+import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
 import com.enterprise.ai.agent.runtime.AgentRuntimeSelector;
 import com.enterprise.ai.agent.runtime.AgentRuntimeValidationResult;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
@@ -22,16 +24,40 @@ class AgentReleaseValidationServiceTest {
 
     private AgentRuntimeSelector runtimeSelector;
     private ToolDefinitionService toolDefinitionService;
+    private AiRegistryService registryService;
     private AgentReleaseValidationService service;
 
     @BeforeEach
     void setUp() {
         runtimeSelector = mock(AgentRuntimeSelector.class);
         toolDefinitionService = mock(ToolDefinitionService.class);
-        service = new AgentReleaseValidationService(runtimeSelector, toolDefinitionService);
+        registryService = mock(AiRegistryService.class);
+        service = new AgentReleaseValidationService(runtimeSelector, toolDefinitionService, registryService);
         when(runtimeSelector.validate(any())).thenReturn(AgentRuntimeValidationResult.builder()
                 .valid(true)
                 .build());
+    }
+
+    @Test
+    void validateRejectsCapabilityHostAsEmbeddedAgentRuntimeTarget() {
+        AgentDefinition definition = baseDefinition(null);
+        definition.setRuntimePlacement("EMBEDDED");
+        definition.setRuntimeConfig(Map.of(
+                "embeddedRuntime", Map.of(
+                        "projectCode", "contract-system",
+                        "instanceId", "cap-host-1")));
+        ProjectInstanceEntity instance = new ProjectInstanceEntity();
+        instance.setProjectCode("contract-system");
+        instance.setInstanceId("cap-host-1");
+        instance.setMetadataJson("""
+                {"runtimePlacement":"CAPABILITY_HOST","runtimeTypes":["SPRING_BOOT2_CAPABILITY_HOST"]}
+                """);
+        when(registryService.findInstance("contract-system", "cap-host-1")).thenReturn(instance);
+
+        AgentReleaseValidationResult result = service.validate(definition);
+
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("EMBEDDED_TARGET_NOT_AGENT_RUNTIME"));
     }
 
     @Test
@@ -200,6 +226,34 @@ class AgentReleaseValidationServiceTest {
                 .edge(GraphSpec.Edge.builder().from("llm").to("open_detail").condition("always").build())
                 .edge(GraphSpec.Edge.builder().from("open_detail").to("END").condition("always").build())
                 .build()));
+
+        assertTrue(result.valid(), () -> result.errors().toString());
+    }
+
+    @Test
+    void validateAcceptsModelFreePageActionWorkflow() {
+        AgentDefinition definition = baseDefinition(GraphSpec.builder()
+                .entry("extract")
+                .finishNode("search")
+                .node(GraphSpec.Node.builder()
+                        .id("extract")
+                        .type("DOCUMENT_EXTRACT")
+                        .config(Map.of("sourceExpression", "input"))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("search")
+                        .type("PAGE_ACTION")
+                        .config(Map.of(
+                                "actionKey", "qmssmp.teamArchive.search",
+                                "args", Map.of("managerName", "filters.managerName")))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("extract").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("extract").to("search").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("search").to("END").condition("always").build())
+                .build());
+        definition.setModelInstanceId(null);
+
+        AgentReleaseValidationResult result = service.validate(definition);
 
         assertTrue(result.valid(), () -> result.errors().toString());
     }

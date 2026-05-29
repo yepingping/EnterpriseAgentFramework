@@ -144,7 +144,17 @@
             <span class="title-mark" />
             <span>实例心跳（{{ instances.length }}）</span>
           </div>
-          <el-button :icon="Refresh" @click="loadInstances">刷新实例</el-button>
+          <div class="header-actions">
+            <el-button
+              :icon="Delete"
+              :disabled="offlineInstanceCount === 0"
+              :loading="purgingOffline"
+              @click="purgeOfflineInstances"
+            >
+              清理离线（{{ offlineInstanceCount }}）
+            </el-button>
+            <el-button :icon="Refresh" @click="loadInstances">刷新实例</el-button>
+          </div>
         </div>
       </template>
 
@@ -158,21 +168,30 @@
           <template #default="{ row }">
             <span class="status-pill" :class="{ offline: row.status !== 'ONLINE', disabled: row.status === 'DISABLED' }">
               <i />
-              {{ row.status }}
+              {{ formatInstanceStatusLabel(row.status) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="Runtime 能力" min-width="260">
+        <el-table-column label="运行时能力" min-width="280">
           <template #default="{ row }">
             <div class="runtime-tags">
-              <el-tag size="small" effect="plain">{{ runtimePlacement(row) }}</el-tag>
-              <el-tag v-for="rt in runtimeTypes(row)" :key="rt" size="small" type="success" effect="plain">{{ rt }}</el-tag>
-              <el-tag v-if="runtimeMeta(row).supportsTools" size="small" type="info" effect="plain">Tool</el-tag>
-              <el-tag v-if="runtimeMeta(row).supportsGraph" size="small" type="warning" effect="plain">Graph</el-tag>
+              <el-tag size="small" effect="plain">{{ formatRuntimePlacementLabel(runtimePlacement(row)) }}</el-tag>
+              <el-tag v-for="rt in runtimeTypes(row)" :key="rt" size="small" type="success" effect="plain">
+                {{ formatRuntimeTypeLabel(rt) }}
+              </el-tag>
+              <el-tag
+                v-for="feat in formatRuntimeFeatureLabels(runtimeMeta(row))"
+                :key="feat"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                {{ feat }}
+              </el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="host" label="Host" min-width="160">
+        <el-table-column prop="host" label="主机" min-width="160">
           <template #default="{ row }">{{ row.host || '-' }}</template>
         </el-table-column>
         <el-table-column prop="port" label="端口" width="120">
@@ -320,7 +339,11 @@ import {
   getScanProjects,
   updateScanProject,
 } from '@/api/scanProject'
-import { listRegistryProjectInstances, updateRegistryProjectInstanceStatus } from '@/api/registry'
+import {
+  listRegistryProjectInstances,
+  purgeRegistryProjectOfflineInstances,
+  updateRegistryProjectInstanceStatus,
+} from '@/api/registry'
 import type { ProjectKind, ProjectVisibility } from '@/types/registry'
 import type { ScanProject, ScanProjectUpsertRequest } from '@/types/scanProject'
 import type { ProjectInstance } from '@/types/registry'
@@ -329,6 +352,12 @@ import {
   formatScanProjectBlockersMessage,
   parseScanProjectBlockersFromError,
 } from '@/utils/scanProjectBlockers'
+import {
+  formatInstanceStatusLabel,
+  formatRuntimeFeatureLabels,
+  formatRuntimePlacementLabel,
+  formatRuntimeTypeLabel,
+} from '@/utils/registryLabels'
 import { useTheme } from '@/composables/useTheme'
 
 const route = useRoute()
@@ -340,6 +369,10 @@ const projectCode = computed(() => String(route.params.projectCode || ''))
 const project = ref<ScanProject | null>(null)
 const instances = ref<ProjectInstance[]>([])
 const loadingInstances = ref(false)
+const purgingOffline = ref(false)
+const offlineInstanceCount = computed(() =>
+  instances.value.filter((item) => item.status === 'OFFLINE' || item.status === 'STALE').length,
+)
 const editDialogVisible = ref(false)
 const editSaving = ref(false)
 const deleteLoading = ref(false)
@@ -442,13 +475,13 @@ const overviewItems = computed(() => [
   { label: '负责人', value: project.value?.owner || '-', icon: User },
   { label: '能力数', value: String(project.value?.toolCount ?? 0), icon: Grid },
   { label: '根地址', value: project.value?.baseUrl ? displayBaseUrl.value : '-', icon: Collection, isLink: true },
-  { label: 'Context Path', value: project.value?.contextPath || '-', icon: Box },
+  { label: '上下文路径', value: project.value?.contextPath || '-', icon: Box },
 ])
 
 const quickEntries = computed(() => [
   {
     title: 'API 目录',
-    desc: '管理 API 与 Tool 的关联关系',
+    desc: '管理 API 与工具的关联关系',
     icon: Link,
     tone: 'purple',
     disabled: !project.value?.id,
@@ -463,8 +496,8 @@ const quickEntries = computed(() => [
     action: goCapabilitySync,
   },
   {
-    title: '查看 Tool',
-    desc: '管理项目下的 Tool 列表',
+    title: '查看工具',
+    desc: '管理项目下的工具列表',
     icon: Tools,
     tone: 'blue',
     disabled: !project.value?.id,
@@ -479,8 +512,8 @@ const quickEntries = computed(() => [
     action: () => goCapability('/capability'),
   },
   {
-    title: '查看 Agent',
-    desc: '管理项目下的 Agent 列表',
+    title: '查看智能体',
+    desc: '管理项目下的智能体列表',
     icon: User,
     tone: 'orange',
     disabled: !project.value?.id,
@@ -560,6 +593,29 @@ function runtimeTypes(instance: ProjectInstance): string[] {
   const raw = runtimeMeta(instance).runtimeTypes
   if (Array.isArray(raw)) return raw.filter(Boolean).map(String)
   return raw ? [String(raw)] : ['SPRING_BOOT_EMBEDDED']
+}
+
+async function purgeOfflineInstances() {
+  if (!projectCode.value || offlineInstanceCount.value === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${offlineInstanceCount.value} 条 OFFLINE/STALE 状态的实例心跳记录。是否继续？`,
+      '清理离线实例',
+      { type: 'warning', confirmButtonText: '清理', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  purgingOffline.value = true
+  try {
+    const { data } = await purgeRegistryProjectOfflineInstances(projectCode.value, 0)
+    ElMessage.success(`已清理 ${data.removed} 条离线实例`)
+    await loadInstances()
+  } catch (error) {
+    ElMessage.error((error as Error).message || '清理失败')
+  } finally {
+    purgingOffline.value = false
+  }
 }
 
 async function setInstanceStatus(instance: ProjectInstance, status: ProjectInstance['status']) {
@@ -949,6 +1005,12 @@ function goCapabilitySync() {
 .table-header {
   justify-content: space-between;
   gap: 16px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .info-icon {

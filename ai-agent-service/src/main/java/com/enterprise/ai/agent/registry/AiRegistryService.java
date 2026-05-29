@@ -101,6 +101,12 @@ public class AiRegistryService {
         }
         registrySecurityService.upsertCredential(project.getId(), project.getProjectCode(),
                 request.appKey(), request.appSecret());
+        registrySecurityService.updateEmbedPolicy(
+                project.getProjectCode(),
+                request.appKey(),
+                request.allowedOrigins(),
+                request.allowedAgentIds(),
+                request.tokenTtlSeconds());
         return toProjectResponse(project);
     }
 
@@ -1009,6 +1015,27 @@ public class AiRegistryService {
         return entity;
     }
 
+    /**
+     * 删除项目下处于 OFFLINE/STALE 状态、且最后心跳时间早于截止时间的实例记录。
+     * 用于管理端清理因历史 PID 变化等原因累积出来的"死实例"心跳行。
+     */
+    @Transactional
+    public int purgeOfflineInstances(String projectCode, int minIdleMinutes) {
+        ScanProjectEntity project = getProject(projectCode);
+        int minutes = Math.max(0, minIdleMinutes);
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(minutes);
+        List<ProjectInstanceEntity> targets = instanceMapper.selectList(Wrappers.<ProjectInstanceEntity>lambdaQuery()
+                .eq(ProjectInstanceEntity::getProjectCode, project.getProjectCode())
+                .in(ProjectInstanceEntity::getStatus, List.of("OFFLINE", "STALE"))
+                .and(q -> q.isNull(ProjectInstanceEntity::getLastHeartbeatAt)
+                        .or()
+                        .lt(ProjectInstanceEntity::getLastHeartbeatAt, cutoff)));
+        for (ProjectInstanceEntity entity : targets) {
+            instanceMapper.deleteById(entity.getId());
+        }
+        return targets.size();
+    }
+
     @Transactional
     public int markStaleInstancesOffline(int heartbeatTtlSeconds) {
         int ttl = Math.max(30, heartbeatTtlSeconds);
@@ -1417,12 +1444,16 @@ public class AiRegistryService {
     }
 
     private String firstText(String... values) {
+        String fallback = null;
         for (String v : values) {
+            if (v != null) {
+                fallback = v;
+            }
             if (StringUtils.hasText(v)) {
                 return v.trim();
             }
         }
-        return null;
+        return fallback;
     }
 
     private String defaultString(String value, String fallback) {

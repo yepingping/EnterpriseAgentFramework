@@ -59,6 +59,24 @@ class EmbeddedRuntimeDispatchServiceTest {
         assertEquals("Runtime 实例未被允许执行 Embedded Runtime: blocked", ex.getMessage());
     }
 
+    @Test
+    void rejectsCapabilityHostBeforeRemoteDispatch() {
+        AiRegistryService registryService = mock(AiRegistryService.class);
+        ProjectInstanceEntity instance = instance("ONLINE");
+        instance.setMetadataJson("""
+                {"runtimePlacement":"CAPABILITY_HOST","runtimeTypes":["SPRING_BOOT2_CAPABILITY_HOST"]}
+                """);
+        when(registryService.findInstance("crm", "i-1")).thenReturn(instance);
+        when(registryService.governancePolicy(instance)).thenReturn(policy(false, true));
+        EmbeddedRuntimeDispatchService service = new EmbeddedRuntimeDispatchService(registryService);
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> service.dispatch(request()));
+
+        assertEquals("Capability Host 只能提供业务能力调用，不能作为 Agent Runtime 执行目标", ex.getMessage());
+    }
+
     private EmbeddedRuntimeDispatchRequest request() {
         return new EmbeddedRuntimeDispatchRequest("crm", "i-1", "agent-a", "hello", "s1", "u1", Map.of(), Map.of());
     }

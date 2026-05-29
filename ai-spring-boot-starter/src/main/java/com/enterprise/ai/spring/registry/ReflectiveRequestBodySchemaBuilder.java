@@ -243,7 +243,13 @@ public class ReflectiveRequestBodySchemaBuilder {
         if ("java.math.BigDecimal".equals(c.getName()) || "java.math.BigInteger".equals(c.getName())) {
             return true;
         }
-        if (pkg.startsWith("java.time.")) {
+        if ("java.time".equals(pkg) || pkg.startsWith("java.time.")) {
+            return true;
+        }
+        if ("java.util.Date".equals(c.getName())
+                || "java.sql.Date".equals(c.getName())
+                || "java.sql.Time".equals(c.getName())
+                || "java.sql.Timestamp".equals(c.getName())) {
             return true;
         }
         if (c.isEnum()) {

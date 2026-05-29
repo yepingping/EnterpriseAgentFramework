@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>能力内核</h2>
-        <p>Capability / Composition / Tool / Interaction</p>
+        <p>能力 / 组合 / 工具 / 交互</p>
       </div>
       <div class="header-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadModules">刷新</el-button>
@@ -19,12 +19,13 @@
           row-key="code"
           highlight-current-row
           class="module-table"
+          empty-text="暂无数据"
           @current-change="selectModule"
         >
           <el-table-column label="能力模块" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="module-cell">
-                <strong>{{ row.name || row.code }}</strong>
+                <strong>{{ formatCapabilityDisplayName(row.name, row.code) }}</strong>
                 <span>{{ row.code }}</span>
               </div>
             </template>
@@ -44,7 +45,7 @@
         <template v-else>
           <div class="module-summary">
             <div>
-              <h3>{{ selectedModule.name }}</h3>
+              <h3>{{ formatCapabilityDisplayName(selectedModule.name, selectedModule.code) }}</h3>
               <span>{{ selectedModule.code }} / {{ selectedModule.version || '1.0.0' }}</span>
             </div>
             <div class="summary-actions">
@@ -63,14 +64,22 @@
               <div class="tab-toolbar">
                 <el-button type="primary" :icon="Plus" @click="openToolDialog()">新建工具</el-button>
               </div>
-              <el-table :data="tools" v-loading="assetLoading" row-key="qualifiedName" stripe>
-                <el-table-column prop="name" label="工具" min-width="160" show-overflow-tooltip />
-                <el-table-column prop="qualifiedName" label="Qualified Name" min-width="220" show-overflow-tooltip />
-                <el-table-column prop="executorType" label="执行器" width="110" />
-                <el-table-column label="可见" width="90" align="center">
+              <el-table :data="tools" v-loading="assetLoading" row-key="qualifiedName" stripe empty-text="暂无数据">
+                <el-table-column prop="name" label="工具" min-width="160" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ formatCapabilityDisplayName(row.name, row.toolCode) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="qualifiedName" label="限定名" min-width="220" show-overflow-tooltip />
+                <el-table-column prop="executorType" label="执行器" width="110">
+                  <template #default="{ row }">
+                    {{ formatExecutorTypeLabel(row.executorType) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="可见" width="100" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.agentVisible ? 'success' : 'info'" size="small">
-                      {{ row.agentVisible ? 'Agent' : '隐藏' }}
+                      {{ formatAgentVisibleLabel(row.agentVisible) }}
                     </el-tag>
                   </template>
                 </el-table-column>
@@ -87,13 +96,17 @@
               <div class="tab-toolbar">
                 <el-button type="primary" :icon="Plus" @click="openCompositionDialog()">新建组合</el-button>
               </div>
-              <el-table :data="compositions" v-loading="assetLoading" row-key="qualifiedName" stripe>
-                <el-table-column prop="name" label="组合" min-width="160" show-overflow-tooltip />
-                <el-table-column prop="qualifiedName" label="Qualified Name" min-width="220" show-overflow-tooltip />
-                <el-table-column label="可见" width="90" align="center">
+              <el-table :data="compositions" v-loading="assetLoading" row-key="qualifiedName" stripe empty-text="暂无数据">
+                <el-table-column prop="name" label="组合" min-width="160" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ formatCapabilityDisplayName(row.name, row.compositionCode) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="qualifiedName" label="限定名" min-width="220" show-overflow-tooltip />
+                <el-table-column label="可见" width="100" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.agentVisible ? 'success' : 'info'" size="small">
-                      {{ row.agentVisible ? 'Agent' : '隐藏' }}
+                      {{ formatAgentVisibleLabel(row.agentVisible) }}
                     </el-tag>
                   </template>
                 </el-table-column>
@@ -110,14 +123,22 @@
               <div class="tab-toolbar">
                 <el-button type="primary" :icon="Plus" @click="openInteractionDialog()">新建交互</el-button>
               </div>
-              <el-table :data="interactions" v-loading="assetLoading" row-key="qualifiedName" stripe>
-                <el-table-column prop="name" label="交互定义" min-width="160" show-overflow-tooltip />
-                <el-table-column prop="qualifiedName" label="Qualified Name" min-width="220" show-overflow-tooltip />
-                <el-table-column prop="interactionType" label="类型" width="150" />
-                <el-table-column label="可见" width="90" align="center">
+              <el-table :data="interactions" v-loading="assetLoading" row-key="qualifiedName" stripe empty-text="暂无数据">
+                <el-table-column prop="name" label="交互定义" min-width="160" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ formatCapabilityDisplayName(row.name, row.interactionCode) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="qualifiedName" label="限定名" min-width="220" show-overflow-tooltip />
+                <el-table-column prop="interactionType" label="类型" width="150">
+                  <template #default="{ row }">
+                    {{ formatInteractionTypeLabel(row.interactionType) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="可见" width="100" align="center">
                   <template #default="{ row }">
                     <el-tag :type="row.agentVisible ? 'success' : 'info'" size="small">
-                      {{ row.agentVisible ? 'Agent' : '隐藏' }}
+                      {{ formatAgentVisibleLabel(row.agentVisible) }}
                     </el-tag>
                   </template>
                 </el-table-column>
@@ -146,9 +167,12 @@
         </el-form-item>
         <el-form-item label="来源">
           <el-select v-model="moduleForm.sourceType" style="width: 100%">
-            <el-option label="BUILTIN" value="BUILTIN" />
-            <el-option label="SDK" value="SDK" />
-            <el-option label="PLUGIN" value="PLUGIN" />
+            <el-option
+              v-for="item in MODULE_SOURCE_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="启用">
@@ -171,9 +195,12 @@
         </el-form-item>
         <el-form-item label="执行器类型">
           <el-select v-model="toolForm.executorType" style="width: 100%">
-            <el-option label="BEAN" value="BEAN" />
-            <el-option label="ECHO" value="ECHO" />
-            <el-option label="HTTP" value="HTTP" />
+            <el-option
+              v-for="item in EXECUTOR_TYPE_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="执行器引用">
@@ -184,7 +211,7 @@
         </el-form-item>
         <el-form-item label="开关">
           <el-switch v-model="toolForm.enabled" active-text="启用" inactive-text="停用" />
-          <el-switch v-model="toolForm.agentVisible" class="inline-switch" active-text="Agent 可见" />
+          <el-switch v-model="toolForm.agentVisible" class="inline-switch" active-text="智能体可见" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -204,12 +231,12 @@
         <el-form-item label="描述">
           <el-input v-model="compositionForm.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="GraphSpec JSON">
+        <el-form-item label="图规格 JSON">
           <el-input v-model="compositionForm.graphSpecJson" type="textarea" :rows="12" />
         </el-form-item>
         <el-form-item label="开关">
           <el-switch v-model="compositionForm.enabled" active-text="启用" inactive-text="停用" />
-          <el-switch v-model="compositionForm.agentVisible" class="inline-switch" active-text="Agent 可见" />
+          <el-switch v-model="compositionForm.agentVisible" class="inline-switch" active-text="智能体可见" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -228,21 +255,23 @@
         </el-form-item>
         <el-form-item label="交互类型">
           <el-select v-model="interactionForm.interactionType" style="width: 100%">
-            <el-option label="采集输入 COLLECT_INPUT" value="COLLECT_INPUT" />
-            <el-option label="展示输出 PRESENT_OUTPUT" value="PRESENT_OUTPUT" />
-            <el-option label="用户选择 USER_CHOICE" value="USER_CHOICE" />
-            <el-option label="确认操作 CONFIRM_ACTION" value="CONFIRM_ACTION" />
+            <el-option
+              v-for="item in INTERACTION_TYPE_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="interactionForm.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="InteractionSpec">
+        <el-form-item label="交互规格 JSON">
           <el-input v-model="interactionForm.specJson" type="textarea" :rows="12" />
         </el-form-item>
         <el-form-item label="开关">
           <el-switch v-model="interactionForm.enabled" active-text="启用" inactive-text="停用" />
-          <el-switch v-model="interactionForm.agentVisible" class="inline-switch" active-text="Agent 可见" />
+          <el-switch v-model="interactionForm.agentVisible" class="inline-switch" active-text="智能体可见" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -253,7 +282,7 @@
 
     <el-dialog v-model="runDialogVisible" :title="runTitle" width="760px">
       <el-form label-width="120px">
-        <el-form-item label="Qualified Name">
+        <el-form-item label="限定名">
           <el-input :model-value="runTarget?.qualifiedName" readonly />
         </el-form-item>
         <el-form-item label="入参 JSON">
@@ -303,6 +332,15 @@ import {
   type RuntimeExecuteResult,
   type ToolAsset,
 } from '@/api/capabilityKernel'
+import {
+  EXECUTOR_TYPE_SELECT_OPTIONS,
+  INTERACTION_TYPE_SELECT_OPTIONS,
+  MODULE_SOURCE_SELECT_OPTIONS,
+  formatAgentVisibleLabel,
+  formatCapabilityDisplayName,
+  formatExecutorTypeLabel,
+  formatInteractionTypeLabel,
+} from '@/utils/capabilityLabels'
 
 type RunKind = 'tool' | 'composition'
 type AssetTab = 'tools' | 'compositions' | 'interactions'

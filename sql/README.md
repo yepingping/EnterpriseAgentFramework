@@ -1,8 +1,8 @@
 # 数据库初始化脚本
 
-`sql/init.sql` 是睿池 ReachAI 的唯一 SQL 基线入口，覆盖 `ai-skills-service`、`ai-model-service`、`ai-agent-service` 当前运行所需的表结构、兼容补列、兼容补索引和必要种子数据。
+`sql/init.sql` 是睿池 ReachAI 的唯一 SQL 基线入口，覆盖 `ai-skills-service`、`ai-model-service`、`ai-agent-service` 当前运行所需的表结构、补列、补索引和必要种子数据。
 
-历史上分散在各 service 的升级补丁 SQL 已合并进本脚本并清理。首次上线、测试环境重建、老库对齐基线，都只执行本文件。
+历史上分散在各 service 的升级补丁 SQL 已合并进本脚本并清理。首次上线和测试环境重建执行本文件；已有开发/测试库需要按时间顺序执行根目录 `sql/upgrade-*.sql`。
 
 ## 执行方式
 
@@ -15,8 +15,8 @@ mysql -uroot -p < sql/init.sql
 1. 建库：`CREATE DATABASE IF NOT EXISTS ai_text_service`。
 2. 建表：统一使用 `CREATE TABLE IF NOT EXISTS`。
 3. 补列 / 补索引：通过 `information_schema` 判空后执行。
-4. 种子数据：模型实例种子使用 `INSERT IGNORE`，默认 `DISABLED`，不会覆盖已经人工配置过的模型实例。
-5. 兼容清理：对历史 `model_name` / `embedding_model` 字段做 best-effort 回填后再清理。
+4. 种子数据：模型实例种子使用 `INSERT IGNORE`，默认 `DISABLED`，不会覆盖已经人工配置过的模型实例；嵌入式页面助手等 Agent 种子只在 `key_slug` 不存在时插入。
+5. 迭代清理：对历史 `model_name` / `embedding_model` 字段做 best-effort 回填后再清理。
 
 ## 当前覆盖范围
 
@@ -32,9 +32,11 @@ mysql -uroot -p < sql/init.sql
 ## 部署规则
 
 - 全新环境：直接执行 `sql/init.sql`。
-- 老环境：先备份 `ai_text_service`，再执行 `sql/init.sql` 对齐缺失表、列、索引和兼容字段。
+- 已有开发/测试环境：先备份 `ai_text_service`，再按时间顺序执行根目录 `sql/upgrade-*.sql`。
+- 班组档案嵌入式对话接入已有环境需执行 `sql/upgrade-20260529-team-archive-embedded-agent.sql`，插入 `team-archive-assistant` 页面动作 Agent。
 - 不再执行 `ai-agent-service/sql`、`ai-model-service/sql`、`ai-skills-service/sql` 下的历史补丁；这些目录已清理。
-- 后续 schema 变更必须直接维护根 `sql/init.sql`，或正式引入 Flyway / Liquibase 后把本文件作为 baseline。
+- 后续 schema 变更必须同时维护根 `sql/init.sql` 和一份新的 `sql/upgrade-YYYYMMDD-short-name.sql`，或正式引入 Flyway / Liquibase 后把本文件作为 baseline。
+- 项目默认不为旧数据做复杂兼容迁移；如果升级脚本会清理、重建、重命名或丢弃历史字段 / 数据，必须在 SQL 注释和变更说明中明确写出。
 
 ## 建议验证
 

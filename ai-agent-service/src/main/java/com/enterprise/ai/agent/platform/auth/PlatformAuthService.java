@@ -52,7 +52,7 @@ public class PlatformAuthService {
         if (!properties.getLocal().isEnabled()) {
             return;
         }
-        PlatformRoleEntity adminRole = ensureRole("PLATFORM_ADMIN", "Platform Admin", "Full platform administration", now);
+        PlatformRoleEntity adminRole = ensureRole("PLATFORM_ADMIN", "平台管理员", "平台全量管理与配置", now);
 
         String username = properties.getLocal().getBootstrapAdmin().getUsername();
         PlatformUserEntity admin = userMapper.selectOne(Wrappers.<PlatformUserEntity>lambdaQuery()
@@ -361,11 +361,11 @@ public class PlatformAuthService {
         Map<String, PlatformPermissionEntity> permissions = DEFAULT_PERMISSIONS.stream()
                 .map(this::ensurePermission)
                 .collect(Collectors.toMap(PlatformPermissionEntity::getPermissionCode, Function.identity()));
-        ensureRoleWithPermissions("PLATFORM_ADMIN", "Platform Admin", "Full platform administration", permissions, now);
-        ensureRoleWithPermissions("AGENT_DESIGNER", "Agent Designer", "Create and edit agents and workflows", permissions, now);
-        ensureRoleWithPermissions("PROJECT_OWNER", "Project Owner", "Manage owned projects and project agents", permissions, now);
-        ensureRoleWithPermissions("OPERATOR", "Operator", "Operate, debug and replay runtime sessions", permissions, now);
-        ensureRoleWithPermissions("AUDITOR", "Auditor", "Read audit logs and traces", permissions, now);
+        ensureRoleWithPermissions("PLATFORM_ADMIN", "平台管理员", "平台全量管理与配置", permissions, now);
+        ensureRoleWithPermissions("AGENT_DESIGNER", "智能体设计者", "创建与编辑智能体及工作流", permissions, now);
+        ensureRoleWithPermissions("PROJECT_OWNER", "项目负责人", "管理已分配业务项目", permissions, now);
+        ensureRoleWithPermissions("OPERATOR", "运维操作员", "运行、调试与回放会话", permissions, now);
+        ensureRoleWithPermissions("AUDITOR", "审计员", "只读审计与追踪", permissions, now);
     }
 
     private PlatformRoleEntity ensureRoleWithPermissions(String code,

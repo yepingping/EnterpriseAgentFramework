@@ -3,39 +3,42 @@
     <div class="page-header">
       <div>
         <h2>平台用户与角色</h2>
-        <p>维护 Agent Studio 管理端账号的角色授权，支持 GLOBAL 和 PROJECT 作用域。</p>
+        <p>维护 Agent Studio 管理端账号的角色授权，支持全局与项目两种作用域。</p>
       </div>
       <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
     </div>
 
     <el-table :data="users" v-loading="loading" stripe>
       <el-table-column prop="username" label="用户名" min-width="150" />
-      <el-table-column prop="displayName" label="显示名" min-width="160" />
+      <el-table-column prop="displayName" label="显示名" min-width="160">
+        <template #default="{ row }">
+          {{ formatPlatformUserDisplayName(row.displayName, row.username) }}
+        </template>
+      </el-table-column>
       <el-table-column prop="sourceProvider" label="来源" width="130">
         <template #default="{ row }">
-          <el-tag size="small">{{ row.sourceProvider }}</el-tag>
+          <el-tag size="small">{{ formatSourceProviderLabel(row.sourceProvider) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="110">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
-            {{ row.status }}
-          </el-tag>
+          <CommonStatusTag :status="row.status" />
         </template>
       </el-table-column>
       <el-table-column prop="lastLoginAt" label="最近登录" width="180" />
-      <el-table-column label="角色授权" min-width="280">
+      <el-table-column label="角色授权" min-width="300">
         <template #default="{ row }">
           <div class="grant-list">
             <el-tag
-              v-for="grant in grantsByUser[row.id] || []"
-              :key="`${grant.roleId}-${grant.scopeType}-${grant.scopeValue}`"
+              v-for="grant in displayGrantsForUser(row.id)"
+              :key="`${grant.roleId}-${grant.scopeType}-${grant.scopeSummary}`"
               size="small"
               effect="plain"
             >
-              {{ grant.roleCode || grant.roleId }} · {{ grant.scopeType }}:{{ grant.scopeValue }}
+              {{ formatPlatformRoleLabel(grant.roleCode, grant.roleName) }} ·
+              {{ formatScopeTypeLabel(grant.scopeType) }}:{{ grant.scopeSummary }}
             </el-tag>
-            <span v-if="!(grantsByUser[row.id] || []).length" class="empty-text">未分配</span>
+            <span v-if="!displayGrantsForUser(row.id).length" class="empty-text">未分配</span>
           </div>
         </template>
       </el-table-column>
@@ -46,10 +49,10 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogOpen" title="角色授权" width="760px">
+    <el-dialog v-model="dialogOpen" title="角色授权" width="820px">
       <div v-if="currentUser" class="dialog-user">
-        <strong>{{ currentUser.displayName || currentUser.username }}</strong>
-        <span>{{ currentUser.username }} · {{ currentUser.sourceProvider }}</span>
+        <strong>{{ formatPlatformUserDisplayName(currentUser.displayName, currentUser.username) }}</strong>
+        <span>{{ currentUser.username }} · {{ formatSourceProviderLabel(currentUser.sourceProvider) }}</span>
       </div>
 
       <div class="grant-editor">
@@ -58,18 +61,29 @@
             <el-option
               v-for="role in roles"
               :key="role.id"
-              :label="`${role.roleCode} · ${role.roleName}`"
+              :label="formatPlatformRoleOptionLabel(role.roleCode, role.roleName)"
               :value="role.id"
             />
           </el-select>
-          <el-select v-model="grant.scopeType" class="scope-type">
-            <el-option label="GLOBAL" value="GLOBAL" />
-            <el-option label="PROJECT" value="PROJECT" />
+          <el-select
+            v-model="grant.scopeType"
+            class="scope-type"
+            @change="handleScopeTypeChange(grant)"
+          >
+            <el-option
+              v-for="item in SCOPE_TYPE_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
-          <el-input
-            v-model="grant.scopeValue"
-            :placeholder="grant.scopeType === 'PROJECT' ? 'projectId / projectCode' : '*'"
-          />
+          <div class="scope-value">
+            <ProjectMultiSelect
+              v-if="grant.scopeType === 'PROJECT'"
+              v-model="grant.projectIds"
+            />
+            <el-input v-else model-value="全部项目" disabled />
+          </div>
           <el-button :icon="Delete" circle @click="removeGrant(index)" />
         </div>
       </div>
@@ -88,19 +102,32 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
+import CommonStatusTag from '@/components/CommonStatusTag.vue'
+import ProjectMultiSelect from '@/components/ProjectMultiSelect.vue'
+import {
+  SCOPE_TYPE_SELECT_OPTIONS,
+  formatPlatformRoleLabel,
+  formatPlatformRoleOptionLabel,
+  formatPlatformUserDisplayName,
+  formatScopeTypeLabel,
+  formatSourceProviderLabel,
+} from '@/utils/uiLabels'
+import {
+  editorRowsToCommands,
+  grantsToEditorRows,
+  groupGrantsForDisplay,
+  type PlatformGrantEditorRow,
+} from '@/utils/platformUserGrants'
 import {
   listPlatformRoles,
   listPlatformUserRoleGrants,
   listPlatformUsers,
   savePlatformUserRoleGrants,
 } from '@/api/platformAuth'
-import type {
-  PlatformRoleView,
-  PlatformUserRoleGrant,
-  PlatformUserRoleGrantCommand,
-  PlatformUserView,
-} from '@/api/platformAuth'
+import type { PlatformRoleView, PlatformUserRoleGrant, PlatformUserView } from '@/api/platformAuth'
+import { useProjectStore } from '@/store/project'
 
+const projectStore = useProjectStore()
 const loading = ref(false)
 const saving = ref(false)
 const dialogOpen = ref(false)
@@ -108,7 +135,11 @@ const users = ref<PlatformUserView[]>([])
 const roles = ref<PlatformRoleView[]>([])
 const currentUser = ref<PlatformUserView | null>(null)
 const grantsByUser = reactive<Record<number, PlatformUserRoleGrant[]>>({})
-const editingGrants = ref<PlatformUserRoleGrantCommand[]>([])
+const editingGrants = ref<PlatformGrantEditorRow[]>([])
+
+function displayGrantsForUser(userId: number) {
+  return groupGrantsForDisplay(grantsByUser[userId] || [], projectStore.projects)
+}
 
 async function reload() {
   loading.value = true
@@ -116,6 +147,7 @@ async function reload() {
     const [{ data: userData }, { data: roleData }] = await Promise.all([
       listPlatformUsers(),
       listPlatformRoles(),
+      projectStore.fetchProjects(),
     ])
     users.value = userData ?? []
     roles.value = (roleData ?? []).filter((role) => role.status === 'ACTIVE')
@@ -132,12 +164,11 @@ async function loadUserGrants(userId: number) {
 
 async function openGrants(user: PlatformUserView) {
   currentUser.value = user
-  await loadUserGrants(user.id)
-  editingGrants.value = (grantsByUser[user.id] || []).map((grant) => ({
-    roleId: grant.roleId,
-    scopeType: grant.scopeType || 'GLOBAL',
-    scopeValue: grant.scopeValue || '*',
-  }))
+  await Promise.all([loadUserGrants(user.id), projectStore.fetchProjects()])
+  editingGrants.value = grantsToEditorRows(grantsByUser[user.id] || [], projectStore.projects)
+  if (!editingGrants.value.length) {
+    addGrant()
+  }
   dialogOpen.value = true
 }
 
@@ -145,8 +176,16 @@ function addGrant() {
   editingGrants.value.push({
     roleId: roles.value[0]?.id ?? 0,
     scopeType: 'GLOBAL',
-    scopeValue: '*',
+    projectIds: [],
   })
+}
+
+function handleScopeTypeChange(grant: PlatformGrantEditorRow) {
+  if (grant.scopeType === 'PROJECT') {
+    grant.projectIds = []
+    return
+  }
+  grant.projectIds = []
 }
 
 function removeGrant(index: number) {
@@ -155,14 +194,22 @@ function removeGrant(index: number) {
 
 async function saveGrants() {
   if (!currentUser.value) return
-  const invalid = editingGrants.value.some((grant) => !grant.roleId || !grant.scopeType || !grant.scopeValue)
-  if (invalid) {
-    ElMessage.warning('请完整填写角色、作用域类型和作用域值')
+  const invalidRole = editingGrants.value.some((grant) => !grant.roleId)
+  const invalidProject = editingGrants.value.some(
+    (grant) => grant.scopeType === 'PROJECT' && grant.projectIds.length === 0,
+  )
+  if (invalidRole) {
+    ElMessage.warning('请选择角色')
+    return
+  }
+  if (invalidProject) {
+    ElMessage.warning('项目作用域请至少选择一个项目')
     return
   }
   saving.value = true
   try {
-    await savePlatformUserRoleGrants(currentUser.value.id, editingGrants.value)
+    const payload = editorRowsToCommands(editingGrants.value, projectStore.projects)
+    await savePlatformUserRoleGrants(currentUser.value.id, payload)
     await loadUserGrants(currentUser.value.id)
     ElMessage.success('角色授权已保存')
     dialogOpen.value = false
@@ -225,9 +272,13 @@ onMounted(reload)
 
 .grant-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 130px minmax(160px, 1fr) 40px;
+  grid-template-columns: minmax(200px, 1fr) 120px minmax(240px, 1.4fr) 40px;
   gap: 8px;
   align-items: center;
+}
+
+.scope-value {
+  min-width: 0;
 }
 
 @media (max-width: 760px) {

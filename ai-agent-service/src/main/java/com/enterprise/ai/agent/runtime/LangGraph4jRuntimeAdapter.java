@@ -216,7 +216,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             return false;
         }
         List<GraphSpec.Node> nodes = orderedExecutableNodes(definition);
-        return nodes.stream().anyMatch(this::isLlmNode) && nodes.stream().allMatch(this::isSupportedNode);
+        return !nodes.isEmpty() && nodes.stream().allMatch(this::isSupportedNode);
     }
 
     @Override
@@ -231,9 +231,6 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         GraphSpec spec = graphSpec(definition);
         if (spec == null || spec.getNodes() == null || spec.getNodes().isEmpty()) {
             return "LangGraph4j requires graphSpec.nodes.";
-        }
-        if (orderedExecutableNodes(definition).stream().noneMatch(this::isLlmNode)) {
-            return "LangGraph4j graphSpec must contain at least one LLM node.";
         }
         return "LangGraph4j currently supports USER_INPUT, INTERACTION, PAGE_ACTION, LLM, TOOL, CAPABILITY, IF_ELSE, VARIABLE_ASSIGN, TEMPLATE, ANSWER, CODE, INTENT_CLASSIFIER, VARIABLE_AGGREGATOR, HUMAN_APPROVAL, LOOP, KNOWLEDGE_WRITE, DOCUMENT_EXTRACT, MCP_CALL, PARAMETER_EXTRACT, HTTP_REQUEST, KNOWLEDGE_RETRIEVAL nodes and simple conditional edges.";
     }
@@ -2260,7 +2257,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         String component = asString(raw.get("component"));
         Object data = raw.get("data");
         Map<String, Object> schema = safeMap(asMap(firstNonNull(raw.get("renderSchema"), raw.get("schema"))));
-        String rendererKey = firstNonBlank(asString(raw.get("rendererKey")), asString(schema.get("rendererKey")));
+        String rendererKey = nullToEmpty(firstNonBlank(asString(raw.get("rendererKey")), asString(schema.get("rendererKey"))));
         Map<String, Object> extension = rendererKey.isBlank() ? Map.of() : Map.of("rendererKey", rendererKey);
         Map<String, Object> summary = new LinkedHashMap<>();
         if (data instanceof Map<?, ?> map) {
@@ -3278,7 +3275,12 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         if (!answer.isBlank()) {
             return answer;
         }
-        return stringify(state.value(LAST_OUTPUT).orElse(""));
+        Object lastOutput = state.value(LAST_OUTPUT).orElse("");
+        Map<String, Object> pageAction = safeMap(asMap(lastOutput));
+        if ("page.action.requested".equals(asString(pageAction.get("type")))) {
+            return firstNonBlank(asString(pageAction.get("message")), asString(pageAction.get("title")), "已为你准备页面查询。");
+        }
+        return stringify(lastOutput);
     }
 
     private List<String> steps(List<GraphSpec.Node> nodes) {

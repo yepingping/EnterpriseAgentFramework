@@ -2,8 +2,10 @@ package com.enterprise.ai.agent.identity;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,5 +39,30 @@ class EmbedSessionServiceTest {
 
         assertEquals("route does not match embed token", ex.getMessage());
         verify(mapper, never()).insert(any());
+    }
+
+    @Test
+    void createStoresExpiryInLocalApplicationTime() {
+        EmbedSessionMapper mapper = mock(EmbedSessionMapper.class);
+        EmbedSessionService service = new EmbedSessionService(mapper, new ObjectMapper());
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setTenantId("default");
+        claims.setAppId("qmssmp-teams-construction-service");
+        claims.setProjectCode("qmssmp-teams-construction-service");
+        claims.setAgentId("team-archive-assistant");
+        claims.setExternalUserId("ztadmin");
+        claims.setGlobalUserId("ztadmin");
+        claims.setPageInstanceId("page-1");
+        claims.setRoute("/team-build/depart-management");
+        claims.setOrigin("http://localhost:9200");
+        claims.setExpiresAt(Instant.now().plusSeconds(1800).getEpochSecond());
+
+        service.create(claims, "page-1", "/team-build/depart-management", List.of("qmssmp.teamArchive.search"), "test");
+
+        ArgumentCaptor<EmbedSessionEntity> captor = ArgumentCaptor.forClass(EmbedSessionEntity.class);
+        verify(mapper).insert(captor.capture());
+        LocalDateTime expiresAt = captor.getValue().getExpiresAt();
+        assertEquals(true, expiresAt.isAfter(LocalDateTime.now().plusMinutes(20)));
     }
 }

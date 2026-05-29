@@ -91,6 +91,9 @@ public class EmbeddedRuntimeDispatchService {
         if (!StringUtils.hasText(instance.getBaseUrl())) {
             throw new IllegalStateException("Runtime 实例缺少 baseUrl");
         }
+        if (RuntimeInstanceRoles.isCapabilityHost(instance)) {
+            throw new IllegalStateException("Capability Host 只能提供业务能力调用，不能作为 Agent Runtime 执行目标");
+        }
         if (policy != null && policy.disabled()) {
             throw new IllegalStateException("Runtime 实例已被治理策略禁用: " + policy.message());
         }

@@ -9,10 +9,10 @@
     </div>
 
     <el-form class="filters" inline>
-      <el-form-item label="App">
+      <el-form-item label="应用">
         <el-input v-model="filters.appId" clearable placeholder="projectCode / appId" />
       </el-form-item>
-      <el-form-item label="Agent">
+      <el-form-item label="智能体">
         <el-input v-model="filters.agentId" clearable placeholder="agentId" />
       </el-form-item>
       <el-form-item label="用户">
@@ -24,87 +24,95 @@
     </el-form>
 
     <el-card shadow="never">
-      <template #header>Embed app policy</template>
+      <template #header>嵌入应用策略</template>
       <el-form class="renderer-form" inline>
-        <el-form-item label="Project">
+        <el-form-item label="项目">
           <el-input v-model="credentialProjectCode" clearable placeholder="projectCode" />
         </el-form-item>
         <el-form-item>
-          <el-button :loading="credentialLoading" @click="loadCredentialPolicies">Load policies</el-button>
+          <el-button :loading="credentialLoading" @click="loadCredentialPolicies">加载策略</el-button>
         </el-form-item>
       </el-form>
       <el-table :data="credentialPolicies" row-key="id" size="small">
-        <el-table-column prop="projectCode" label="Project" width="150" />
-        <el-table-column prop="appKey" label="App Key" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="allowedOriginsJson" label="Allowed Origins" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="allowedAgentIdsJson" label="Allowed Agents" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="tokenTtlSeconds" label="TTL" width="90" />
-        <el-table-column prop="status" label="Status" width="100" />
-        <el-table-column label="Ops" width="120">
+        <el-table-column prop="projectCode" label="项目" width="150" />
+        <el-table-column prop="appKey" label="应用密钥" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="allowedOriginsJson" label="允许来源" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="allowedAgentIdsJson" label="允许智能体" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="tokenTtlSeconds" label="令牌 TTL" width="90" />
+        <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="editCredentialPolicy(row)">Edit</el-button>
+            <CommonStatusTag :status="row.status" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="editCredentialPolicy(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-form v-if="editingCredentialId" class="policy-editor" label-width="120px">
-        <el-form-item label="Allowed Origins">
+        <el-form-item label="允许来源">
           <el-input v-model="credentialOriginsText" type="textarea" :rows="2" placeholder="https://app.example.com, https://*.corp.example.com" />
         </el-form-item>
-        <el-form-item label="Allowed Agents">
+        <el-form-item label="允许智能体">
           <el-input v-model="credentialAgentsText" placeholder="agent-a,agent-b" />
         </el-form-item>
-        <el-form-item label="Token TTL">
+        <el-form-item label="令牌 TTL">
           <el-input-number v-model="credentialTtlSeconds" :min="60" :max="3600" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="credentialSaving" @click="saveCredentialPolicy">Save policy</el-button>
+          <el-button type="primary" :loading="credentialSaving" @click="saveCredentialPolicy">保存策略</el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <el-card shadow="never">
-      <template #header>Embed renderer registry</template>
+      <template #header>嵌入渲染器注册表</template>
       <el-form class="renderer-form" inline>
-        <el-form-item label="App">
+        <el-form-item label="应用">
           <el-input v-model="rendererForm.appId" clearable placeholder="appId" />
         </el-form-item>
-        <el-form-item label="Renderer">
+        <el-form-item label="渲染器">
           <el-input v-model="rendererForm.rendererKey" clearable placeholder="bzsdk.teamProfile" />
         </el-form-item>
-        <el-form-item label="Version">
+        <el-form-item label="版本">
           <el-input v-model="rendererForm.version" clearable placeholder="1.0.0" />
         </el-form-item>
-        <el-form-item label="Agents">
+        <el-form-item label="智能体">
           <el-input v-model="rendererAgentsText" clearable placeholder="agent-a,agent-b" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="rendererSaving" @click="saveRenderer">Save renderer</el-button>
-          <el-button :loading="rendererLoading" @click="loadRenderers">Refresh</el-button>
+          <el-button type="primary" :loading="rendererSaving" @click="saveRenderer">保存渲染器</el-button>
+          <el-button :loading="rendererLoading" @click="loadRenderers">刷新</el-button>
         </el-form-item>
       </el-form>
       <el-table :data="renderers" row-key="id" size="small">
-        <el-table-column prop="appId" label="App" width="140" />
-        <el-table-column prop="rendererKey" label="Renderer" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="version" label="Version" width="120" />
-        <el-table-column prop="allowedAgentIdsJson" label="Allowed Agents" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" label="Status" width="100" />
-        <el-table-column label="Ops" width="180">
+        <el-table-column prop="appId" label="应用" width="140" />
+        <el-table-column prop="rendererKey" label="渲染器" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="version" label="版本" width="120" />
+        <el-table-column prop="allowedAgentIdsJson" label="允许智能体" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="editRenderer(row)">Edit</el-button>
-            <el-button link type="danger" @click="disableRenderer(row)">Disable</el-button>
+            <CommonStatusTag :status="row.status" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="editRenderer(row)">编辑</el-button>
+            <el-button link type="danger" @click="disableRenderer(row)">停用</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
     <el-table :data="sessions" row-key="sessionId" @row-click="selectSession">
-      <el-table-column prop="sessionId" label="Session" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="appId" label="App" width="130" />
-      <el-table-column prop="agentId" label="Agent" width="150" show-overflow-tooltip />
+      <el-table-column prop="sessionId" label="会话 ID" min-width="220" show-overflow-tooltip />
+      <el-table-column prop="appId" label="应用" width="130" />
+      <el-table-column prop="agentId" label="智能体" width="150" show-overflow-tooltip />
       <el-table-column prop="externalUserId" label="用户" width="150" show-overflow-tooltip />
       <el-table-column prop="pageInstanceId" label="页面实例" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="origin" label="Origin" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="route" label="Route" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="origin" label="来源域" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="route" label="路由" min-width="160" show-overflow-tooltip />
       <el-table-column prop="status" label="状态" width="100" />
       <el-table-column prop="createdAt" label="创建时间" width="180" />
     </el-table>
@@ -113,8 +121,8 @@
       <el-card shadow="never">
         <template #header>页面动作</template>
         <el-table :data="pageActions" row-key="id" size="small">
-          <el-table-column prop="requestId" label="Request" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="actionKey" label="Action" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="requestId" label="请求 ID" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="actionKey" label="动作" min-width="160" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" width="120" />
           <el-table-column prop="targetPageInstanceId" label="页面实例" min-width="160" show-overflow-tooltip />
           <el-table-column prop="errorMessage" label="错误" min-width="160" show-overflow-tooltip />
@@ -127,7 +135,7 @@
           <el-table-column prop="eventType" label="事件" width="150" />
           <el-table-column prop="role" label="角色" width="90" />
           <el-table-column prop="content" label="内容" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="traceId" label="Trace" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="traceId" label="追踪 ID" min-width="140" show-overflow-tooltip />
         </el-table>
       </el-card>
     </div>
@@ -136,6 +144,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import CommonStatusTag from '@/components/CommonStatusTag.vue'
 import {
   createEmbedRenderer,
   disableEmbedRenderer as disableEmbedRendererApi,

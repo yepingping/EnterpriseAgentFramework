@@ -2,9 +2,12 @@ package com.enterprise.ai.agent.agent;
 
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.registry.AiRegistryService;
+import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
 import com.enterprise.ai.agent.runtime.AgentRuntimeRequest;
 import com.enterprise.ai.agent.runtime.AgentRuntimeSelector;
 import com.enterprise.ai.agent.runtime.AgentRuntimeValidationResult;
+import com.enterprise.ai.agent.runtime.RuntimeInstanceRoles;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +45,7 @@ public class AgentReleaseValidationService {
 
     private final AgentRuntimeSelector runtimeSelector;
     private final ToolDefinitionService toolDefinitionService;
+    private final AiRegistryService registryService;
 
     public AgentReleaseValidationResult validate(AgentDefinition definition) {
         AgentReleaseValidationResult.Builder report = AgentReleaseValidationResult.builder();
@@ -65,7 +69,7 @@ public class AgentReleaseValidationService {
         if (!definition.isEnabled()) {
             report.warn("AGENT_DISABLED", null, "Agent 当前未启用，发布后网关仍不可调用");
         }
-        if (!StringUtils.hasText(definition.getModelInstanceId())) {
+        if (requiresModelInstance(definition) && !StringUtils.hasText(definition.getModelInstanceId())) {
             report.error("AGENT_MODEL_EMPTY", null, "模型实例不能为空");
         }
     }
@@ -88,7 +92,24 @@ public class AgentReleaseValidationService {
             if (target == null) {
                 report.error("EMBEDDED_TARGET_MISSING", null,
                         "本地/混合运行必须选择一个 Runtime 实例");
+            } else {
+                validateEmbeddedRuntimeTarget(target, report);
             }
+        }
+    }
+
+    private void validateEmbeddedRuntimeTarget(Map<String, Object> target,
+                                               AgentReleaseValidationResult.Builder report) {
+        String projectCode = text(target.get("projectCode"));
+        String instanceId = text(target.get("instanceId"));
+        try {
+            ProjectInstanceEntity instance = registryService.findInstance(projectCode, instanceId);
+            if (RuntimeInstanceRoles.isCapabilityHost(instance)) {
+                report.error("EMBEDDED_TARGET_NOT_AGENT_RUNTIME", null,
+                        "Capability Host 只能提供业务能力调用，不能作为 Agent Runtime 执行目标");
+            }
+        } catch (IllegalArgumentException ex) {
+            report.error("EMBEDDED_TARGET_INVALID", null, ex.getMessage());
         }
     }
 
@@ -134,11 +155,6 @@ public class AgentReleaseValidationService {
             report.error("GRAPH_ENTRY_MISSING", null, "GraphSpec 必须配置入口节点");
         } else if (!byId.containsKey(entry)) {
             report.error("GRAPH_ENTRY_INVALID", entry, "入口节点不存在: " + entry);
-        }
-
-        boolean hasLlm = nodes.stream().anyMatch(node -> node != null && "LLM".equalsIgnoreCase(node.getType()));
-        if (!hasLlm) {
-            report.error("GRAPH_LLM_MISSING", null, "GraphSpec 至少需要一个 LLM 节点");
         }
 
         Map<String, List<GraphSpec.Edge>> outgoing = new HashMap<>();
@@ -758,6 +774,33 @@ public class AgentReleaseValidationService {
         }
         String visibility = normalize(entity.getVisibility(), "PRIVATE");
         return "PUBLIC".equals(visibility) || "SHARED".equals(visibility);
+    }
+
+    private boolean requiresModelInstance(AgentDefinition definition) {
+        if (definition == null) {
+            return false;
+        }
+        String runtimeType = normalize(definition.getRuntimeType(), "AGENTSCOPE");
+        if (!"LANGGRAPH4J".equals(runtimeType)) {
+            return true;
+        }
+        GraphSpec graph = definition.getGraphSpec();
+        List<GraphSpec.Node> nodes = graph == null || graph.getNodes() == null ? List.of() : graph.getNodes();
+        return nodes.stream().anyMatch(this::nodeRequiresModel);
+    }
+
+    private boolean nodeRequiresModel(GraphSpec.Node node) {
+        if (node == null) {
+            return false;
+        }
+        String type = AgentGraphNodeType.normalize(node.getType());
+        if ("LLM".equals(type)) {
+            return true;
+        }
+        if ("PARAMETER_EXTRACT".equals(type)) {
+            return "LLM".equals(normalize(text(config(node).get("extractMode")), "EXPRESSION"));
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")

@@ -1,7 +1,7 @@
 package com.enterprise.ai.spring.registry;
 
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -11,7 +11,9 @@ public class EafAgentClient {
 
     private final EafRegistryProperties properties;
 
-    private final RestClient restClient;
+    private final RestTemplate restTemplate;
+
+    private final String registryBaseUrl;
 
     private final EafCurrentUserProvider currentUserProvider;
 
@@ -21,7 +23,8 @@ public class EafAgentClient {
 
     public EafAgentClient(EafRegistryProperties properties, EafCurrentUserProvider currentUserProvider) {
         this.properties = properties;
-        this.restClient = RestClient.builder().baseUrl(trimTrailingSlash(properties.getRegistry().getUrl())).build();
+        this.restTemplate = new RestTemplate();
+        this.registryBaseUrl = trimTrailingSlash(properties.getRegistry().getUrl());
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -33,11 +36,7 @@ public class EafAgentClient {
         if (!StringUtils.hasText(agentKey)) {
             throw new IllegalArgumentException("agentKey 不能为空");
         }
-        return restClient.post()
-                .uri("/api/v1/agents/{key}/chat", agentKey)
-                .body(request)
-                .retrieve()
-                .body(Map.class);
+        return restTemplate.postForObject(registryBaseUrl + "/api/v1/agents/{key}/chat", request, Map.class, agentKey);
     }
 
     public AgentChatRequest requestForCurrentUser(String message,

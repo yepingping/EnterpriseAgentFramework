@@ -8,7 +8,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -45,7 +45,7 @@ public class EmbedSessionService {
         entity.setSdkVersion(StringUtils.hasText(sdkVersion) ? sdkVersion.trim() : null);
         entity.setBridgeActionsJson(writeJson(bridgeActions == null ? List.of() : bridgeActions));
         entity.setStatus("ACTIVE");
-        entity.setExpiresAt(LocalDateTime.ofInstant(Instant.ofEpochSecond(claims.getExpiresAt()), ZoneOffset.UTC));
+        entity.setExpiresAt(LocalDateTime.ofInstant(Instant.ofEpochSecond(claims.getExpiresAt()), ZoneId.systemDefault()));
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         mapper.insert(entity);

@@ -3,10 +3,10 @@
     <div class="page-header">
       <div>
         <h2>认证源配置</h2>
-        <p>管理平台登录的 LOCAL、HEADER、OIDC、SAML Provider。敏感字段只允许写入，不回显明文。</p>
+        <p>管理平台登录的本地、网关请求头、OIDC、SAML 等认证源。敏感字段只允许写入，不回显明文。</p>
       </div>
       <div class="header-actions">
-        <el-button type="primary" :icon="Plus" @click="openCreate">新增 Provider</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreate">新增认证源</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
       </div>
     </div>
@@ -17,17 +17,19 @@
           <code>{{ row.providerCode }}</code>
         </template>
       </el-table-column>
-      <el-table-column prop="providerName" label="名称" min-width="180" />
-      <el-table-column prop="providerType" label="类型" width="120">
+      <el-table-column prop="providerName" label="名称" min-width="180">
         <template #default="{ row }">
-          <el-tag size="small">{{ row.providerType }}</el-tag>
+          {{ formatAuthProviderName(row.providerCode, row.providerName) }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="providerType" label="类型" width="150">
+        <template #default="{ row }">
+          <el-tag size="small">{{ formatAuthProviderTypeLabel(row.providerType) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="110">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
-            {{ row.status }}
-          </el-tag>
+          <CommonStatusTag :status="row.status" />
         </template>
       </el-table-column>
       <el-table-column prop="configJson" label="配置 JSON（敏感值已脱敏）" min-width="360" show-overflow-tooltip>
@@ -52,24 +54,30 @@
         style="margin-bottom: 12px"
       />
       <el-form :model="editing" label-width="110px">
-        <el-form-item label="Provider 编码" required>
-          <el-input v-model="editing.providerCode" placeholder="OIDC / SAML / HEADER / LOCAL" />
+        <el-form-item label="认证源编码" required>
+          <el-input v-model="editing.providerCode" placeholder="如 OIDC、SAML、HEADER、LOCAL" />
         </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="editing.providerName" />
         </el-form-item>
         <el-form-item label="类型" required>
           <el-select v-model="editing.providerType">
-            <el-option label="LOCAL" value="LOCAL" />
-            <el-option label="HEADER" value="HEADER" />
-            <el-option label="OIDC" value="OIDC" />
-            <el-option label="SAML" value="SAML" />
+            <el-option
+              v-for="item in AUTH_PROVIDER_TYPE_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="editing.status">
-            <el-option label="ACTIVE" value="ACTIVE" />
-            <el-option label="INACTIVE" value="INACTIVE" />
+            <el-option
+              v-for="item in COMMON_STATUS_SELECT_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="配置 JSON">
@@ -94,6 +102,13 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
+import CommonStatusTag from '@/components/CommonStatusTag.vue'
+import {
+  AUTH_PROVIDER_TYPE_SELECT_OPTIONS,
+  COMMON_STATUS_SELECT_OPTIONS,
+  formatAuthProviderName,
+  formatAuthProviderTypeLabel,
+} from '@/utils/uiLabels'
 import {
   listPlatformAuthProviders,
   savePlatformAuthProvider,
@@ -145,7 +160,7 @@ function openEdit(row: PlatformAuthProviderView) {
 
 async function save() {
   if (!editing.providerCode || !editing.providerType) {
-    ElMessage.warning('请填写 Provider 编码和类型')
+    ElMessage.warning('请填写认证源编码和类型')
     return
   }
   try {

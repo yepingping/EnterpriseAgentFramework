@@ -85,6 +85,13 @@ public class EafRegistryProperties {
         private String environment = "default";
         private String owner;
         private String visibility = "PRIVATE";
+        /**
+         * 稳定实例 ID。配置后将完全覆盖 SDK 内部自动生成的实例 ID，
+         * 用于保证业务系统重启、PID 变化时仍然复用同一行心跳记录。
+         * <p>未配置时，SDK 会按 {@code host + ":" + appName + ":" + port} 的方式
+         * 计算一个和进程生命周期无关的默认值。</p>
+         */
+        private String instanceId;
 
         public String getCode() {
             return code;
@@ -140,6 +147,14 @@ public class EafRegistryProperties {
 
         public void setVisibility(String visibility) {
             this.visibility = visibility;
+        }
+
+        public String getInstanceId() {
+            return instanceId;
+        }
+
+        public void setInstanceId(String instanceId) {
+            this.instanceId = instanceId;
         }
     }
 
