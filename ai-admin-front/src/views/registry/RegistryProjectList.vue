@@ -6,29 +6,11 @@
         <p>统一管理 AI 项目的注册、SDK 接入、API 接入与能力扫描</p>
       </div>
       <div class="hero-actions">
-        <el-button type="primary" size="large" class="primary-action" :icon="Plus" @click="openSdkDialog">
-          创建 SDK 接入
+        <el-button type="primary" size="large" class="primary-action" :icon="Plus" @click="openAccessDialog('sdk')">
+          接入项目
         </el-button>
-        <el-button size="large" class="secondary-action" :icon="Refresh" @click="openScanCreateDialog">扫描项目</el-button>
       </div>
     </div>
-
-    <section v-if="accessBannerVisible" class="access-banner">
-      <button type="button" class="banner-close" aria-label="关闭提示" @click="dismissAccessBanner">
-        <el-icon :size="12"><Close /></el-icon>
-      </button>
-      <div class="banner-icon" aria-hidden="true">
-        <img class="banner-icon-img" src="/SDK接入1.svg" alt="" />
-      </div>
-      <div class="banner-copy">
-        <strong>通过 SDK 接入或扫描项目，快速注册并发现 AI 能力</strong>
-        <span>支持多种接入方式，自动识别 API 能力，生成 SDK，统一管理项目全生命周期。</span>
-      </div>
-      <div class="banner-links">
-        <el-button link type="primary" @click="guideDrawerVisible = true">了解接入流程</el-button>
-        <el-button link type="primary" @click="guideDrawerVisible = true">查看接入文档</el-button>
-      </div>
-    </section>
 
     <div class="metric-grid">
       <div v-for="metric in metrics" :key="metric.label" class="metric-card">
@@ -49,12 +31,6 @@
     </div>
 
     <el-card class="project-card" shadow="never">
-      <el-tabs v-model="activeTab" class="project-tabs">
-        <el-tab-pane label="全部项目" name="all" />
-        <el-tab-pane label="SDK 接入" name="sdk" />
-        <el-tab-pane label="API 接入" name="api" />
-      </el-tabs>
-
       <div class="toolbar">
         <el-input
           v-model="keyword"
@@ -153,11 +129,10 @@
           <div class="empty-body">
             <div class="empty-copy">
               <h3>还没有接入任何 AI 项目</h3>
-              <p>你可以通过创建 SDK 接入新项目，或扫描已有项目自动发现 API 能力。</p>
+              <p>你可以通过创建接入项目，选择 SDK 接入或扫描接入来发现 AI 能力。</p>
             </div>
             <div class="empty-actions">
-              <el-button type="primary" :icon="Plus" @click="openSdkDialog">创建 SDK 接入</el-button>
-              <el-button :icon="Refresh" @click="openScanCreateDialog">扫描已有项目</el-button>
+              <el-button type="primary" :icon="Plus" @click="openAccessDialog('sdk')">接入项目</el-button>
             </div>
           </div>
         </div>
@@ -176,150 +151,132 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="sdkDialogVisible" title="创建 SDK 接入" width="660px">
-      <el-form :model="sdkForm" label-width="120px">
-        <el-form-item label="项目名称" required>
-          <el-input v-model="sdkForm.name" placeholder="如：智能客服平台" />
-        </el-form-item>
-        <el-form-item label="项目编码" required>
-          <el-input v-model="sdkForm.projectCode" placeholder="如：customer-service" />
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="环境">
-              <el-input v-model="sdkForm.environment" placeholder="dev / test / prod" />
+    <el-dialog v-model="accessDialogVisible" title="接入项目" width="760px" destroy-on-close>
+      <el-tabs v-model="accessDialogTab" class="access-dialog-tabs">
+        <el-tab-pane label="SDK 接入" name="sdk">
+          <el-form :model="sdkForm" label-width="120px">
+            <el-form-item label="项目名称" required>
+              <el-input v-model="sdkForm.name" placeholder="如：智能客服平台" />
             </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="负责人">
-              <el-input v-model="sdkForm.owner" placeholder="负责人姓名" />
+            <el-form-item label="项目编码" required>
+              <el-input v-model="sdkForm.projectCode" placeholder="如：customer-service" />
             </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="可见性">
-          <el-select v-model="sdkForm.visibility" style="width: 100%">
-            <el-option v-for="opt in VISIBILITY_SELECT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Base URL" required>
-          <el-input v-model="sdkForm.baseUrl" placeholder="http://localhost:8080" />
-        </el-form-item>
-        <el-form-item label="Context Path">
-          <el-input v-model="sdkForm.contextPath" placeholder="/api" />
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="App Key">
-              <el-input v-model="sdkForm.appKey" placeholder="留空由后端策略处理" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="App Secret">
-              <el-input v-model="sdkForm.appSecret" show-password placeholder="留空由后端策略处理" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <el-button @click="sdkDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveSdkProject">保存并生成接入配置</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="scanDialogVisible" title="扫描已有项目" width="720px">
-      <el-form label-width="120px">
-        <el-form-item label="项目名称" required>
-          <el-input v-model="scanForm.name" placeholder="如 legacy-crm" />
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="项目编码">
-              <el-input v-model="scanForm.projectCode" placeholder="如 order-service" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="接入方式">
-              <el-select v-model="scanForm.projectKind" style="width: 100%">
-                <el-option v-for="opt in PROJECT_KIND_SELECT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="环境">
-              <el-input v-model="scanForm.environment" placeholder="dev / test / prod" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="负责人">
-              <el-input v-model="scanForm.owner" placeholder="负责人姓名" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="项目域名" required>
-              <el-input v-model="scanForm.baseUrl" placeholder="http://localhost:18602" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="环境">
+                  <el-input v-model="sdkForm.environment" placeholder="dev / test / prod" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="负责人">
+                  <el-input v-model="sdkForm.owner" placeholder="负责人姓名" />
+                </el-form-item>
+              </el-col>
+            </el-row>
             <el-form-item label="可见性">
-              <el-select v-model="scanForm.visibility" style="width: 100%">
+              <el-select v-model="sdkForm.visibility" style="width: 100%">
                 <el-option v-for="opt in VISIBILITY_SELECT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="扫描路径" :required="scanForm.projectKind !== 'REGISTERED'">
-          <el-input v-model="scanForm.scanPath" placeholder="服务器上的绝对路径" />
-          <div v-if="scanForm.projectKind === 'REGISTERED'" class="form-hint">SDK 注册项目可不配置扫描路径。</div>
-        </el-form-item>
-        <el-form-item label="扫描方式" required>
-          <el-radio-group v-model="scanForm.scanType">
-            <el-radio label="openapi">OpenAPI</el-radio>
-            <el-radio label="controller">Controller</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="scanForm.scanType === 'openapi'" label="规范文件">
-          <el-input v-model="scanForm.specFile" placeholder="可选，相对 scanPath；留空自动发现" />
-        </el-form-item>
-      </el-form>
+            <el-form-item label="Base URL" required>
+              <el-input v-model="sdkForm.baseUrl" placeholder="http://localhost:8080" />
+            </el-form-item>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="App Key">
+                  <el-input v-model="sdkForm.appKey" placeholder="留空由后端策略处理" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="App Secret">
+                  <el-input v-model="sdkForm.appSecret" show-password placeholder="留空由后端策略处理" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </el-form>
+        </el-tab-pane>
+
+        <el-tab-pane label="扫描接入" name="scan">
+          <el-form label-width="120px">
+            <el-form-item label="项目名称" required>
+              <el-input v-model="scanForm.name" placeholder="如 legacy-crm" />
+            </el-form-item>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="项目编码">
+                  <el-input v-model="scanForm.projectCode" placeholder="如 order-service" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="接入方式">
+                  <el-select v-model="scanForm.projectKind" style="width: 100%">
+                    <el-option v-for="opt in PROJECT_KIND_SELECT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="环境">
+                  <el-input v-model="scanForm.environment" placeholder="dev / test / prod" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="负责人">
+                  <el-input v-model="scanForm.owner" placeholder="负责人姓名" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="项目域名" required>
+                  <el-input v-model="scanForm.baseUrl" placeholder="http://localhost:18602" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="可见性">
+                  <el-select v-model="scanForm.visibility" style="width: 100%">
+                    <el-option v-for="opt in VISIBILITY_SELECT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="扫描路径" :required="scanForm.projectKind !== 'REGISTERED'">
+              <el-input v-model="scanForm.scanPath" placeholder="服务器上的绝对路径" />
+              <div v-if="scanForm.projectKind === 'REGISTERED'" class="form-hint">SDK 注册项目可不配置扫描路径。</div>
+            </el-form-item>
+            <el-form-item label="扫描方式" required>
+              <el-radio-group v-model="scanForm.scanType">
+                <el-radio label="openapi">OpenAPI</el-radio>
+                <el-radio label="controller">Controller</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item v-if="scanForm.scanType === 'openapi'" label="规范文件">
+              <el-input v-model="scanForm.specFile" placeholder="可选，相对 scanPath；留空自动发现" />
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
       <template #footer>
-        <el-button @click="scanDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveScanProject">保存</el-button>
+        <el-button @click="accessDialogVisible = false">取消</el-button>
+        <el-button
+          v-if="accessDialogTab === 'sdk'"
+          type="primary"
+          :loading="saving"
+          @click="saveSdkProject"
+        >
+          保存并生成接入配置
+        </el-button>
+        <el-button
+          v-else
+          type="primary"
+          :loading="saving"
+          @click="saveScanProject"
+        >
+          保存
+        </el-button>
       </template>
     </el-dialog>
-
-    <el-drawer v-model="guideDrawerVisible" title="业务系统接入指南（ReachAI SDK）" size="560px" destroy-on-close>
-      <div class="guide-drawer">
-        <el-alert
-          type="info"
-          show-icon
-          :closable="false"
-          title="接入思路"
-          description="在本页创建 SDK 接入后，业务系统引入 reachai-spring-boot2-starter 和 reachai-capability-sdk，配置注册中心地址与项目信息；应用启动后会自动注册项目、上报心跳、扫描 ReachAI 能力并同步到平台。"
-        />
-
-        <h3 class="guide-h3">1. Maven 依赖</h3>
-        <div class="guide-code-wrap">
-          <el-button class="guide-copy" size="small" text type="primary" @click="copyText(mavenSnippet)">复制</el-button>
-          <pre class="guide-pre">{{ mavenSnippet }}</pre>
-        </div>
-
-        <h3 class="guide-h3">2. Spring Boot 配置</h3>
-        <div class="guide-code-wrap">
-          <el-button class="guide-copy" size="small" text type="primary" @click="copyText(yamlSnippet)">复制</el-button>
-          <pre class="guide-pre">{{ yamlSnippet }}</pre>
-        </div>
-
-        <h3 class="guide-h3">3. 能力声明（可选）</h3>
-        <div class="guide-code-wrap">
-          <el-button class="guide-copy" size="small" text type="primary" @click="copyText(javaSnippet)">复制</el-button>
-          <pre class="guide-pre">{{ javaSnippet }}</pre>
-        </div>
-      </div>
-    </el-drawer>
   </div>
 </template>
 
@@ -329,7 +286,6 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Box,
-  Close,
   Connection,
   FolderChecked,
   Plus,
@@ -339,7 +295,6 @@ import {
 } from '@element-plus/icons-vue'
 import {
   createScanProject,
-  getScanProjectDetail,
   getScanProjects,
 } from '@/api/scanProject'
 import { registerRegistryProject } from '@/api/registry'
@@ -358,40 +313,17 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const { theme } = useTheme()
 
-const ACCESS_BANNER_STORAGE_KEY = 'eaf-registry-access-banner-dismissed'
-
-function readAccessBannerDismissed(): boolean {
-  if (typeof sessionStorage === 'undefined') return false
-  return sessionStorage.getItem(ACCESS_BANNER_STORAGE_KEY) === '1'
-}
-
-const accessBannerVisible = ref(!readAccessBannerDismissed())
-
-function dismissAccessBanner() {
-  accessBannerVisible.value = false
-  try {
-    sessionStorage.setItem(ACCESS_BANNER_STORAGE_KEY, '1')
-  } catch {
-    // ignore private mode / quota
-  }
-}
-
 const loading = ref(false)
 const saving = ref(false)
 const projects = ref<ScanProject[]>([])
-const activeTab = ref('all')
 const keyword = ref('')
 const kindFilter = ref('')
 const statusFilter = ref('')
 const ownerFilter = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
-const sdkDialogVisible = ref(false)
-const scanDialogVisible = ref(false)
-const guideDrawerVisible = ref(false)
-const guideYamlSource = ref<ScanProject | null>(null)
-/** 打开接入指南时优先使用该项目的详情（含 registry 凭证）；否则用顶部当前项目 */
-const guideFocusProjectId = ref<number | null>(null)
+const accessDialogVisible = ref(false)
+const accessDialogTab = ref<'sdk' | 'scan'>('sdk')
 
 /** 限制表格主体高度，使横向滚动条落在视口内（靠近浏览器窗口底部），无需先滚到卡片最底 */
 const projectTableMaxHeight = ref(480)
@@ -452,10 +384,6 @@ const filteredProjects = computed(() => {
   const text = keyword.value.trim().toLowerCase()
   return projects.value.filter((project) => {
     const kind = project.projectKind || 'SCAN'
-    const matchesTab =
-      activeTab.value === 'all' ||
-      (activeTab.value === 'sdk' && (kind === 'REGISTERED' || kind === 'HYBRID')) ||
-      (activeTab.value === 'api' && project.toolCount > 0)
     const matchesContext = !projectStore.currentProjectId || project.id === projectStore.currentProjectId
     const matchesKeyword =
       !text ||
@@ -465,7 +393,6 @@ const filteredProjects = computed(() => {
 
     return (
       matchesContext &&
-      matchesTab &&
       matchesKeyword &&
       (!kindFilter.value || kind === kindFilter.value) &&
       (!statusFilter.value || project.status === statusFilter.value) &&
@@ -515,99 +442,13 @@ onUnmounted(() => {
   window.removeEventListener('resize', scheduleUpdateProjectTableMaxHeight)
 })
 
-watch([activeTab, keyword, kindFilter, statusFilter, ownerFilter, () => projectStore.currentProjectId, pageSize], () => {
+watch([keyword, kindFilter, statusFilter, ownerFilter, () => projectStore.currentProjectId, pageSize], () => {
   currentPage.value = 1
 })
 
-watch([accessBannerVisible, activeTab, () => filteredProjects.value.length], () => {
+watch([() => filteredProjects.value.length], () => {
   nextTick(scheduleUpdateProjectTableMaxHeight)
 })
-
-/** 与 RegistryProjectDetail 一致：VITE_AI_AGENT_SERVICE_URL，默认本地 18603 */
-const agentServiceBaseUrl = computed(() => {
-  const raw = import.meta.env.VITE_AI_AGENT_SERVICE_URL?.trim()
-  const fallback = 'http://localhost:18603'
-  if (!raw) return fallback
-  return raw.replace(/\/$/, '')
-})
-
-function yamlSafeScalar(raw: string): string {
-  const s = raw.trim()
-  if (!s) return '""'
-  if (/[:#\n[\]{}|>&*!'"`]/.test(s) || /^\s|\s$/.test(raw) || /^[\d.-]+$/.test(s)) {
-    return `'${s.replace(/'/g, "''")}'`
-  }
-  return s
-}
-
-const yamlSnippet = computed(() => {
-  const p = guideYamlSource.value ?? projectStore.currentProject
-  const registryUrl = yamlSafeScalar(agentServiceBaseUrl.value)
-  const code = p?.projectCode?.trim() || 'your-project-code'
-  const name = p?.name?.trim() || '你的业务系统名称'
-  const baseUrl = p?.baseUrl?.trim() || 'http://localhost:8080'
-  const env = p?.environment?.trim() || 'dev'
-  const ctx = (p?.contextPath ?? '').trim()
-  const appKey = p?.registryAppKey?.trim() || 'your-app-key'
-  const ctxLine = ctx ? `\n    context-path: ${yamlSafeScalar(ctx)}` : ''
-  return `reachai:
-  registry:
-    enabled: true
-    url: ${registryUrl}
-    app-key: ${yamlSafeScalar(appKey)}
-    app-secret: \${REACHAI_REGISTRY_APP_SECRET}
-  project:
-    code: ${yamlSafeScalar(code)}
-    name: ${yamlSafeScalar(name)}
-    base-url: ${yamlSafeScalar(baseUrl)}${ctxLine}
-    environment: ${yamlSafeScalar(env)}
-  capability:
-    scan-controller: true
-    sync-on-startup: true`
-})
-
-watch(guideDrawerVisible, async (open) => {
-  if (!open) {
-    guideYamlSource.value = null
-    guideFocusProjectId.value = null
-    return
-  }
-  const id = guideFocusProjectId.value ?? projectStore.currentProjectId
-  if (!id) {
-    guideYamlSource.value = null
-    return
-  }
-  const row = projectStore.projects.find((x) => x.id === id)
-  guideYamlSource.value = row ?? null
-  try {
-    const { data } = await getScanProjectDetail(id)
-    guideYamlSource.value = data
-  } catch {
-    // 保留列表快照，凭证字段可能为空
-  }
-})
-
-const mavenSnippet = `<!-- 与睿池 ReachAI 根 pom 版本一致，或改为你们私服坐标 -->
-<dependency>
-  <groupId>com.enterprise.ai</groupId>
-  <artifactId>reachai-capability-sdk</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
-</dependency>
-<dependency>
-  <groupId>com.enterprise.ai</groupId>
-  <artifactId>reachai-spring-boot2-starter</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
-</dependency>`
-
-const javaSnippet = `@RestController
-@RequestMapping("/api/orders")
-public class OrderApi {
-    @ReachCapability(name = "queryOrder", title = "查询订单", sideEffect = ReachSideEffectLevel.READ)
-    @GetMapping("/{orderNo}")
-    public OrderDTO get(@ReachParam(name = "orderNo", description = "订单号") @PathVariable String orderNo) {
-        return orderService.get(orderNo);
-    }
-}`
 
 function createEmptyScanForm(): ScanProjectUpsertRequest {
   return {
@@ -651,15 +492,6 @@ function applyScanForm(project: ScanProjectUpsertRequest) {
   scanForm.specFile = project.specFile || ''
 }
 
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制到剪贴板')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择文本复制')
-  }
-}
-
 async function loadProjects() {
   loading.value = true
   try {
@@ -675,14 +507,11 @@ async function loadProjects() {
   }
 }
 
-function openSdkDialog() {
+function openAccessDialog(tab: 'sdk' | 'scan' = 'sdk') {
   resetSdkForm()
-  sdkDialogVisible.value = true
-}
-
-function openScanCreateDialog() {
   applyScanForm(createEmptyScanForm())
-  scanDialogVisible.value = true
+  accessDialogTab.value = tab
+  accessDialogVisible.value = true
 }
 
 async function saveSdkProject() {
@@ -692,16 +521,14 @@ async function saveSdkProject() {
   }
   saving.value = true
   try {
-    const { data } = await registerRegistryProject({
+    await registerRegistryProject({
       ...sdkForm,
       appKey: sdkForm.appKey || undefined,
       appSecret: sdkForm.appSecret || undefined,
     })
     ElMessage.success('SDK 接入项目已创建')
-    sdkDialogVisible.value = false
+    accessDialogVisible.value = false
     await loadProjects()
-    guideFocusProjectId.value = data.projectId
-    guideDrawerVisible.value = true
   } finally {
     saving.value = false
   }
@@ -721,7 +548,7 @@ async function saveScanProject() {
     }
     await createScanProject(payload)
     ElMessage.success('扫描项目已创建')
-    scanDialogVisible.value = false
+    accessDialogVisible.value = false
     await loadProjects()
   } catch (error) {
     ElMessage.error((error as Error).message || '保存失败')
@@ -834,7 +661,6 @@ function goDetail(project: ScanProject) {
 
 .hero-actions,
 .empty-actions,
-.banner-links,
 .toolbar {
   display: flex;
   align-items: center;
@@ -850,64 +676,6 @@ function goDetail(project: ScanProject) {
   min-width: 142px;
   border-radius: 8px;
   box-shadow: 0 10px 20px rgb(var(--brand-primary-rgb) / 0.22);
-}
-
-.secondary-action {
-  min-width: 112px;
-  border-radius: 8px;
-  color: #344054;
-  background: #fff;
-  border-color: #d9deea;
-}
-
-.access-banner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  max-width: 1180px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 18px 38px 18px 22px;
-  border: 1px solid #eaecf5;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 32px rgba(17, 24, 39, 0.04);
-}
-
-.banner-close {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid #e4e7ee;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.95);
-  color: #667085;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
-
-  &:hover {
-    border-color: var(--brand-selected-bg);
-    color: var(--brand-primary);
-    background: rgb(var(--brand-selected-rgb) / 0.5);
-    box-shadow: 0 1px 6px rgb(var(--brand-primary-rgb) / 0.1);
-  }
-
-  &:focus-visible {
-    outline: 2px solid rgb(var(--brand-primary-rgb) / 0.35);
-    outline-offset: 2px;
-  }
 }
 
 .empty-main {
@@ -951,42 +719,6 @@ function goDetail(project: ScanProject) {
   height: auto;
   object-fit: contain;
   display: block;
-}
-
-.banner-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  overflow: hidden;
-  background: linear-gradient(135deg, var(--brand-selected-bg), rgba(255, 255, 255, 0.88));
-}
-
-.banner-icon-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.banner-copy {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-
-  strong {
-    color: #101828;
-    font-size: 15px;
-  }
-
-  span {
-    color: #667085;
-    font-size: 13px;
-  }
 }
 
 .metric-grid {
@@ -1091,28 +823,6 @@ function goDetail(project: ScanProject) {
 
   :deep(.el-card__body) {
     padding: 0;
-  }
-}
-
-.project-tabs {
-  padding: 0 22px;
-
-  :deep(.el-tabs__header) {
-    margin: 0;
-  }
-
-  :deep(.el-tabs__item) {
-    height: 50px;
-    color: #667085;
-    font-weight: 600;
-  }
-
-  :deep(.el-tabs__item.is-active) {
-    color: var(--brand-primary);
-  }
-
-  :deep(.el-tabs__active-bar) {
-    background-color: var(--brand-primary);
   }
 }
 
@@ -1372,41 +1082,6 @@ function goDetail(project: ScanProject) {
   }
 }
 
-.guide-drawer {
-  padding-right: 8px;
-}
-
-.guide-h3 {
-  margin: 20px 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.guide-code-wrap {
-  position: relative;
-}
-
-.guide-copy {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 1;
-}
-
-.guide-pre {
-  margin: 0;
-  padding: 12px;
-  max-height: 280px;
-  overflow: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-light);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .registry-project-page.is-dark {
   background:
     radial-gradient(circle at 14% 8%, rgb(var(--brand-primary-rgb) / 0.18), transparent 28%),
@@ -1422,30 +1097,8 @@ function goDetail(project: ScanProject) {
     }
   }
 
-  .secondary-action {
-    color: #cbd5e1;
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.1);
-
-    &:hover {
-      color: #e2e8f0;
-      background: rgb(var(--brand-primary-rgb) / 0.12);
-      border-color: rgb(var(--brand-primary-rgb) / 0.35);
-    }
-  }
-
   .primary-action {
     box-shadow: 0 10px 22px rgb(var(--brand-primary-rgb) / 0.28);
-  }
-
-  .banner-links {
-    :deep(.el-button.is-link) {
-      color: var(--brand-disabled);
-
-      &:hover {
-        color: var(--brand-selected-bg);
-      }
-    }
   }
 
   .empty-actions {
@@ -1462,7 +1115,6 @@ function goDetail(project: ScanProject) {
     }
   }
 
-  .access-banner,
   .metric-card,
   .project-card {
     border-color: rgba(255, 255, 255, 0.07);
@@ -1471,38 +1123,8 @@ function goDetail(project: ScanProject) {
     backdrop-filter: blur(12px);
   }
 
-  .access-banner {
-    background:
-      radial-gradient(circle at 0% 0%, rgb(var(--brand-primary-rgb) / 0.13), transparent 34%),
-      rgba(255, 255, 255, 0.035);
-  }
-
-  .banner-close {
-    color: #94a3b8;
-    border-color: rgba(255, 255, 255, 0.1);
-    background: rgba(15, 23, 42, 0.92);
-
-    &:hover {
-      color: var(--brand-selected-bg);
-      border-color: rgb(var(--brand-hover-rgb) / 0.45);
-      background: rgb(var(--brand-primary-rgb) / 0.18);
-      box-shadow: 0 1px 8px rgb(var(--brand-primary-rgb) / 0.16);
-    }
-  }
-
-  .banner-icon,
   .empty-illustration {
     background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.22), rgb(var(--brand-hover-rgb) / 0.08));
-  }
-
-  .banner-copy {
-    strong {
-      color: #e2e8f0;
-    }
-
-    span {
-      color: #94a3b8;
-    }
   }
 
   .metric-card {
@@ -1551,41 +1173,6 @@ function goDetail(project: ScanProject) {
       color: #fdba74;
       border-color: rgba(253, 186, 116, 0.18);
       background: rgba(234, 88, 12, 0.16);
-    }
-  }
-
-  .project-tabs {
-    :deep(.el-tabs__header) {
-      background: transparent;
-    }
-
-    :deep(.el-tabs__nav-wrap) {
-      background: transparent;
-    }
-
-    :deep(.el-tabs__content) {
-      background: transparent;
-    }
-
-    :deep(.el-tab-pane) {
-      background: transparent;
-    }
-
-    :deep(.el-tabs__item) {
-      color: #94a3b8;
-    }
-
-    :deep(.el-tabs__item.is-active),
-    :deep(.el-tabs__item:hover) {
-      color: var(--brand-selected-bg);
-    }
-
-    :deep(.el-tabs__active-bar) {
-      background: linear-gradient(90deg, var(--brand-primary), var(--brand-hover));
-    }
-
-    :deep(.el-tabs__nav-wrap::after) {
-      background-color: rgba(255, 255, 255, 0.06);
     }
   }
 
@@ -1880,30 +1467,6 @@ function goDetail(project: ScanProject) {
     }
   }
 
-  .guide-h3 {
-    color: #e2e8f0;
-  }
-
-  .guide-drawer {
-    :deep(.el-alert) {
-      background: rgba(255, 255, 255, 0.04);
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-
-    :deep(.el-alert__title) {
-      color: #e2e8f0;
-    }
-
-    :deep(.el-alert__description) {
-      color: #94a3b8;
-    }
-  }
-
-  .guide-pre {
-    color: #cbd5e1;
-    border-color: rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.24);
-  }
 }
 
 @media (max-width: 1200px) {
@@ -1911,8 +1474,7 @@ function goDetail(project: ScanProject) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .page-hero,
-  .access-banner {
+  .page-hero {
     align-items: flex-start;
     flex-direction: column;
   }
