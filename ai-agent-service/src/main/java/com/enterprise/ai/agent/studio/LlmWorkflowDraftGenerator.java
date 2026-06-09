@@ -141,6 +141,8 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 normalizeApprovalConfig(config);
             } else if (type == AgentGraphNodeType.KNOWLEDGE_RETRIEVAL) {
                 normalizeKnowledgeConfig(config, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
+            } else if (type == AgentGraphNodeType.PAGE_ACTION) {
+                normalizePageActionConfig(config, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
             } else if (type.isToolLike() || type == AgentGraphNodeType.HTTP_REQUEST || type == AgentGraphNodeType.MCP_CALL) {
                 normalizeCapabilityConfig(config, type, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
             }
@@ -158,6 +160,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         if (nodes.isEmpty()) {
             validationErrors.add("workflow draft did not contain any usable nodes");
         }
+        normalizeReferencedOutputAliases(nodes);
         return nodes;
     }
 
@@ -361,6 +364,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                     "approvers", arrayValue(config.get("approvers")),
                     "timeoutSeconds", integer(config.get("timeoutSeconds"), 3600),
                     "defaultRoute", firstText(text(config.get("defaultRoute")), "approved")));
+            case "pageAction" -> data.put("pageActionConfig", pageActionConfig(config, node.label()));
             case "parameter" -> data.put("parameterConfig", Map.of(
                     "mode", firstText(text(config.get("extractMode")), text(config.get("mode")), "expression"),
                     "modelInstanceId", firstText(text(config.get("modelInstanceId")), ""),
@@ -462,6 +466,134 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
             config.put("projectCode", firstText(resource.getProjectCode(), request.getProjectCode()));
         }
         config.putIfAbsent("inputMapping", Map.of("input", "$lastOutput"));
+    }
+
+    private void normalizePageActionConfig(Map<String, Object> config,
+                                           WorkflowDraftGenerationRequest request,
+                                           Map<String, WorkflowDraftResource> resources,
+                                           List<String> warnings,
+                                           List<WorkflowDraftPlaceholder> placeholders,
+                                           String nodeId,
+                                           String label) {
+        String ref = firstText(text(config.get("ref")), text(config.get("name")), text(config.get("qualifiedName")),
+                text(config.get("actionKey")), text(config.get("action")));
+        WorkflowDraftResource resource = resource(ref, resources);
+        if (resource == null) {
+            resource = singlePageActionResource(request);
+        }
+        if (resource == null) {
+            markPlaceholder(config, warnings, placeholders, nodeId, "pageAction", label,
+                    StringUtils.hasText(ref) ? "未找到页面动作：" + ref : "模型生成了页面动作节点，请选择页面和 actionKey");
+        } else {
+            Map<String, Object> metadata = mutableMap(resource.getMetadata());
+            config.put("projectCode", firstText(text(metadata.get("projectCode")), resource.getProjectCode(), request.getProjectCode()));
+            config.put("pageKey", firstText(text(metadata.get("pageKey")), text(config.get("pageKey"))));
+            config.put("routePattern", firstText(text(metadata.get("routePattern")), text(config.get("routePattern"))));
+            config.put("actionKey", firstText(text(metadata.get("actionKey")), resource.getName(), ref));
+            config.put("title", firstText(text(config.get("title")), label, resource.getDescription(), resource.getName()));
+            config.put("confirm", boolOr(metadata.get("confirmRequired"), bool(config.get("confirm"))));
+            config.putIfAbsent("metadata", Map.of(
+                    "source", "AI_DRAFT",
+                    "inputSchema", mutableMap(metadata.get("inputSchema")),
+                    "outputSchema", mutableMap(metadata.get("outputSchema")),
+                    "sampleArgs", mutableMap(metadata.get("sampleArgs"))));
+        }
+        config.put("args", mutableMap(config.get("args")));
+        config.put("outputAlias", firstText(text(config.get("outputAlias")), "page_action_result"));
+    }
+
+    private WorkflowDraftResource singlePageActionResource(WorkflowDraftGenerationRequest request) {
+        if (request == null || request.getPageActions() == null || request.getPageActions().size() != 1) {
+            return null;
+        }
+        return request.getPageActions().get(0);
+    }
+
+    private void normalizeReferencedOutputAliases(List<DraftNode> nodes) {
+        Set<String> knownAliases = new LinkedHashSet<>();
+        for (DraftNode node : nodes) {
+            knownAliases.add(node.id());
+            String outputAlias = text(node.config() == null ? null : node.config().get("outputAlias"));
+            if (StringUtils.hasText(outputAlias)) {
+                knownAliases.add(outputAlias);
+            }
+        }
+
+        for (int index = 0; index < nodes.size(); index++) {
+            DraftNode node = nodes.get(index);
+            if (!"pageAction".equals(node.kind())) {
+                continue;
+            }
+            Set<String> referencedAliases = new LinkedHashSet<>();
+            collectReferenceAliases(node.config() == null ? null : node.config().get("args"), referencedAliases);
+            if (node.inputs() != null) {
+                for (Map<String, Object> input : node.inputs()) {
+                    collectReferenceAliases(input == null ? null : input.get("source"), referencedAliases);
+                }
+            }
+
+            for (String alias : referencedAliases) {
+                if (knownAliases.contains(alias)) {
+                    continue;
+                }
+                DraftNode upstream = nearestExtractLikeNode(nodes, index);
+                if (upstream == null) {
+                    continue;
+                }
+                Map<String, Object> upstreamConfig = upstream.config();
+                if (upstreamConfig == null) {
+                    continue;
+                }
+                if (!StringUtils.hasText(text(upstreamConfig.get("outputAlias")))) {
+                    upstreamConfig.put("outputAlias", alias);
+                    knownAliases.add(alias);
+                }
+            }
+        }
+    }
+
+    private DraftNode nearestExtractLikeNode(List<DraftNode> nodes, int beforeIndex) {
+        for (int i = beforeIndex - 1; i >= 0; i--) {
+            DraftNode candidate = nodes.get(i);
+            if ("llm".equals(candidate.kind()) || "parameter".equals(candidate.kind())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void collectReferenceAliases(Object value, Set<String> aliases) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                collectReferenceAliases(item, aliases);
+            }
+            return;
+        }
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                collectReferenceAliases(item, aliases);
+            }
+            return;
+        }
+        String raw = text(value);
+        for (String token : raw.split("[^A-Za-z0-9_.$-]+")) {
+            String normalized = token.replaceFirst("^\\$+", "");
+            if (!normalized.contains(".")) {
+                continue;
+            }
+            String alias = normalized.split("\\.", 2)[0];
+            if (StringUtils.hasText(alias) && !isBuiltinVariableAlias(alias)) {
+                aliases.add(alias);
+            }
+        }
+    }
+
+    private boolean isBuiltinVariableAlias(String alias) {
+        return Set.of("input", "answer", "lastOutput", "previousOutput", "lastRoute", "lastSuccess", "lastError", "params", "sys", "var", "nodeOutput")
+                .contains(alias);
     }
 
     private void markPlaceholder(Map<String, Object> config,
@@ -623,6 +755,20 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 "directReturnThreshold", doubleOr(config.get("directReturnThreshold"), 0.85D)));
     }
 
+    private Map<String, Object> pageActionConfig(Map<String, Object> config, String label) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("projectCode", firstText(text(config.get("projectCode")), ""));
+        out.put("pageKey", firstText(text(config.get("pageKey")), ""));
+        out.put("routePattern", firstText(text(config.get("routePattern")), ""));
+        out.put("actionKey", firstText(text(config.get("actionKey")), ""));
+        out.put("title", firstText(text(config.get("title")), label, text(config.get("actionKey"))));
+        out.put("confirm", bool(config.get("confirm")));
+        out.put("args", mutableMap(config.get("args")));
+        out.put("metadata", mutableMap(config.get("metadata")));
+        out.put("outputAlias", firstText(text(config.get("outputAlias")), "page_action_result"));
+        return out;
+    }
+
     private Map<String, Object> genericConfig(String kind, Map<String, Object> config) {
         Map<String, Object> out = new LinkedHashMap<>();
         switch (kind) {
@@ -659,6 +805,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
             if (resource == null) continue;
             indexResource(out, resource.getName(), resource);
             indexResource(out, resource.getQualifiedName(), resource);
+            indexResource(out, resource.getDescription(), resource);
         }
         return out;
     }
@@ -668,6 +815,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         if (request.getTools() != null) resources.addAll(request.getTools());
         if (request.getCapabilities() != null) resources.addAll(request.getCapabilities());
         if (request.getKnowledgeBases() != null) resources.addAll(request.getKnowledgeBases());
+        if (request.getPageActions() != null) resources.addAll(request.getPageActions());
         return resources;
     }
 
@@ -686,11 +834,11 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         return """
                 You are Agent Studio's workflow draft generator. Return only strict JSON.
                 Generate a complete workflow draft from the user's requirement.
-                Use only node kinds listed in nodeTypes. Use only supplied tools/capabilities/knowledgeBases when binding real resources.
+                Use only node kinds listed in nodeTypes. Use only supplied tools/capabilities/knowledgeBases/pageActions when binding real resources.
                 If a business step has no matching resource, still generate the node and mark it as a placeholder by setting config.needsConfiguration=true and config.placeholderReason.
                 Do not output start/end nodes. Use START and END only as edge endpoints.
                 Required JSON shape:
-                {"summary":"short summary","nodes":[{"id":"stable_snake_case","kind":"userInput|llm|tool|skill|knowledge|classifier|condition|answer|approval|parameter|http|code|aggregate|loop|template|variable|mcp","label":"display name","description":"what it does","config":{},"inputs":[],"outputs":[]}],"edges":[{"id":"optional","from":"START or node id","to":"node id or END","condition":"always|approved|rejected|route:key|success|error","sourceHandle":"optional","targetHandle":"optional"}],"warnings":[]}
+                {"summary":"short summary","nodes":[{"id":"stable_snake_case","kind":"userInput|llm|tool|skill|knowledge|pageAction|classifier|condition|answer|approval|parameter|http|code|aggregate|loop|template|variable|mcp","label":"display name","description":"what it does","config":{},"inputs":[],"outputs":[]}],"edges":[{"id":"optional","from":"START or node id","to":"node id or END","condition":"always|approved|rejected|route:key|success|error","sourceHandle":"optional","targetHandle":"optional"}],"warnings":[]}
                 """;
     }
 
@@ -705,6 +853,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         payload.put("tools", request.getTools() == null ? List.of() : request.getTools());
         payload.put("capabilities", request.getCapabilities() == null ? List.of() : request.getCapabilities());
         payload.put("knowledgeBases", request.getKnowledgeBases() == null ? List.of() : request.getKnowledgeBases());
+        payload.put("pageActions", request.getPageActions() == null ? List.of() : request.getPageActions());
         payload.put("currentCanvas", request.getCurrentCanvas() == null ? Map.of() : request.getCurrentCanvas());
         return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(payload);
     }
@@ -832,6 +981,11 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     private boolean bool(Object value) {
         if (value instanceof Boolean b) return b;
         return "true".equalsIgnoreCase(text(value));
+    }
+
+    private boolean boolOr(Object value, boolean fallback) {
+        if (value == null) return fallback;
+        return bool(value);
     }
 
     private int integer(Object value, int fallback) {

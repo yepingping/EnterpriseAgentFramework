@@ -6,6 +6,9 @@ import type {
   ScanProject,
   ScanProjectAuthSaveRequest,
   ScanProjectBlockers,
+  ScanProjectRegistryCredentialSaveRequest,
+  SdkAccessCheckRequest,
+  SdkAccessCheckResponse,
   ScanProjectScanResult,
   ScanProjectUpsertRequest,
   ScanSettings,
@@ -51,6 +54,14 @@ export function updateScanProject(id: number, data: ScanProjectUpsertRequest) {
 
 export function updateScanProjectAuthSettings(id: number, data: ScanProjectAuthSaveRequest) {
   return agentRequest.patch<ScanProject>(`/api/scan-projects/${id}/auth-settings`, data)
+}
+
+export function updateScanProjectRegistryCredential(id: number, data: ScanProjectRegistryCredentialSaveRequest) {
+  return agentRequest.patch<ScanProject>(`/api/scan-projects/${id}/registry-credential`, data)
+}
+
+export function runSdkAccessCheck(id: number, data: SdkAccessCheckRequest) {
+  return agentRequest.post<SdkAccessCheckResponse>(`/api/scan-projects/${id}/sdk-access-check`, data)
 }
 
 export function updateScanProjectScanSettings(id: number, data: ScanSettings) {

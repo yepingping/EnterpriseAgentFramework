@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.scan;
 
-import com.enterprise.ai.skill.SideEffectLevel;
+import com.enterprise.ai.runtime.contract.SideEffectLevel;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

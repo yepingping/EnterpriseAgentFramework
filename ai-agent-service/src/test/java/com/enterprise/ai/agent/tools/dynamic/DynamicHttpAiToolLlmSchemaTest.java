@@ -5,6 +5,8 @@ import com.enterprise.ai.agent.skill.ToolExecutionContextHolder;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
+import com.enterprise.ai.reach.sdk.auth.ReachAiInvocationClaims;
+import com.enterprise.ai.reach.sdk.auth.ReachAiInvocationToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -29,21 +31,21 @@ class DynamicHttpAiToolLlmSchemaTest {
                   {
                     "name": "body_json",
                     "type": "object",
-                    "description": "请求体",
+                    "description": "body",
                     "required": true,
                     "location": "BODY",
                     "children": [
                       {
                         "name": "teamName",
                         "type": "string",
-                        "description": "班组名称",
+                        "description": "team name",
                         "required": false,
                         "location": null
                       },
                       {
                         "name": "page",
                         "type": "integer",
-                        "description": "页码",
+                        "description": "page number",
                         "required": false,
                         "location": null
                       }
@@ -70,7 +72,7 @@ class DynamicHttpAiToolLlmSchemaTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> bodyProp = (Map<String, Object>) props.get("body_json");
         assertEquals("object", bodyProp.get("type"));
-        assertEquals("请求体", bodyProp.get("description"));
+        assertEquals("body", bodyProp.get("description"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> nested = (Map<String, Object>) bodyProp.get("properties");
@@ -78,7 +80,7 @@ class DynamicHttpAiToolLlmSchemaTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> teamName = (Map<String, Object>) nested.get("teamName");
         assertEquals("string", teamName.get("type"));
-        assertEquals("班组名称", teamName.get("description"));
+        assertEquals("team name", teamName.get("description"));
 
         @SuppressWarnings("unchecked")
         List<String> required = (List<String>) root.get("required");
@@ -94,13 +96,13 @@ class DynamicHttpAiToolLlmSchemaTest {
         var body = new ToolDefinitionParameter(
                 "ids",
                 "array",
-                "id 列表",
+                "id list",
                 true,
                 "QUERY",
                 List.of(new ToolDefinitionParameter(
                         "item",
                         "string",
-                        "单个 id",
+                        "single id",
                         false,
                         null,
                         List.of()
@@ -197,9 +199,63 @@ class DynamicHttpAiToolLlmSchemaTest {
         }
     }
 
-    private static void captureHeader(Map<String, String> received, HttpExchange exchange, String key, String headerName) {
-        String value = exchange.getRequestHeaders().getFirst(headerName);
-        received.put(key, value == null ? "" : value);
+    @Test
+    void executeSendsInvocationTokenForReachAiCapabilityHostProtocol() throws Exception {
+        Map<String, String> received = new ConcurrentHashMap<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/reachai/capabilities/contract.query/invoke", exchange -> {
+            captureHeader(received, exchange, "token", "X-ReachAI-Invocation-Token");
+            byte[] body = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            ToolDefinitionEntity entity = new ToolDefinitionEntity();
+            entity.setName("contract.query");
+            entity.setProjectCode("bzsdk");
+            entity.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+            entity.setEndpointPath("/reachai/capabilities/contract.query/invoke");
+            entity.setHttpMethod("POST");
+            entity.setCapabilityMetadataJson("{\"invokeProtocol\":\"REACHAI_CAPABILITY_HTTP\"}");
+            entity.setParametersJson("[{\"name\":\"contractNo\",\"type\":\"string\",\"description\":\"Contract number\",\"required\":true,\"location\":\"BODY\"}]");
+            ToolExecutionContextHolder.set(ToolExecutionContext.builder()
+                    .projectCode("bzsdk")
+                    .agentId("team-agent")
+                    .traceId("trace-1")
+                    .sessionId("session-1")
+                    .externalUserId("ADMIN001")
+                    .globalUserId("emp-0001")
+                    .roles(List.of("admin"))
+                    .build());
+
+            DynamicHttpAiTool.InvocationTokenProvider provider = (definition, context) ->
+                    ReachAiInvocationToken.sign("secret", ReachAiInvocationClaims.builder()
+                            .projectCode(definition.getProjectCode())
+                            .appKey("demo-key")
+                            .capabilityName(definition.getName())
+                            .externalUserId(context.getExternalUserId())
+                            .globalUserId(context.getGlobalUserId())
+                            .roles(context.getRoles())
+                            .agentId(context.getAgentId())
+                            .sessionId(context.getSessionId())
+                            .traceId(context.getTraceId())
+                            .build(), 1_700_000_000_000L, 120);
+
+            new DynamicHttpAiTool(entity, new ObjectMapper(),
+                    DynamicHttpAiTool.HttpInvocationExtras.EMPTY, null, provider)
+                    .execute(Map.of("contractNo", "HT-001"));
+
+            ReachAiInvocationClaims verified = ReachAiInvocationToken.verify(
+                    "secret", received.get("token"), "bzsdk", "contract.query", 1_700_000_030_000L);
+            assertEquals("ADMIN001", verified.getExternalUserId());
+            assertEquals("team-agent", verified.getAgentId());
+            assertEquals("trace-1", verified.getTraceId());
+        } finally {
+            ToolExecutionContextHolder.clear();
+            server.stop(0);
+        }
     }
 
     @Test
@@ -238,5 +294,10 @@ class DynamicHttpAiToolLlmSchemaTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    private static void captureHeader(Map<String, String> received, HttpExchange exchange, String key, String headerName) {
+        String value = exchange.getRequestHeaders().getFirst(headerName);
+        received.put(key, value == null ? "" : value);
     }
 }

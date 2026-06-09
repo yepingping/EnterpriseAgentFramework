@@ -35,4 +35,7 @@ public class WorkflowDraftGenerationRequest {
 
     @Singular
     private List<WorkflowDraftResource> knowledgeBases;
+
+    @Singular
+    private List<WorkflowDraftResource> pageActions;
 }

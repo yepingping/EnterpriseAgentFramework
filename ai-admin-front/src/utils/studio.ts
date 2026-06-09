@@ -179,6 +179,9 @@ function canvasNodeToGraphNode(node: CanvasNode, base: AgentForm): AgentGraphNod
       config: {
         ...common,
         actionKey: pageAction.actionKey,
+        projectCode: pageAction.projectCode,
+        pageKey: pageAction.pageKey,
+        routePattern: pageAction.routePattern,
         title: pageAction.title || node.data.label,
         confirm: pageAction.confirm === true,
         args: pageAction.args || {},
@@ -646,6 +649,9 @@ function graphConfigToNodeData(
   if (kind === 'pageAction') {
     const outputAlias = stringValue(config.outputAlias) || 'page_action_result'
     const pageActionConfig = {
+      projectCode: stringValue(config.projectCode),
+      pageKey: stringValue(config.pageKey),
+      routePattern: stringValue(config.routePattern),
       actionKey: stringValue(config.actionKey),
       title: stringValue(config.title) || label,
       confirm: config.confirm === true,

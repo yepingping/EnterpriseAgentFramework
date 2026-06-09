@@ -2,10 +2,10 @@ package com.enterprise.ai.agent.skill.interactive;
 
 import com.enterprise.ai.agent.skill.ToolExecutionContextHolder;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
-import com.enterprise.ai.skill.AiSkill;
-import com.enterprise.ai.skill.SkillKind;
-import com.enterprise.ai.skill.SkillMetadata;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.AiSkill;
+import com.enterprise.ai.runtime.contract.SkillKind;
+import com.enterprise.ai.runtime.contract.SkillMetadata;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 
 import java.util.List;
 import java.util.Map;

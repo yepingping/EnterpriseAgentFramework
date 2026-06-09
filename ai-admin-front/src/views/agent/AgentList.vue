@@ -75,6 +75,24 @@
         <span class="filter-count">当前筛选 {{ filteredAgents.length }} / {{ agents.length }}</span>
       </div>
 
+      <el-alert
+        v-if="apiAssetContext"
+        class="api-asset-context"
+        type="success"
+        show-icon
+        :closable="false"
+      >
+        <template #title>
+          已从 API 资产目录选择：{{ apiAssetContext.name }}
+        </template>
+        <div class="api-asset-context-body">
+          <span>请选择一个流程型 Agent 进入 Studio，或直接新建流程型 Agent，系统会带着该接口打开 API 查询流程配置。</span>
+          <el-button size="small" type="primary" :icon="Plus" @click="handleCreateWorkflowFromAsset">
+            新建流程型 Agent
+          </el-button>
+        </div>
+      </el-alert>
+
       <div v-if="viewMode === 'card'" v-loading="loading" class="agent-card-grid">
         <article
           v-for="agent in filteredAgents"
@@ -241,12 +259,21 @@ const filterRuntime = ref('')
 const filterEnabled = ref<boolean | ''>('')
 const filterProjectId = ref<number | undefined>(undefined)
 const viewMode = ref<'table' | 'card'>('table')
+const apiAssetQueryKeys = ['intent', 'apiAssetId', 'apiAssetTool', 'apiAssetName'] as const
 
 const enabledCount = computed(() => agents.value.filter((agent) => agent.enabled).length)
 const workflowAgentCount = computed(() => agents.value.filter((agent) => modeForAgent(agent) === 'WORKFLOW').length)
 const pendingPublishCount = computed(() =>
   agents.value.filter((agent) => isSdkManaged(agent) && sdkPublishState(agent).type !== 'success').length,
 )
+const apiAssetContext = computed(() => {
+  if (queryString(route.query.intent) !== 'api-query-template') return null
+  const id = queryString(route.query.apiAssetId)
+  const tool = queryString(route.query.apiAssetTool)
+  const name = queryString(route.query.apiAssetName) || tool || id
+  if (!id && !tool && !name) return null
+  return { id, tool, name }
+})
 
 const runtimeFilterOptions = computed(() => {
   const options = new Map<string, string>()
@@ -419,6 +446,23 @@ function syncProjectFilter() {
   filterProjectId.value = projectStore.currentProjectId ?? undefined
 }
 
+function queryString(value: unknown) {
+  if (Array.isArray(value)) return value[0] == null ? '' : String(value[0])
+  return value == null ? '' : String(value)
+}
+
+function apiAssetNavigationQuery(extra: Record<string, string | number> = {}) {
+  const query: Record<string, string | number> = { ...extra }
+  if (filterProjectId.value !== undefined) {
+    query.projectId = filterProjectId.value
+  }
+  for (const key of apiAssetQueryKeys) {
+    const value = queryString(route.query[key])
+    if (value) query[key] = value
+  }
+  return query
+}
+
 async function loadScanProjects() {
   try {
     const { data } = await getScanProjects()
@@ -466,13 +510,28 @@ async function loadAgentVersions(list: AgentDefinition[]) {
 function handleCreate() {
   router.push({
     path: '/agent/new/edit',
-    query: filterProjectId.value !== undefined ? { projectId: filterProjectId.value } : {},
+    query: apiAssetNavigationQuery(),
+  })
+}
+
+function handleCreateWorkflowFromAsset() {
+  router.push({
+    path: '/agent/new/edit',
+    query: apiAssetNavigationQuery({
+      runtimeType: 'LANGGRAPH4J',
+      agentMode: 'WORKFLOW',
+    }),
   })
 }
 
 function handleEdit(id: string) { router.push(`/agent/${id}/edit`) }
 function handleDebug(id: string) { router.push(`/agent/${id}/debug`) }
-function handleStudio(id: string) { router.push(`/agent/${id}/studio`) }
+function handleStudio(id: string) {
+  router.push({
+    path: `/agent/${id}/studio`,
+    query: apiAssetNavigationQuery(),
+  })
+}
 function handleVersions(id: string) { router.push(`/agent/${id}/versions`) }
 
 function handleAgentAction(id: string, actionId: AgentListActionId) {
@@ -524,14 +583,18 @@ watch(
 <style scoped lang="scss">
 .agent-page {
   padding: 14px 16px 24px;
+  background:
+    radial-gradient(circle at 16% 0%, rgb(var(--brand-selected-rgb) / 0.3), transparent 28%),
+    radial-gradient(circle at 84% 16%, rgb(var(--brand-primary-rgb) / 0.08), transparent 30%);
 }
 
 .agent-header,
 .agent-shell {
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.38);
   border-radius: 10px;
-  background: var(--bg-card);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgb(var(--brand-selected-rgb) / 0.18));
+  box-shadow: 0 10px 28px rgb(var(--brand-primary-rgb) / 0.08);
+  backdrop-filter: blur(16px);
 }
 
 .agent-header {
@@ -548,7 +611,7 @@ watch(
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
-  color: #818cf8;
+  color: var(--brand-primary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -585,9 +648,9 @@ p {
 .stat-item {
   min-height: 58px;
   padding: 10px 12px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.44);
   border-radius: 8px;
-  background: rgba(148, 163, 184, 0.06);
+  background: rgb(var(--brand-selected-rgb) / 0.12);
 
   span {
     display: block;
@@ -624,8 +687,8 @@ p {
   gap: 10px;
   flex-wrap: wrap;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(148, 163, 184, 0.04);
+  border-bottom: 1px solid rgb(var(--brand-selected-rgb) / 0.38);
+  background: rgb(var(--brand-selected-rgb) / 0.12);
 }
 
 .filter-control {
@@ -651,9 +714,24 @@ p {
   white-space: nowrap;
 }
 
+.api-asset-context {
+  margin: 12px 16px 0;
+}
+
+.api-asset-context-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .agent-table {
   :deep(th.el-table__cell) {
     height: 46px;
+    background: rgb(var(--brand-selected-rgb) / 0.34);
+    color: var(--brand-active);
     font-weight: 700;
   }
 
@@ -674,19 +752,19 @@ p {
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(135deg, #10b981, #6366f1);
+  background: linear-gradient(135deg, #10b981, var(--brand-primary));
   flex-shrink: 0;
 
   &.workflow {
-    background: linear-gradient(135deg, #f59e0b, #8b5cf6);
+    background: linear-gradient(135deg, #f59e0b, var(--brand-hover));
   }
 
   &.code {
-    background: linear-gradient(135deg, #0ea5e9, #6366f1);
+    background: linear-gradient(135deg, var(--brand-hover), var(--brand-primary));
   }
 
   &.external {
-    background: linear-gradient(135deg, #ef4444, #8b5cf6);
+    background: linear-gradient(135deg, #ef4444, var(--brand-hover));
   }
 }
 
@@ -737,15 +815,15 @@ p {
   display: flex;
   flex-direction: column;
   padding: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.38);
   border-radius: 8px;
-  background: var(--bg-card);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgb(var(--brand-selected-rgb) / 0.14));
   cursor: pointer;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 
   &:hover {
-    border-color: rgba(129, 140, 248, 0.56);
-    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.14);
+    border-color: rgb(var(--brand-hover-rgb) / 0.48);
+    box-shadow: 0 14px 28px rgb(var(--brand-primary-rgb) / 0.12);
     transform: translateY(-1px);
   }
 }

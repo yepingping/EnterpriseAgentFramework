@@ -40,9 +40,9 @@
                 <span class="menu-cn">项目管理</span>
               </span>
             </el-menu-item>
-            <el-menu-item index="/registry/capability-sync">
+            <el-menu-item index="/registry/api-assets">
               <span class="menu-label leaf">
-                <span class="menu-cn">能力变更评审</span>
+                <span class="menu-cn">API 资产目录</span>
               </span>
             </el-menu-item>
             <el-menu-item index="/registry/runtimes">
@@ -247,11 +247,6 @@
                 <span class="menu-cn">领域定义</span>
               </span>
             </el-menu-item>
-            <el-menu-item index="/settings/embed-ops">
-              <span class="menu-label leaf">
-                <span class="menu-cn">嵌入审计</span>
-              </span>
-            </el-menu-item>
             <el-menu-item index="/runops">
               <span class="menu-label leaf">
                 <span class="menu-cn">运行中心</span>
@@ -277,7 +272,13 @@
         <div class="breadcrumb-area">
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item>{{ currentTitle }}</el-breadcrumb-item>
+            <el-breadcrumb-item
+              v-for="item in currentBreadcrumbs"
+              :key="item.title"
+              :to="item.to"
+            >
+              {{ item.title }}
+            </el-breadcrumb-item>
           </el-breadcrumb>
         </div>
         <div class="topbar-actions">
@@ -289,6 +290,26 @@
               class="topbar-btn"
               @click="toggleTheme"
             />
+          </el-tooltip>
+          <el-tooltip :content="`主题色：${currentBrandLabel}`" placement="bottom">
+            <el-dropdown trigger="click" @command="handleBrandCommand">
+              <el-button circle size="small" class="topbar-btn brand-btn" :aria-label="`主题色：${currentBrandLabel}`">
+                <span class="brand-swatch" />
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="option in brandOptions"
+                    :key="option.value"
+                    :command="option.value"
+                    :class="{ selected: option.value === brand }"
+                  >
+                    <span class="brand-menu-swatch" :data-brand-option="option.value" />
+                    <span>{{ option.label }}</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </el-tooltip>
           <el-tooltip content="通知" placement="bottom">
             <el-badge :value="3" :max="99" class="notify-badge">
@@ -316,7 +337,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useTheme } from '@/composables/useTheme'
+import { useTheme, type BrandTheme } from '@/composables/useTheme'
 import { useProjectStore } from '@/store/project'
 import ProjectSelector from '@/components/ProjectSelector.vue'
 import {
@@ -335,7 +356,15 @@ import {
   Moon,
 } from '@element-plus/icons-vue'
 
-const { theme, toggleTheme } = useTheme()
+const { theme, brand, brandOptions, toggleTheme, setBrand } = useTheme()
+const currentBrandLabel = computed(() => brandOptions.find((option) => option.value === brand.value)?.label || '科技紫')
+const brandValues = computed(() => brandOptions.map((option) => option.value))
+
+function handleBrandCommand(value: string | number | object) {
+  if (typeof value === 'string' && brandValues.value.includes(value as BrandTheme)) {
+    setBrand(value as BrandTheme)
+  }
+}
 
 const route = useRoute()
 const projectStore = useProjectStore()
@@ -344,6 +373,12 @@ const projectStore = useProjectStore()
 const defaultOpenMenuGroups = computed(() => {
   const path = route.path
   const open: string[] = []
+  if (
+    path.startsWith('/registry') ||
+    path.startsWith('/scan-project')
+  ) {
+    open.push('/registry-group')
+  }
   if (
     path.startsWith('/settings/platform-users')
     || path.startsWith('/settings/business-users')
@@ -354,7 +389,6 @@ const defaultOpenMenuGroups = computed(() => {
   if (
     path.startsWith('/domain')
     || path.startsWith('/runops')
-    || path.startsWith('/settings/embed-ops')
   ) {
     open.push('/domain-group')
   }
@@ -373,7 +407,6 @@ const activeMenu = computed(() => {
   if (path.startsWith('/settings/platform-users')) return '/settings/platform-users'
   if (path.startsWith('/settings/business-users')) return '/settings/business-users'
   if (path.startsWith('/settings/auth-providers')) return '/settings/auth-providers'
-  if (path.startsWith('/settings/embed-ops')) return '/settings/embed-ops'
   if (path.startsWith('/settings/tool-acl')) return '/settings/tool-acl'
   if (path.startsWith('/capability/tools')) return '/capability/tools'
   if (path.startsWith('/capability/compositions')) return '/capability/compositions'
@@ -392,10 +425,11 @@ const activeMenu = computed(() => {
   if (path.startsWith('/skill/slot/logs')) return '/capability/slot/logs'
   if (path.startsWith('/skill')) return '/capability'
   if (path.startsWith('/tool')) return '/tool'
-  if (path.startsWith('/registry/capability-sync')) return '/registry/capability-sync'
+  if (path.startsWith('/registry/api-assets')) return '/registry/api-assets'
+  if (path.startsWith('/registry/capability-sync')) return '/registry/projects'
   if (path.startsWith('/registry/runtimes')) return '/registry/runtimes'
   if (path.startsWith('/registry/projects')) return '/registry/projects'
-  if (path.startsWith('/scan-project')) return '/registry/projects'
+  if (path.startsWith('/scan-project')) return '/registry/api-assets'
   if (path.startsWith('/runops')) return '/runops'
   if (path.startsWith('/domain/board')) return '/domain/board'
   if (path.startsWith('/domain/classifier-test')) return '/domain/classifier-test'
@@ -413,9 +447,15 @@ const isStudioPage = computed(() => route.name === 'AgentStudio')
 const isSidebarCollapsed = computed(() => isStudioPage.value)
 
 const currentTitle = computed(() => (route.meta.title as string) || '')
+const currentBreadcrumbs = computed(() => {
+  const configured = route.meta.breadcrumb as Array<{ title: string; to?: Record<string, unknown> }> | undefined
+  if (configured?.length) return configured
+  return currentTitle.value ? [{ title: currentTitle.value }] : []
+})
 
 const isProjectManagementPage = computed(() =>
   route.path.startsWith('/registry/projects') ||
+  route.path.startsWith('/registry/api-assets') ||
   route.path.startsWith('/registry/runtimes') ||
   route.path.startsWith('/scan-project'),
 )
@@ -441,7 +481,7 @@ watch(
 
 .sidebar {
   background:
-    radial-gradient(circle at 24px 24px, rgba(99, 102, 241, 0.28), transparent 26%),
+    radial-gradient(circle at 24px 24px, rgb(var(--brand-primary-rgb) / 0.28), transparent 26%),
     radial-gradient(circle at 210px 160px, rgba(14, 165, 233, 0.12), transparent 30%),
     linear-gradient(180deg, #07111f 0%, #08101c 42%, #050b14 100%);
   border-right: 1px solid rgba(148, 163, 184, 0.12);
@@ -473,7 +513,7 @@ watch(
     right: 0;
     bottom: 0;
     width: 1px;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.65), transparent 40%, rgba(14, 165, 233, 0.22));
+    background: linear-gradient(180deg, rgb(var(--brand-primary-rgb) / 0.65), transparent 40%, rgba(14, 165, 233, 0.22));
     pointer-events: none;
   }
 }
@@ -541,7 +581,7 @@ watch(
   align-items: center;
   justify-content: center;
   box-shadow:
-    0 12px 28px rgba(37, 99, 235, 0.32),
+    0 12px 28px rgb(var(--brand-primary-rgb) / 0.32),
     inset 0 0 0 1px rgba(255, 255, 255, 0.24);
   overflow: hidden;
 
@@ -558,7 +598,7 @@ watch(
   line-height: 1.1;
   letter-spacing: 0;
   padding-bottom: 10px;
-  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 48%, #93c5fd 100%);
+  background: linear-gradient(135deg, #ffffff 0%, var(--brand-selected-bg) 48%, var(--brand-disabled) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -622,24 +662,24 @@ watch(
     }
 
     &:hover {
-      background: rgba(99, 102, 241, 0.12);
+      background: rgb(var(--brand-primary-rgb) / 0.12);
       color: #f8fafc;
       transform: translateX(2px);
 
       .el-icon {
-        color: #dbeafe;
-        background: rgba(99, 102, 241, 0.18);
-        box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.18);
+        color: var(--brand-selected-bg);
+        background: rgb(var(--brand-primary-rgb) / 0.18);
+        box-shadow: inset 0 0 0 1px rgb(var(--brand-hover-rgb) / 0.18);
       }
     }
 
     &.is-active {
       background:
-        linear-gradient(135deg, rgba(79, 70, 229, 0.92), rgba(37, 99, 235, 0.76)),
+        linear-gradient(135deg, rgb(var(--brand-active-rgb) / 0.92), rgb(var(--brand-hover-rgb) / 0.76)),
         linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent);
       color: #ffffff;
       box-shadow:
-        0 12px 26px rgba(37, 99, 235, 0.24),
+        0 12px 26px rgb(var(--brand-primary-rgb) / 0.24),
         inset 0 0 0 1px rgba(255, 255, 255, 0.13);
 
       &::before {
@@ -650,8 +690,8 @@ watch(
         bottom: 8px;
         width: 4px;
         border-radius: 0 999px 999px 0;
-        background: linear-gradient(180deg, #67e8f9, #818cf8);
-        box-shadow: 0 0 14px rgba(103, 232, 249, 0.55);
+        background: linear-gradient(180deg, var(--brand-selected-bg), var(--brand-hover));
+        box-shadow: 0 0 14px rgb(var(--brand-hover-rgb) / 0.55);
       }
 
       &::after {
@@ -705,13 +745,13 @@ watch(
     }
 
     &:hover {
-      background: rgba(99, 102, 241, 0.10);
+      background: rgb(var(--brand-primary-rgb) / 0.10);
       color: #f8fafc;
       transform: translateX(2px);
 
       .el-icon {
-        color: #dbeafe;
-        background: rgba(99, 102, 241, 0.16);
+        color: var(--brand-selected-bg);
+        background: rgb(var(--brand-primary-rgb) / 0.16);
       }
 
       .el-sub-menu__icon-arrow {
@@ -727,8 +767,8 @@ watch(
     background: rgba(148, 163, 184, 0.08);
 
     .el-icon {
-      color: #c7d2fe;
-      background: rgba(99, 102, 241, 0.16);
+      color: var(--brand-selected-bg);
+      background: rgb(var(--brand-primary-rgb) / 0.16);
     }
   }
 
@@ -744,7 +784,7 @@ watch(
       top: 2px;
       bottom: 8px;
       width: 1px;
-      background: linear-gradient(180deg, rgba(99, 102, 241, 0.35), rgba(148, 163, 184, 0.08));
+      background: linear-gradient(180deg, rgb(var(--brand-primary-rgb) / 0.35), rgba(148, 163, 184, 0.08));
     }
   }
 
@@ -776,17 +816,17 @@ watch(
 
     &:hover {
       color: #e2e8f0;
-      background: rgba(99, 102, 241, 0.10);
+      background: rgb(var(--brand-primary-rgb) / 0.10);
     }
 
     &.is-active {
       color: #ffffff;
-      background: linear-gradient(135deg, rgba(79, 70, 229, 0.72), rgba(37, 99, 235, 0.50));
-      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+      background: linear-gradient(135deg, rgb(var(--brand-active-rgb) / 0.72), rgb(var(--brand-hover-rgb) / 0.50));
+      box-shadow: 0 10px 22px rgb(var(--brand-primary-rgb) / 0.18);
 
       &::before {
-        background: #67e8f9;
-        box-shadow: 0 0 10px rgba(103, 232, 249, 0.55);
+        background: var(--brand-hover);
+        box-shadow: 0 0 10px rgb(var(--brand-hover-rgb) / 0.55);
       }
     }
   }
@@ -837,10 +877,64 @@ watch(
   color: #94a3b8;
 
   &:hover {
-    background: rgba(99, 102, 241, 0.1);
-    border-color: rgba(99, 102, 241, 0.2);
+    background: rgb(var(--brand-primary-rgb) / 0.1);
+    border-color: rgb(var(--brand-primary-rgb) / 0.2);
     color: #e2e8f0;
   }
+}
+
+.brand-btn {
+  position: relative;
+}
+
+.brand-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--brand-primary-gradient);
+  box-shadow:
+    0 0 0 2px rgb(var(--brand-primary-rgb) / 0.14),
+    0 0 14px rgb(var(--brand-primary-rgb) / 0.24);
+}
+
+:global(.brand-menu-swatch) {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+:global(.brand-menu-swatch[data-brand-option='metro-green']) {
+  background: linear-gradient(135deg, #0b7a59, #2d9375);
+}
+
+:global(.brand-menu-swatch[data-brand-option='aurora-cyan']) {
+  background: linear-gradient(135deg, #0891b2, #22d3ee);
+}
+
+:global(.brand-menu-swatch[data-brand-option='nebula-violet']) {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
+}
+
+:global(.brand-menu-swatch[data-brand-option='coral-rose']) {
+  background: linear-gradient(135deg, #e11d48, #fb7185);
+}
+
+:global(.brand-menu-swatch[data-brand-option='solar-gold']) {
+  background: linear-gradient(135deg, #b45309, #f59e0b);
+}
+
+:global(.brand-menu-swatch[data-brand-option='deep-ocean']) {
+  background: linear-gradient(135deg, #1d4ed8, #06b6d4);
+}
+
+:global(.el-dropdown-menu__item.selected) {
+  color: var(--brand-primary);
+  background: rgb(var(--brand-primary-rgb) / 0.08);
 }
 
 .notify-badge {
@@ -851,13 +945,13 @@ watch(
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-hover));
   cursor: pointer;
   color: #fff;
   transition: box-shadow 0.2s ease;
 
   &:hover {
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+    box-shadow: 0 0 0 3px rgb(var(--brand-primary-rgb) / 0.3);
   }
 }
 
@@ -873,7 +967,7 @@ watch(
     left: 240px;
     right: 0;
     height: 300px;
-    background: radial-gradient(ellipse at 50% 0%, rgba(99, 102, 241, 0.04) 0%, transparent 70%);
+    background: radial-gradient(ellipse at 50% 0%, rgb(var(--brand-primary-rgb) / 0.04) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
   }
@@ -906,9 +1000,9 @@ watch(
     color: #667085;
 
     &:hover {
-      background: #f5f3ff;
-      border-color: #ddd6fe;
-      color: #5b3df5;
+      background: rgb(var(--brand-primary-rgb) / 0.08);
+      border-color: var(--brand-selected-bg);
+      color: var(--brand-primary);
     }
   }
 
@@ -958,9 +1052,152 @@ watch(
     color: #94a3b8;
 
     &:hover {
-      background: rgba(99, 102, 241, 0.12);
-      border-color: rgba(99, 102, 241, 0.35);
+      background: rgb(var(--brand-primary-rgb) / 0.12);
+      border-color: rgb(var(--brand-primary-rgb) / 0.35);
       color: #e2e8f0;
+    }
+  }
+}
+
+/* SDK wizard aligned sidebar skin: dark glass, violet highlights, and subtle grid glow. */
+.main-layout:not(.studio-shell) {
+  .sidebar {
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+      radial-gradient(circle at 14% 4%, rgb(var(--brand-primary-rgb) / 0.26), transparent 24%),
+      radial-gradient(circle at 86% 76%, rgb(var(--brand-hover-rgb) / 0.18), transparent 32%),
+      linear-gradient(180deg, #121735 0%, #07111f 52%, #050b14 100%) !important;
+    background-size: 32px 32px, 32px 32px, auto, auto, auto;
+    border-right-color: rgb(var(--brand-selected-rgb) / 0.18) !important;
+    box-shadow:
+      inset -1px 0 0 rgba(255, 255, 255, 0.05),
+      18px 0 46px rgba(49, 46, 129, 0.22) !important;
+
+    &::before {
+      background:
+        linear-gradient(115deg, transparent 0%, rgb(var(--brand-hover-rgb) / 0.07) 35%, transparent 56%),
+        linear-gradient(72deg, transparent 18%, rgb(var(--brand-primary-rgb) / 0.08) 44%, transparent 70%) !important;
+      opacity: 0.9 !important;
+      mask-image: linear-gradient(180deg, #000 0%, transparent 82%);
+    }
+
+    &::after {
+      background: linear-gradient(180deg, rgb(var(--brand-selected-rgb) / 0.42), transparent 42%, rgb(var(--brand-hover-rgb) / 0.24)) !important;
+    }
+  }
+
+  .logo {
+    border-bottom-color: rgb(var(--brand-selected-rgb) / 0.13) !important;
+  }
+
+  .logo-icon-wrap {
+    box-shadow:
+      0 12px 28px rgb(var(--brand-primary-rgb) / 0.28),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.24) !important;
+  }
+
+  .logo-text {
+    background: linear-gradient(135deg, #ffffff 0%, var(--brand-selected-bg) 50%, var(--brand-disabled) 100%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+  }
+
+  .menu-divider {
+    background: linear-gradient(90deg, transparent, rgb(var(--brand-selected-rgb) / 0.18), transparent) !important;
+  }
+
+  .sidebar-menu {
+    :deep(.el-menu-item),
+    :deep(.el-sub-menu__title) {
+      color: rgba(226, 232, 240, 0.74) !important;
+
+      .el-icon {
+        color: rgb(var(--brand-selected-rgb) / 0.72) !important;
+        background: rgba(255, 255, 255, 0.065) !important;
+        box-shadow:
+          inset 0 0 0 1px rgb(var(--brand-selected-rgb) / 0.1),
+          0 8px 20px rgba(15, 23, 42, 0.08) !important;
+      }
+
+      &:hover {
+        background: rgb(var(--brand-hover-rgb) / 0.14) !important;
+        color: #f8fafc !important;
+
+        .el-icon {
+          color: #ffffff !important;
+          background: rgb(var(--brand-primary-rgb) / 0.22) !important;
+          box-shadow:
+            inset 0 0 0 1px rgb(var(--brand-selected-rgb) / 0.2),
+            0 0 18px rgb(var(--brand-hover-rgb) / 0.2) !important;
+        }
+      }
+    }
+
+    :deep(.el-menu-item.is-active) {
+      background:
+        linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.92), rgb(var(--brand-hover-rgb) / 0.82)),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.18), transparent 46%) !important;
+      color: #ffffff !important;
+      box-shadow:
+        0 12px 28px rgb(var(--brand-primary-rgb) / 0.26),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.16) !important;
+
+      &::before {
+        background: linear-gradient(180deg, var(--brand-hover), #67e8f9) !important;
+        box-shadow: 0 0 14px rgb(var(--brand-hover-rgb) / 0.62) !important;
+      }
+
+      .el-icon {
+        color: #ffffff !important;
+        background: rgba(255, 255, 255, 0.18) !important;
+      }
+    }
+
+    :deep(.el-sub-menu__title .el-sub-menu__icon-arrow) {
+      color: rgb(var(--brand-selected-rgb) / 0.58) !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+
+    :deep(.el-sub-menu.is-opened > .el-sub-menu__title) {
+      background: rgba(255, 255, 255, 0.07) !important;
+      color: #f8fafc !important;
+
+      .el-icon {
+        color: var(--brand-selected-bg) !important;
+        background: rgb(var(--brand-primary-rgb) / 0.2) !important;
+      }
+    }
+
+    :deep(.el-sub-menu .el-menu::before) {
+      background: linear-gradient(180deg, rgb(var(--brand-hover-rgb) / 0.38), rgb(var(--brand-selected-rgb) / 0.08)) !important;
+    }
+
+    :deep(.el-sub-menu .el-menu-item) {
+      color: rgba(203, 213, 225, 0.72) !important;
+      background: transparent !important;
+
+      &::before {
+        background: rgb(var(--brand-selected-rgb) / 0.26) !important;
+      }
+
+      &:hover {
+        background: rgb(var(--brand-hover-rgb) / 0.12) !important;
+        color: #f1f5f9 !important;
+      }
+
+      &.is-active {
+        background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.72), rgb(var(--brand-hover-rgb) / 0.56)) !important;
+        color: #ffffff !important;
+        box-shadow: 0 10px 22px rgb(var(--brand-primary-rgb) / 0.2) !important;
+
+        &::before {
+          background: var(--brand-hover) !important;
+          box-shadow: 0 0 10px rgb(var(--brand-hover-rgb) / 0.58) !important;
+        }
+      }
     }
   }
 }

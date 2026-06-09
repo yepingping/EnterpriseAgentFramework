@@ -10,7 +10,7 @@
 
 当前系统不是单纯的“扫描历史项目生成 Tool”，而是由以下主线组成：
 
-- 项目与能力注册中心：业务系统可通过 `ai-spring-boot-starter` 主动注册项目、实例、能力和 SDK 图。
+- 项目与能力注册中心：业务系统可通过 `reachai-spring-boot2-starter` 与 `reachai-capability-sdk` 主动注册项目、实例、能力和 SDK 图。
 - 能力资产治理：`tool_definition` 统一承载 Tool 与粗粒度 Capability，扫描接入和 SDK 注册都进入同一资产目录。
 - Agent Studio 与 Runtime：Agent 定义、GraphSpec、交互式节点、会话式调试台、版本发布、评测、运行时选择和节点级调试都在平台中闭环。
 - 运行治理与开放协议：RunOps、Trace、Tool ACL、Guard 决策、MCP、A2A 和 Gateway 共同承担生产运行边界。
@@ -27,6 +27,8 @@
 | [05-知识模型与企业资产.md](./05-知识模型与企业资产.md) | 模型实例、知识库、业务索引、领域、市场资产如何被 Agent 使用 |
 | [09-AI长任务代码审计提示词.md](./09-AI长任务代码审计提示词.md) | 交给长上下文 AI 执行只读全仓代码审计、死代码过滤、文档/SQL/前后端漂移检查的完整提示词 |
 | [11-ReachAI-JDK8接入SDK与JDK17-Runtime分层方案.md](./11-ReachAI-JDK8接入SDK与JDK17-Runtime分层方案.md) | JDK8 业务接入 SDK 与 JDK17 中台 Runtime 分层的当前落地模块、协议边界和验证方式 |
+| [14-班组系统接入ReachAI SDK实施步骤.md](./14-班组系统接入ReachAI%20SDK实施步骤.md) | 班组微服务接入 ReachAI SDK、网关 token broker、前端嵌入对话框和 Page Action 的标准步骤 |
+| [15-创建页面助手轻闭环.md](./15-创建页面助手轻闭环.md) | 项目详情页创建页面助手向导、手工声明页面动作、生成 Agent Studio 草稿的 v1 边界 |
 | [ai-memory/README.md](./ai-memory/README.md) | 给 Cursor、Codex 等 AI 编程工具看的项目规则、记忆和历史坑位 |
 
 ## 当前已落地

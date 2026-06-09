@@ -26,6 +26,7 @@
         </span>
         <el-button @click="handleDebug" :icon="VideoPlay">调试</el-button>
         <el-button :icon="MagicStick" :disabled="studioReadOnly" @click="openAiDraftDialog">AI 生成流程</el-button>
+        <el-button :icon="Link" :disabled="studioReadOnly" @click="openApiQueryTemplateDialog">API 查询流程</el-button>
         <el-button @click="openEvalDrawer" :icon="Finished">评测</el-button>
         <el-dropdown trigger="click" @command="handleHeaderCommand">
           <el-button :icon="MoreFilled">更多</el-button>
@@ -610,40 +611,58 @@
             </div>
           </template>
         </VueFlow>
-        <div class="canvas-operator">
-          <el-tooltip content="搜索节点 Ctrl+F" placement="top">
-            <el-button :icon="Search" circle @click="openCanvasSearch" />
+        <div class="canvas-operator" :class="{ collapsed: canvasOperatorCollapsed }">
+          <el-tooltip :content="canvasOperatorCollapsed ? '展开画布工具' : '收起画布工具'" placement="top">
+            <button
+              class="canvas-operator-toggle"
+              type="button"
+              :aria-expanded="!canvasOperatorCollapsed"
+              @click="canvasOperatorCollapsed = !canvasOperatorCollapsed"
+            >
+              <el-icon><Operation /></el-icon>
+              <span>{{ canvasOperatorCollapsed ? '工具' : '收起' }}</span>
+              <el-icon class="operator-caret">
+                <ArrowUp v-if="canvasOperatorCollapsed" />
+                <ArrowDown v-else />
+              </el-icon>
+            </button>
           </el-tooltip>
-          <el-divider direction="vertical" />
-          <el-tooltip content="撤销 Ctrl+Z" placement="top">
-            <el-button :icon="RefreshLeft" circle :disabled="studioReadOnly || !canUndo" @click="undoCanvas" />
-          </el-tooltip>
-          <el-tooltip content="重做 Ctrl+Y" placement="top">
-            <el-button :icon="RefreshRight" circle :disabled="studioReadOnly || !canRedo" @click="redoCanvas" />
-          </el-tooltip>
-          <el-divider direction="vertical" />
-          <el-tooltip content="复制 Ctrl+C" placement="top">
-            <el-button :icon="CopyDocument" circle :disabled="!selectedNode || selectedNode.data.kind === 'start' || selectedNode.data.kind === 'end'" @click="copySelectedNode" />
-          </el-tooltip>
-          <el-tooltip content="粘贴 Ctrl+V" placement="top">
-            <el-button :icon="Files" circle :disabled="studioReadOnly || !copiedNode" @click="pasteCopiedNode" />
-          </el-tooltip>
-          <el-tooltip content="折叠/展开节点" placement="top">
-            <el-button :icon="Operation" circle :disabled="!selectedNode" @click="toggleSelectedNodeCollapsed" />
-          </el-tooltip>
-          <el-divider direction="vertical" />
-          <el-tooltip content="自动整理 Ctrl+O" placement="top">
-            <el-button :icon="Rank" circle @click="handleAutoLayout" />
-          </el-tooltip>
-          <el-tooltip content="聚焦画布 Ctrl+1" placement="top">
-            <el-button :icon="Aim" circle @click="handleFitView" />
-          </el-tooltip>
-          <el-tooltip content="缩小" placement="top">
-            <el-button :icon="ZoomOut" circle @click="handleZoomOut" />
-          </el-tooltip>
-          <el-tooltip content="放大" placement="top">
-            <el-button :icon="ZoomIn" circle @click="handleZoomIn" />
-          </el-tooltip>
+          <template v-if="!canvasOperatorCollapsed">
+            <el-divider direction="vertical" />
+            <el-tooltip content="搜索节点 Ctrl+F" placement="top">
+              <el-button :icon="Search" circle @click="openCanvasSearch" />
+            </el-tooltip>
+            <el-divider direction="vertical" />
+            <el-tooltip content="撤销 Ctrl+Z" placement="top">
+              <el-button :icon="RefreshLeft" circle :disabled="studioReadOnly || !canUndo" @click="undoCanvas" />
+            </el-tooltip>
+            <el-tooltip content="重做 Ctrl+Y" placement="top">
+              <el-button :icon="RefreshRight" circle :disabled="studioReadOnly || !canRedo" @click="redoCanvas" />
+            </el-tooltip>
+            <el-divider direction="vertical" />
+            <el-tooltip content="复制 Ctrl+C" placement="top">
+              <el-button :icon="CopyDocument" circle :disabled="!selectedNode || selectedNode.data.kind === 'start' || selectedNode.data.kind === 'end'" @click="copySelectedNode" />
+            </el-tooltip>
+            <el-tooltip content="粘贴 Ctrl+V" placement="top">
+              <el-button :icon="Files" circle :disabled="studioReadOnly || !copiedNode" @click="pasteCopiedNode" />
+            </el-tooltip>
+            <el-tooltip content="折叠/展开节点" placement="top">
+              <el-button :icon="Operation" circle :disabled="!selectedNode" @click="toggleSelectedNodeCollapsed" />
+            </el-tooltip>
+            <el-divider direction="vertical" />
+            <el-tooltip content="自动整理 Ctrl+O" placement="top">
+              <el-button :icon="Rank" circle @click="handleAutoLayout" />
+            </el-tooltip>
+            <el-tooltip content="聚焦画布 Ctrl+1" placement="top">
+              <el-button :icon="Aim" circle @click="handleFitView" />
+            </el-tooltip>
+            <el-tooltip content="缩小" placement="top">
+              <el-button :icon="ZoomOut" circle @click="handleZoomOut" />
+            </el-tooltip>
+            <el-tooltip content="放大" placement="top">
+              <el-button :icon="ZoomIn" circle @click="handleZoomIn" />
+            </el-tooltip>
+          </template>
         </div>
         <div
           v-if="!aiEditMinimized"
@@ -1235,6 +1254,91 @@
           <strong>{{ item.label }}</strong>
           <em>{{ item.hint }}</em>
         </button>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="apiQueryTemplateOpen" title="从 API 资产生成查询流程" width="900px" class="api-query-template-dialog">
+      <div class="api-query-template-body">
+        <el-alert
+          type="info"
+          :closable="false"
+          title="选择一个已关联 Tool 的项目接口，系统会生成交互收集、页面查询动作、Tool 调用和结果展示节点。"
+        />
+        <div class="api-query-template-toolbar">
+          <el-input
+            v-model="apiQueryTemplateFilters.keyword"
+            :prefix-icon="Search"
+            clearable
+            placeholder="搜索接口名称、路径、描述"
+            @keyup.enter="reloadApiQueryTemplateAssets"
+          />
+          <el-select v-model="apiQueryTemplateFilters.toolLinkStatus" clearable placeholder="Tool 状态">
+            <el-option label="已关联 Tool" value="LINKED" />
+            <el-option label="未关联 Tool" value="NOT_LINKED" />
+            <el-option label="全局 Tool 缺失" value="GLOBAL_MISSING" />
+          </el-select>
+          <el-input v-model="apiQueryTemplateActionKey" placeholder="page.search.applyFilters" />
+          <el-button type="primary" @click="reloadApiQueryTemplateAssets">查询</el-button>
+        </div>
+        <el-table
+          v-loading="apiQueryTemplateLoading"
+          :data="apiQueryTemplateAssets"
+          row-key="apiId"
+          :row-class-name="apiQueryTemplateRowClassName"
+          height="420"
+          stripe
+          empty-text="暂无 API 资产"
+        >
+          <el-table-column label="接口" min-width="280" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="api-template-cell">
+                <strong>{{ row.name }}</strong>
+                <span>{{ row.httpMethod || '-' }} {{ row.endpointPath || row.sourceLocation || '-' }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="项目 / 模块" min-width="190" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="api-template-cell">
+                <strong>{{ row.projectName || row.projectCode || '-' }}</strong>
+                <span>{{ row.moduleName || '-' }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="参数" width="80" align="center">
+            <template #default="{ row }">{{ row.parameterCount || row.parameters?.length || 0 }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="150">
+            <template #default="{ row }">
+              <el-tag size="small" :type="apiQueryTemplateSelectable(row) ? 'success' : 'info'" effect="plain">
+                {{ apiQueryTemplateStatusLabel(row) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                text
+                :disabled="!apiQueryTemplateSelectable(row)"
+                @click="generateApiQueryTemplate(row)"
+              >
+                生成流程
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="api-query-template-footer">
+          <span>页面动作 actionKey 由业务前端 SDK 启动时用项目 key/secret 自动上报，例如班组档案页可注册为 teamArchive.search。</span>
+          <el-pagination
+            v-model:current-page="apiQueryTemplateFilters.page"
+            v-model:page-size="apiQueryTemplateFilters.pageSize"
+            layout="total, prev, pager, next"
+            :total="apiQueryTemplateTotal"
+            @current-change="loadApiQueryTemplateAssets"
+          />
+        </div>
       </div>
     </el-dialog>
 
@@ -1899,15 +2003,17 @@ import '@vue-flow/minimap/dist/style.css'
 
 import type { AgentForm, AgentReleaseValidationItem, AgentVersion, AgentDefinition, AgentNodeDebugResult, AgentGraphNodeTypeDescriptor, WorkflowDraftGenerationResult, WorkflowDraftResource, AgentWorkflowDebugRunResult, AgentWorkflowDebugStepResult, WorkflowDraftEditResult, WorkflowDraftEditOperation, WorkflowDraftEditOperationType, ExecutableDebugSessionView, ExecutableDebugMessage } from '@/types/agent'
 import type { CanvasNode, CanvasEdge, CanvasNodeKind, InteractionCallNodeRequest, InteractionNodeConfig, StudioFieldSchema, StudioVariableOption } from '@/types/studio'
-import { getAgent, updateAgent, publishAgentVersion, validateAgentRelease, gatewayChat, listAgentVersions, debugAgentNode, createExecutableDebugSession, getExecutableDebugSession, submitExecutableDebugSession, cancelExecutableDebugSession, getAgentGraphNodeTypes, generateWorkflowDraft, editWorkflowDraft } from '@/api/agent'
+import { createAgent, getAgent, updateAgent, publishAgentVersion, validateAgentRelease, gatewayChat, listAgentVersions, debugAgentNode, createExecutableDebugSession, getExecutableDebugSession, submitExecutableDebugSession, cancelExecutableDebugSession, getAgentGraphNodeTypes, generateWorkflowDraft, editWorkflowDraft } from '@/api/agent'
 import { createEvalDataset, listEvalDatasets, startEvalRun } from '@/api/agentEval'
 import type { AgentEvalCaseImportRow, AgentEvalDataset, AgentEvalRunSummary, AgentEvalRunView } from '@/types/agentEval'
 import LlmModelIcon from '@/components/icons/LlmModelIcon.vue'
 import SendIcon from '@/components/icons/SendIcon.vue'
 import { listAllTools } from '@/api/tool'
 import { listAllCompositions } from '@/api/composition'
-import type { ToolInfo } from '@/types/tool'
+import type { ToolInfo, ToolParameter } from '@/types/tool'
 import type { CompositionInfo } from '@/types/composition'
+import { listApiAssets } from '@/api/apiAsset'
+import type { ApiAssetItem } from '@/types/apiAsset'
 import type { ChatResponse } from '@/types/chat'
 import type { UiFieldPayload, UiRequestPayload } from '@/types/interaction'
 import { canvasToDefinition, createDefaultNodeData, definitionToCanvas, interactionOutputPorts, kindColor } from '@/utils/studio'
@@ -1940,6 +2046,7 @@ const route = useRoute()
 const router = useRouter()
 const agentId = route.params.id as string
 const isNew = agentId === 'new'
+const PAGE_ASSISTANT_DRAFT_KEY = 'reachai:page-assistant-draft'
 
 const { screenToFlowCoordinate, fitView, setCenter, zoomIn, zoomOut, getViewport } = useVueFlow()
 const DEBUG_DRAWER_WIDTH_RATIO = 0.58
@@ -1991,10 +2098,23 @@ const aiDraftGenerating = ref(false)
 const aiDraftRequirement = ref('')
 const aiDraftModelInstanceId = ref('')
 const aiDraftPreview = ref<WorkflowDraftGenerationResult | null>(null)
+const apiQueryTemplateOpen = ref(false)
+const apiQueryTemplateLoading = ref(false)
+const apiQueryTemplateAssets = ref<ApiAssetItem[]>([])
+const apiQueryTemplateTotal = ref(0)
+const apiQueryTemplateActionKey = ref('page.search.applyFilters')
+const apiQueryTemplateRouteAssetId = ref<number | null>(null)
+const apiQueryTemplateFilters = reactive({
+  keyword: '',
+  toolLinkStatus: 'LINKED',
+  page: 1,
+  pageSize: 10,
+})
 const aiEditInstruction = ref('')
 const aiEditLoading = ref(false)
 const aiEditPreview = ref<WorkflowDraftEditResult | null>(null)
 const aiEditMinimized = ref(false)
+const canvasOperatorCollapsed = ref(true)
 const traceToolNames = computed(() => {
   const names = traceNodes.value
     .map((n) => (n.toolName || '').trim())
@@ -3019,6 +3139,388 @@ function addNodeFromSearch(kind: CanvasNodeKind) {
   nodeSearchOpen.value = false
 }
 
+function openApiQueryTemplateDialog() {
+  apiQueryTemplateOpen.value = true
+  apiQueryTemplateActionKey.value = apiQueryTemplateActionKey.value || 'page.search.applyFilters'
+  apiQueryTemplateFilters.page = 1
+  loadApiQueryTemplateAssets()
+}
+
+function reloadApiQueryTemplateAssets() {
+  apiQueryTemplateFilters.page = 1
+  loadApiQueryTemplateAssets()
+}
+
+async function loadApiQueryTemplateAssets() {
+  apiQueryTemplateLoading.value = true
+  try {
+    const { data } = await listApiAssets({
+      projectId: form.projectId || undefined,
+      keyword: apiQueryTemplateFilters.keyword || undefined,
+      toolLinkStatus: apiQueryTemplateFilters.toolLinkStatus || undefined,
+      page: apiQueryTemplateFilters.page,
+      pageSize: apiQueryTemplateFilters.pageSize,
+    })
+    apiQueryTemplateAssets.value = prioritizeRouteApiAsset(data.items || [])
+    apiQueryTemplateTotal.value = data.total || 0
+  } catch {
+    apiQueryTemplateAssets.value = []
+    apiQueryTemplateTotal.value = 0
+    ElMessage.error('加载 API 资产失败')
+  } finally {
+    apiQueryTemplateLoading.value = false
+  }
+}
+
+function queryString(value: unknown) {
+  if (Array.isArray(value)) return value[0] == null ? '' : String(value[0])
+  return value == null ? '' : String(value)
+}
+
+function routeApiAssetContext() {
+  if (queryString(route.query.intent) !== 'api-query-template') return null
+  const id = Number(queryString(route.query.apiAssetId))
+  const tool = queryString(route.query.apiAssetTool)
+  const name = queryString(route.query.apiAssetName)
+  if (!Number.isFinite(id) && !tool && !name) return null
+  return {
+    id: Number.isFinite(id) && id > 0 ? id : null,
+    keyword: tool || name,
+  }
+}
+
+function applyApiAssetRouteContext() {
+  const context = routeApiAssetContext()
+  if (!context) return
+  apiQueryTemplateRouteAssetId.value = context.id
+  apiQueryTemplateFilters.keyword = context.keyword
+  apiQueryTemplateFilters.toolLinkStatus = 'LINKED'
+  openApiQueryTemplateDialog()
+}
+
+function prioritizeRouteApiAsset(items: ApiAssetItem[]) {
+  if (!apiQueryTemplateRouteAssetId.value) return items
+  const index = items.findIndex((item) => item.apiId === apiQueryTemplateRouteAssetId.value)
+  if (index <= 0) return items
+  const next = [...items]
+  const [matched] = next.splice(index, 1)
+  next.unshift(matched)
+  return next
+}
+
+function apiQueryTemplateRowClassName({ row }: { row: ApiAssetItem }) {
+  return row.apiId === apiQueryTemplateRouteAssetId.value ? 'is-route-api-asset' : ''
+}
+
+function generateApiQueryTemplate(asset: ApiAssetItem) {
+  if (!apiQueryTemplateSelectable(asset)) {
+    ElMessage.warning('该接口还不能生成查询流程，请先完成 Tool 关联并开启 Agent 可见。')
+    return
+  }
+  const baseName = normalizeTemplateName(asset.name || asset.globalToolName || 'api')
+  const queryAlias = `${baseName}_query`
+  const actionAlias = `${baseName}_page_action`
+  const resultAlias = `${baseName}_result`
+  const displayAlias = `${baseName}_display`
+  const y = 180 + Math.max(0, nodes.value.length - 2) * 18
+  const interactionNode = createCanvasNode('interaction', { x: 260, y }, false)
+  const pageActionNode = createCanvasNode('pageAction', { x: 600, y }, false)
+  const toolNode = createCanvasNode('tool', { x: 940, y }, false)
+  const displayNode = createCanvasNode('interaction', { x: 1280, y }, false)
+  const fields = apiAssetToInteractionFields(asset)
+  const inputMapping = apiAssetInputMapping(asset, queryAlias)
+
+  interactionNode.data.label = `${asset.name} 查询条件`
+  interactionNode.data.description = asset.aiDescription || asset.description || '从 API 资产生成的查询条件收集节点'
+  interactionNode.data.outputAlias = queryAlias
+  interactionNode.data.interactionConfig = {
+    interactionType: 'COLLECT_INPUT',
+    binding: {
+      sourceKind: 'API',
+      ref: asset.globalToolName || asset.name,
+      qualifiedName: asset.globalToolQualifiedName || asset.globalToolName || asset.name,
+      projectCode: asset.projectCode || null,
+      projectId: asset.projectId,
+      apiNodeId: asset.apiId,
+      apiMethod: asset.httpMethod || null,
+      apiPath: asset.endpointPath || null,
+      generatedFrom: `API:${asset.apiId}`,
+      autoCreateCallNode: true,
+      autoCreateDisplayNode: true,
+      callNodeId: toolNode.id,
+      displayNodeId: displayNode.id,
+    },
+    title: `${asset.name} 查询条件`,
+    component: 'FORM',
+    fields,
+    dataExpression: 'lastOutput',
+    outputAlias: queryAlias,
+    dataSources: {
+      apiAsset: apiAssetTemplateMetadata(asset),
+    },
+    behavior: { askMissing: true, maxTurns: 6 },
+    renderSchema: {},
+  }
+  interactionNode.data.outputs = interactionOutputPorts(interactionNode.data.interactionConfig, queryAlias)
+
+  pageActionNode.data.label = '驱动页面查询'
+  pageActionNode.data.description = '请求嵌入的业务页面填入查询条件并触发搜索'
+  pageActionNode.data.outputAlias = actionAlias
+  pageActionNode.data.pageActionConfig = {
+    projectCode: asset.projectCode || '',
+    actionKey: apiQueryTemplateActionKey.value.trim() || 'page.search.applyFilters',
+    title: `页面查询：${asset.name}`,
+    confirm: false,
+    args: apiAssetPageActionMapping(asset, queryAlias),
+    outputAlias: actionAlias,
+    metadata: {
+      projectCode: asset.projectCode || null,
+      apiId: asset.apiId,
+      apiName: asset.name,
+      endpointPath: asset.endpointPath || null,
+    },
+  }
+  pageActionNode.data.inputs = [{ id: queryAlias, name: queryAlias, type: 'object', required: false, source: queryAlias }]
+  pageActionNode.data.outputs = [{ id: actionAlias, name: actionAlias, type: 'object' }]
+
+  toolNode.data.label = `调用 ${asset.globalToolName || asset.name}`
+  toolNode.data.description = asset.aiDescription || asset.description || '调用已关联的 API Tool'
+  toolNode.data.outputAlias = resultAlias
+  toolNode.data.inputs = callNodeInputsFromMapping(inputMapping)
+  toolNode.data.outputs = [{ id: resultAlias, name: resultAlias, type: 'any' }]
+  toolNode.data.toolConfig = {
+    ref: asset.globalToolName || asset.name,
+    qualifiedName: asset.globalToolQualifiedName || asset.globalToolName || asset.name,
+    projectCode: asset.projectCode || null,
+    visibility: 'PROJECT',
+    credentialRef: '',
+    maxRequestTimeMs: 180000,
+    inputMapping,
+    mappingNote: `由 API 查询流程向导生成：${asset.httpMethod || ''} ${asset.endpointPath || asset.name}`.trim(),
+  }
+
+  displayNode.data.label = `${asset.name} 查询结果`
+  displayNode.data.description = '展示查询接口返回结果'
+  displayNode.data.outputAlias = displayAlias
+  displayNode.data.interactionConfig = {
+    interactionType: 'PRESENT_OUTPUT',
+    binding: { sourceKind: 'NONE' },
+    title: `${asset.name} 查询结果`,
+    component: 'TABLE',
+    fields: [],
+    dataExpression: resultAlias,
+    outputAlias: displayAlias,
+    dataSources: {
+      source: { nodeId: toolNode.id, outputAlias: resultAlias, apiId: asset.apiId },
+    },
+    behavior: { acknowledge: false },
+    renderSchema: {
+      apiName: asset.name,
+      endpointPath: asset.endpointPath || null,
+      responseType: asset.responseType || null,
+    },
+  }
+  displayNode.data.outputs = interactionOutputPorts(displayNode.data.interactionConfig, displayAlias)
+
+  ensureCanvasEdge(interactionNode.id, pageActionNode.id)
+  ensureCanvasEdge(pageActionNode.id, toolNode.id)
+  ensureCanvasEdge(toolNode.id, displayNode.id)
+  selectedNodeId.value = interactionNode.id
+  selectedEdgeId.value = null
+  propertyPanelCollapsed.value = false
+  apiQueryTemplateOpen.value = false
+  ElMessage.success('已生成 API 查询流程')
+}
+
+function apiAssetToInteractionFields(asset: ApiAssetItem): StudioFieldSchema[] {
+  const fields = (asset.parameters || []).flatMap((parameter) => apiParameterToFields(parameter))
+  if (fields.length) return fields
+  return [{
+    name: 'query',
+    key: 'query',
+    type: 'string',
+    required: true,
+    description: '查询条件',
+    component: 'input',
+    source: 'input.message',
+    targetPath: 'query',
+    slotFilling: templateSlotFillingForField('query', '查询条件'),
+  }]
+}
+
+function apiParameterToFields(parameter: ToolParameter, prefix = ''): StudioFieldSchema[] {
+  if (!isApiInputParameter(parameter)) return []
+  const rawName = parameter.name || 'param'
+  const targetPath = prefix ? `${prefix}.${rawName}` : rawName
+  const children = (parameter.children || []).filter(isApiInputParameter)
+  if (children.length) {
+    return children.flatMap((child) => apiParameterToFields(child, targetPath))
+  }
+  const name = normalizeTemplateName(targetPath.replace(/\./g, '_'))
+  return [{
+    name,
+    key: name,
+    type: apiFieldType(parameter.type),
+    required: Boolean(parameter.required),
+    description: parameter.description || rawName,
+    component: apiFieldComponent(parameter.type),
+    source: targetPath,
+    targetPath,
+    slotFilling: templateSlotFillingForField(rawName, parameter.description || rawName),
+  }]
+}
+
+function apiAssetPageActionMapping(asset: ApiAssetItem, queryAlias: string) {
+  const mapping: Record<string, string> = {}
+  for (const parameter of asset.parameters || []) {
+    collectPageActionMapping(parameter, mapping, queryAlias)
+  }
+  if (!Object.keys(mapping).length) {
+    mapping.query = `${queryAlias}.targetArgs.query`
+  }
+  return mapping
+}
+
+function collectPageActionMapping(parameter: ToolParameter, mapping: Record<string, string>, queryAlias: string, prefix = '') {
+  if (!isApiInputParameter(parameter)) return
+  const rawName = parameter.name || 'param'
+  const targetPath = prefix ? `${prefix}.${rawName}` : rawName
+  const children = (parameter.children || []).filter(isApiInputParameter)
+  if (children.length) {
+    for (const child of children) collectPageActionMapping(child, mapping, queryAlias, targetPath)
+    return
+  }
+  const pageField = pageFilterFieldName(rawName, parameter.description || '')
+  if (pageField) {
+    mapping[pageField] = `${queryAlias}.targetArgs.${targetPath}`
+  }
+}
+
+function apiAssetInputMapping(asset: ApiAssetItem, queryAlias: string) {
+  const mapping: Record<string, string> = {}
+  for (const parameter of asset.parameters || []) {
+    collectApiInputMapping(parameter, mapping, queryAlias)
+  }
+  if (!Object.keys(mapping).length) {
+    mapping.query = `${queryAlias}.targetArgs.query`
+  }
+  return mapping
+}
+
+function collectApiInputMapping(parameter: ToolParameter, mapping: Record<string, string>, queryAlias: string, prefix = '') {
+  if (!isApiInputParameter(parameter)) return
+  const rawName = parameter.name || 'param'
+  const targetPath = prefix ? `${prefix}.${rawName}` : rawName
+  const children = (parameter.children || []).filter(isApiInputParameter)
+  if (children.length) {
+    for (const child of children) collectApiInputMapping(child, mapping, queryAlias, targetPath)
+    return
+  }
+  mapping[targetPath] = `${queryAlias}.targetArgs.${targetPath}`
+}
+
+function isApiInputParameter(parameter: ToolParameter) {
+  return (parameter.location || '').toUpperCase() !== 'RESPONSE'
+}
+
+function templateSlotFillingForField(name: string, description?: string | null): NonNullable<StudioFieldSchema['slotFilling']> {
+  const patterns = slotRulePatterns(name, description || '')
+  return {
+    enabled: true,
+    strategies: patterns.length ? ['RULE', 'LLM'] : ['LLM'],
+    confirmPolicy: patterns.length ? 'NEVER' : 'LOW_CONFIDENCE',
+    confidenceThreshold: 0.85,
+    llmPrompt: '',
+    modelInstanceId: '',
+    patterns,
+    dictionaryValues: [],
+  }
+}
+
+function pageFilterFieldName(name: string, description: string) {
+  const text = `${name} ${description}`.toLowerCase()
+  if (text.includes('managername') || text.includes('负责人') || text.includes('responsible') || text.includes('principal') || text.includes('owner')) return 'managerName'
+  if (text.includes('teamname') || text.includes('班组名称') || text.includes('班组名') || text.includes('groupname')) return 'teamName'
+  if (text.includes('membername') || text.includes('班组成员') || text.includes('成员')) return 'memberName'
+  if (text.includes('organid') || text.includes('organizationid') || text.includes('关联组织')) return 'organId'
+  if (text.includes('deptid') || text.includes('departmentid') || text.includes('部门')) return 'deptId'
+  return name || ''
+}
+
+function slotRulePatterns(name: string, description: string) {
+  const field = pageFilterFieldName(name, description)
+  const person = '([\\u4e00-\\u9fa5A-Za-z0-9_·.-]{2,30})'
+  if (field === 'managerName') {
+    return [
+      `负责人(?:为|是|叫|=|：|:)?\\s*${person}`,
+      `${person}\\s*(?:负责|作为负责人)`,
+    ]
+  }
+  if (field === 'teamName') {
+    return [
+      `班组(?:名称|名)?(?:为|是|叫|=|：|:)?\\s*${person}`,
+      `查询(?:一下)?\\s*${person}\\s*(?:班组|组)`,
+    ]
+  }
+  if (field === 'memberName') {
+    return [
+      `(?:班组)?成员(?:为|是|包含|有|=|：|:)?\\s*${person}`,
+      `成员.*?${person}`,
+    ]
+  }
+  return []
+}
+
+function apiFieldType(type?: string | null): StudioFieldSchema['type'] {
+  const normalized = String(type || '').toLowerCase()
+  if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'number'].includes(normalized)) return 'number'
+  if (['bool', 'boolean'].includes(normalized)) return 'boolean'
+  if (['array', 'list'].includes(normalized)) return 'array'
+  if (['object', 'json'].includes(normalized)) return 'object'
+  return 'string'
+}
+
+function apiFieldComponent(type?: string | null): StudioFieldSchema['component'] {
+  const normalized = String(type || '').toLowerCase()
+  if (['bool', 'boolean'].includes(normalized)) return 'switch'
+  if (['array', 'list', 'object', 'json'].includes(normalized)) return 'textarea'
+  return 'input'
+}
+
+function normalizeTemplateName(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+  return normalized || 'api'
+}
+
+function apiAssetTemplateMetadata(asset: ApiAssetItem) {
+  return {
+    apiId: asset.apiId,
+    name: asset.name,
+    globalToolName: asset.globalToolName || null,
+    qualifiedName: asset.globalToolQualifiedName || null,
+    projectCode: asset.projectCode || null,
+    httpMethod: asset.httpMethod || null,
+    endpointPath: asset.endpointPath || null,
+  }
+}
+
+function apiQueryTemplateSelectable(asset: ApiAssetItem) {
+  return asset.toolLinkStatus === 'LINKED' && !!asset.globalToolName && asset.enabled && asset.agentVisible && !asset.removedFromSource
+}
+
+function apiQueryTemplateStatusLabel(asset: ApiAssetItem) {
+  if (asset.removedFromSource) return '源接口已移除'
+  if (asset.toolLinkStatus !== 'LINKED') return '需先关联 Tool'
+  if (!asset.enabled) return '未启用'
+  if (!asset.agentVisible) return 'Agent 不可见'
+  return '可生成'
+}
+
 function portSummary(ports: CanvasNode['data']['inputs'] | CanvasNode['data']['outputs'], fallback: string) {
   if (!ports?.length) return `${fallback} 0`
   return `${fallback} ${ports.map((port) => port.name || port.id).slice(0, 3).join(', ')}`
@@ -3907,6 +4409,7 @@ async function loadAgent() {
       },
     ]
     edges.value = [decorateEdge({ id: 'e-start-end', source: 'start', target: 'end', condition: 'always', label: 'always' })]
+    applyPageAssistantDraftFromStorage()
     return
   }
   try {
@@ -4042,6 +4545,42 @@ function handleCredentialCreated(credential: WorkflowCredential) {
   credentialOptions.value = [credential, ...existing]
 }
 
+function applyPageAssistantDraftFromStorage() {
+  const raw = sessionStorage.getItem(PAGE_ASSISTANT_DRAFT_KEY)
+  if (!raw) return
+  try {
+    const parsed = JSON.parse(raw) as {
+      form?: Partial<AgentForm>
+      canvasSnapshot?: Record<string, unknown>
+    }
+    if (parsed.form) {
+      Object.assign(form, {
+        ...parsed.form,
+        runtimeType: 'LANGGRAPH4J',
+        agentMode: 'WORKFLOW',
+        type: 'single',
+      })
+    }
+    const rawSnapshot = parsed.canvasSnapshot || (parsed.form?.canvasJson ? JSON.parse(String(parsed.form.canvasJson)) : null)
+    const snapshot = normalizeGeneratedCanvas(rawSnapshot)
+    if (snapshot) {
+      const normalized = definitionToCanvas({
+        ...(form as unknown as AgentDefinition),
+        graphSpec: form.graphSpec,
+        canvasJson: JSON.stringify(snapshot),
+      })
+      nodes.value = normalized.nodes
+      edges.value = normalized.edges
+      decorateEdges()
+    }
+    sessionStorage.removeItem(PAGE_ASSISTANT_DRAFT_KEY)
+    ElMessage.success('已载入页面助手草稿，请检查后保存')
+  } catch {
+    sessionStorage.removeItem(PAGE_ASSISTANT_DRAFT_KEY)
+    ElMessage.warning('页面助手草稿读取失败，请重新生成')
+  }
+}
+
 async function handleSave() {
   if (studioReadOnly.value) {
     ElMessage.info('SDK 代码托管 Agent 当前为只读草稿，请修改 EafGraph 后重启业务系统同步。')
@@ -4055,8 +4594,10 @@ async function handleSave() {
   try {
     const payload = canvasToDefinition(form, { version: 2, nodes: nodes.value, edges: edges.value })
     if (isNew) {
-      ElMessage.warning('请先在表单视图创建 Agent，再进入 Studio 编辑')
-      return false
+      const { data } = await createAgent(payload as AgentForm)
+      ElMessage.success('已创建 Agent 并保存草稿')
+      await router.replace(`/agent/${data.id}/studio`)
+      return true
     }
     await updateAgent(agentId, payload)
     ElMessage.success('已保存草稿')
@@ -5306,6 +5847,7 @@ onMounted(async () => {
   await Promise.all([loadGraphNodeTypes(), loadAgent()])
   await Promise.all([loadToolOptions(), loadCompositionOptions(), loadModelOptions(), loadKnowledgeOptions(), loadCredentialOptions()])
   await nextTick()
+  applyApiAssetRouteContext()
   pushHistorySnapshot()
   historyReady.value = true
   window.addEventListener('keydown', handleStudioShortcut)
@@ -5575,8 +6117,11 @@ watch(
 
 .studio-back-btn {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  min-width: 82px;
   min-height: 40px;
   padding: 0 14px 0 10px;
   border: 1px solid #cdd9ec;
@@ -5586,10 +6131,17 @@ watch(
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
   box-shadow: 0 10px 24px rgba(30, 58, 138, 0.12);
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 
+  span {
+    white-space: nowrap;
+  }
+
   .el-icon {
+    flex: 0 0 24px;
     display: grid;
     place-items: center;
     width: 24px;
@@ -7147,9 +7699,58 @@ watch(
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
   backdrop-filter: blur(12px);
+  transition: width 0.18s ease, padding 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 
   .el-button {
     margin-left: 0;
+  }
+
+  &.collapsed {
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.13);
+  }
+}
+
+.canvas-operator-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 242, 255, 0.82)),
+    radial-gradient(circle at 18% 12%, rgba(99, 102, 241, 0.12), transparent 48%);
+  color: #4f46e5;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow:
+    0 8px 18px rgba(79, 70, 229, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+
+  .el-icon {
+    font-size: 16px;
+  }
+
+  .operator-caret {
+    margin-left: 1px;
+    color: #8b9cff;
+    font-size: 13px;
+  }
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: rgba(99, 102, 241, 0.42);
+    box-shadow:
+      0 12px 24px rgba(79, 70, 229, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.86);
   }
 }
 
@@ -8394,6 +8995,49 @@ watch(
 .ai-draft-body {
   display: grid;
   gap: 12px;
+}
+
+.api-query-template-body {
+  display: grid;
+  gap: 12px;
+}
+
+.api-query-template-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 150px minmax(180px, 240px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.api-template-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+
+  strong,
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
+:deep(.el-table__row.is-route-api-asset td.el-table__cell) {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.api-query-template-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .ai-draft-model-row {

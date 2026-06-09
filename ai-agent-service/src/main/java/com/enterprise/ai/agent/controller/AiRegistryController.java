@@ -1,7 +1,11 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.identity.PageActionCatalogContracts.PageCatalogRegisterRequest;
+import com.enterprise.ai.agent.identity.PageActionCatalogService;
+import com.enterprise.ai.agent.identity.PageCatalogRegisterResult;
 import com.enterprise.ai.agent.registry.AiRegistryService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
+import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilityDiffItemDTO;
 import com.enterprise.ai.agent.registry.RegistryContracts.CapabilityReviewRequest;
@@ -29,6 +33,7 @@ public class AiRegistryController {
 
     private final AiRegistryService registryService;
     private final RegistrySecurityService securityService;
+    private final PageActionCatalogService pageActionCatalogService;
 
     @PostMapping("/projects/register")
     public ResponseEntity<?> registerProject(@RequestBody ProjectRegisterRequest request,
@@ -63,6 +68,19 @@ public class AiRegistryController {
             securityService.verifyIfConfigured(projectCode, signatureHeaders(headers));
             SdkCapabilityDescriptionSettings body = registryService.getSdkCapabilityDescriptionSettings(projectCode);
             return ResponseEntity.ok(body);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/projects/{projectCode}/pages/register")
+    public ResponseEntity<?> registerPageCatalog(@PathVariable String projectCode,
+                                                 @RequestBody PageCatalogRegisterRequest request,
+                                                 @RequestHeader HttpHeaders headers) {
+        try {
+            RegistryCredentialEntity credential = securityService.verifyRequired(projectCode, signatureHeaders(headers));
+            PageCatalogRegisterResult result = pageActionCatalogService.registerFromProjectCredential(credential, request);
+            return ResponseEntity.ok(result);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
         }

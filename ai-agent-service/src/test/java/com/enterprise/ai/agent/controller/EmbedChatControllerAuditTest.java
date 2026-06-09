@@ -13,6 +13,7 @@ import com.enterprise.ai.agent.identity.EmbedSessionService;
 import com.enterprise.ai.agent.identity.EmbedTokenClaims;
 import com.enterprise.ai.agent.identity.EmbedTokenIssueResult;
 import com.enterprise.ai.agent.identity.EmbedTokenService;
+import com.enterprise.ai.agent.identity.PageActionEventEntity;
 import com.enterprise.ai.agent.model.AgentResult;
 import com.enterprise.ai.agent.model.ChatResponse;
 import com.enterprise.ai.agent.model.interactive.UiRequestPayload;
@@ -132,6 +133,51 @@ class EmbedChatControllerAuditTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         verify(auditEventService).recordPageActionResult(eq(session), eq("page-action-1"), any(Map.class));
+    }
+
+    @Test
+    void pendingPageActionsReturnsDispatchRequestsForCurrentSession() {
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        EmbedSessionService sessionService = mock(EmbedSessionService.class);
+        EmbedAuditEventService auditEventService = mock(EmbedAuditEventService.class);
+        EmbedChatController controller = new EmbedChatController(
+                mock(RegistrySecurityService.class),
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                sessionService,
+                mock(AgentDefinitionService.class),
+                mock(AgentRouter.class),
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                auditEventService,
+                mock(EmbedRendererAuthorizationService.class));
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setProjectCode("bzsdk");
+        claims.setAgentId("team-agent");
+        claims.setExternalUserId("u-1");
+        when(tokenService.verify("token")).thenReturn(claims);
+        EmbedSessionEntity session = new EmbedSessionEntity();
+        session.setSessionId("embed-session-1");
+        session.setPageInstanceId("page-1");
+        when(sessionService.requireActiveSession("embed-session-1", claims)).thenReturn(session);
+        PageActionEventEntity event = new PageActionEventEntity();
+        event.setRequestId("debug-1");
+        event.setActionKey("team.search");
+        event.setTitle("Search team");
+        event.setArgsJson("{\"teamName\":\"一班\"}");
+        event.setTargetPageInstanceId("page-1");
+        when(auditEventService.pendingPageActionRequests(session, 10)).thenReturn(List.of(event));
+
+        ResponseEntity<ApiResult<List<EmbedChatController.PageActionDispatchResponse>>> response =
+                controller.pendingPageActions("embed-session-1", "Bearer token", 10);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        EmbedChatController.PageActionDispatchResponse dispatch = response.getBody().getData().get(0);
+        assertEquals("debug-1", dispatch.requestId());
+        assertEquals("team.search", dispatch.actionKey());
+        assertEquals("一班", dispatch.args().get("teamName"));
+        assertEquals("page-1", dispatch.target().get("pageInstanceId"));
     }
 
     @Test

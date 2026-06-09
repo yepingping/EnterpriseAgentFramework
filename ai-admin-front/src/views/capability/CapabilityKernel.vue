@@ -185,7 +185,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="toolDialogVisible" title="工具资产" width="720px">
+    <el-dialog v-model="toolDialogVisible" title="工具管理" width="720px">
       <el-form label-width="130px">
         <el-form-item label="工具编码" required>
           <el-input v-model="toolForm.toolCode" :disabled="Boolean(toolEditingCode)" />

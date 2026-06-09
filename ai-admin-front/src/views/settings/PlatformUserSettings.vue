@@ -8,7 +8,7 @@
       <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
     </div>
 
-    <el-table :data="users" v-loading="loading" stripe>
+    <el-table :data="users" v-loading="loading" stripe class="platform-user-table">
       <el-table-column prop="username" label="用户名" min-width="150" />
       <el-table-column prop="displayName" label="显示名" min-width="160">
         <template #default="{ row }">
@@ -223,7 +223,11 @@ onMounted(reload)
 
 <style scoped lang="scss">
 .platform-user-page {
-  padding: 16px 20px;
+  min-height: calc(100vh - 56px);
+  padding: 28px 32px 40px;
+  background: var(--brand-page-bg);
+  background-size: 28px 28px, 28px 28px, auto, auto, auto, auto;
+  color: var(--text-primary);
 }
 
 .page-header {
@@ -231,17 +235,67 @@ onMounted(reload)
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
+  padding: 20px 22px;
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.58);
+  border-radius: 8px;
+  background: var(--brand-glass-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 18px 44px rgb(var(--brand-primary-rgb) / 0.12);
+  backdrop-filter: blur(20px) saturate(1.08);
 
   h2 {
-    margin: 0 0 4px;
-    font-size: 20px;
+    margin: 0 0 8px;
+    color: var(--text-primary);
+    font-size: 24px;
+    line-height: 1.25;
+    font-weight: 800;
   }
 
   p {
     margin: 0;
-    color: #667085;
-    font-size: 13px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  :deep(.el-button) {
+    border-radius: 8px;
+    border-color: rgb(var(--brand-selected-rgb) / 0.72);
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--text-primary);
+
+    &:hover {
+      border-color: rgb(var(--brand-primary-rgb) / 0.32);
+      background: rgb(var(--brand-selected-rgb) / 0.42);
+      color: var(--brand-primary);
+    }
+  }
+}
+
+.platform-user-table {
+  overflow: hidden;
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.56);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 18px 42px rgb(var(--brand-primary-rgb) / 0.1);
+  backdrop-filter: blur(18px);
+
+  :deep(th.el-table__cell) {
+    background: rgb(var(--brand-selected-rgb) / 0.44);
+    color: var(--brand-active);
+    font-weight: 700;
+  }
+
+  :deep(td.el-table__cell) {
+    color: var(--text-primary);
+  }
+
+  :deep(.el-table__row:hover > td.el-table__cell) {
+    background: rgb(var(--brand-selected-rgb) / 0.2);
   }
 }
 
@@ -253,7 +307,7 @@ onMounted(reload)
 
 .empty-text,
 .dialog-user span {
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -279,6 +333,33 @@ onMounted(reload)
 
 .scope-value {
   min-width: 0;
+}
+
+:global([data-theme="dark"]) {
+  .platform-user-page {
+    color: #e5e7eb;
+  }
+
+  .page-header,
+  .platform-user-table {
+    border-color: rgb(var(--brand-primary-rgb) / 0.28);
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgb(var(--brand-primary-rgb) / 0.18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 18px 44px rgba(0, 0, 0, 0.24);
+  }
+
+  .platform-user-table {
+    :deep(th.el-table__cell) {
+      background: rgb(var(--brand-primary-rgb) / 0.24);
+      color: var(--brand-selected-bg);
+    }
+
+    :deep(td.el-table__cell) {
+      background: rgba(15, 23, 42, 0.56);
+      color: #e2e8f0;
+    }
+  }
 }
 
 @media (max-width: 760px) {

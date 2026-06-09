@@ -23,14 +23,13 @@ reachai-capability-sdk
 reachai-spring-boot2-starter
 ```
 
-根 `pom.xml` 当前同时保留历史模块和新模块：
+根 `pom.xml` 当前保留的新接入模块和运行时模块：
 
 ```text
 ai-common
 reachai-capability-sdk
 reachai-spring-boot2-starter
-ai-skill-sdk
-ai-spring-boot-starter
+ai-runtime-contract
 ai-model-service
 ai-skills-service
 ai-agent-service
@@ -40,8 +39,9 @@ ai-agent-service
 
 - `reachai-capability-sdk` 是 Java 8、无 Spring 强绑定的业务能力契约 SDK。
 - `reachai-spring-boot2-starter` 是 Java 8、Spring Boot 2.x 业务系统接入 starter。
+- `ai-runtime-contract` 是 Java 17 中台内部 Tool / Skill 运行时契约模块。
 - `ai-agent-service` 继续作为 Java 17 中台控制面和 Runtime Host。
-- 历史 `ai-skill-sdk`、`ai-spring-boot-starter` 仍保留，但不是 JDK8 新接入链路的主入口。
+- 历史 `ai-skill-sdk`、`ai-spring-boot-starter` 已正式退役，不再作为工程模块保留。
 
 ## 命名边界
 
@@ -453,7 +453,7 @@ git diff --check
 
 仍保留的历史边界：
 
-- 旧 `ai-skill-sdk` 与 `ai-spring-boot-starter` 还在工程中，作为历史链路和现有功能承载。
+- 旧 `ai-skill-sdk` 与 `ai-spring-boot-starter` 已从工程模块中移除；中台内部运行时契约由 `ai-runtime-contract` 承载。
 - 服务端仍兼容旧签名头，便于已有链路平滑过渡。
 - 完整 Runtime 仍在 `ai-agent-service` 内，尚未抽成独立 `reachai-agent-runtime` 模块。
 - SQL 表名和部分内部类名仍包含历史 `skill` 语义，当前不为旧数据兼容做额外迁移。

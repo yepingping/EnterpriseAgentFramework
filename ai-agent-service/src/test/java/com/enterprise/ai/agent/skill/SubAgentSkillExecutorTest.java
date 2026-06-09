@@ -1,8 +1,8 @@
 package com.enterprise.ai.agent.skill;
 
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
-import com.enterprise.ai.skill.SkillMetadata;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.SkillMetadata;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,8 +108,8 @@ class SubAgentSkillExecutorTest {
     void resolveRetryLimitUsesMetadataValue() {
         SubAgentSpec spec = new SubAgentSpec("prompt", List.of("tool_a"), null, 5, false);
         SkillMetadata metadata = new SkillMetadata("1.0.0",
-                com.enterprise.ai.skill.SideEffectLevel.READ_ONLY,
-                com.enterprise.ai.skill.HitlPolicy.NEVER,
+                com.enterprise.ai.runtime.contract.SideEffectLevel.READ_ONLY,
+                com.enterprise.ai.runtime.contract.HitlPolicy.NEVER,
                 3_000,
                 2,
                 Map.of());

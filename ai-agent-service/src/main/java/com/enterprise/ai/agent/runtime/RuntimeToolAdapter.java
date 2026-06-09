@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.runtime;
 
-import com.enterprise.ai.skill.AiTool;
+import com.enterprise.ai.runtime.contract.AiTool;
 
 public interface RuntimeToolAdapter<T> {
 

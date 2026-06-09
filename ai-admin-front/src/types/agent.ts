@@ -133,6 +133,7 @@ export interface WorkflowDraftResource {
   definitionId?: number | null
   projectCode?: string | null
   description?: string | null
+  metadata?: Record<string, unknown> | null
 }
 
 export interface WorkflowDraftPlaceholder {
@@ -152,6 +153,7 @@ export interface WorkflowDraftGenerationRequest {
   tools?: WorkflowDraftResource[]
   capabilities?: WorkflowDraftResource[]
   knowledgeBases?: WorkflowDraftResource[]
+  pageActions?: WorkflowDraftResource[]
 }
 
 export interface WorkflowDraftGenerationResult {
@@ -193,6 +195,7 @@ export interface WorkflowDraftEditRequest {
   tools?: WorkflowDraftResource[]
   capabilities?: WorkflowDraftResource[]
   knowledgeBases?: WorkflowDraftResource[]
+  pageActions?: WorkflowDraftResource[]
 }
 
 export interface WorkflowDraftEditResult {

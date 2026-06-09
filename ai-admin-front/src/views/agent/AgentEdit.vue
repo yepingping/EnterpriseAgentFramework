@@ -120,7 +120,7 @@
                 <el-select
                   v-model="form.modelInstanceId"
                   filterable
-                  placeholder="选择模型实例"
+                  :placeholder="isWorkflowRuntime ? '可选；仅 LLM 节点需要' : '选择模型实例'"
                   :disabled="!selectedLlmProvider"
                   @change="syncSelectedLlmProvider"
                 >
@@ -301,6 +301,7 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const agentId = route.params.id as string
 const isNew = agentId === 'new'
+const apiAssetQueryKeys = ['intent', 'apiAssetId', 'apiAssetTool', 'apiAssetName'] as const
 
 const formRef = ref<FormInstance>()
 const pageLoading = ref(false)
@@ -351,7 +352,7 @@ const form = reactive<AgentForm>({
 const rules: FormRules = {
   name: [{ required: true, message: '请输入智能体名称', trigger: 'blur' }],
   intentType: [{ required: true, message: '请选择或输入意图类型', trigger: 'change' }],
-  modelInstanceId: [{ required: true, message: '请选择默认模型', trigger: 'change' }],
+  modelInstanceId: [{ validator: validateDefaultModel, trigger: 'change' }],
 }
 
 const runtimePlacementOptions = [
@@ -578,25 +579,10 @@ function defaultWorkflowGraphSpec(): AgentGraphSpec {
     name: form.name || 'Agent Graph',
     mode: 'WORKFLOW',
     runtimeHint: 'LANGGRAPH4J',
-    nodes: [
-      {
-        id: 'llm',
-        type: 'LLM',
-        name: 'LLM',
-        config: {
-          modelInstanceId: form.modelInstanceId,
-          systemPrompt: form.systemPrompt,
-          userPrompt: '{{ input }}',
-          outputFormat: 'text',
-        },
-      },
-    ],
-    edges: [
-      { from: 'START', to: 'llm', condition: 'always' },
-      { from: 'llm', to: 'END', condition: 'always' },
-    ],
-    entry: 'llm',
-    finish: ['llm'],
+    nodes: [],
+    edges: [],
+    entry: '',
+    finish: [],
   }
 }
 
@@ -615,6 +601,14 @@ function ensureWorkflowGraphSpec() {
     finish: form.graphSpec.finish?.length ? form.graphSpec.finish : [form.graphSpec.nodes[0]?.id].filter(Boolean) as string[],
   }
   return form.graphSpec
+}
+
+function validateDefaultModel(_rule: unknown, _value: unknown, callback: (error?: Error) => void) {
+  if (isAgentScopeRuntime.value && !form.modelInstanceId) {
+    callback(new Error('请选择默认模型'))
+    return
+  }
+  callback()
 }
 
 function syncForSave() {
@@ -693,7 +687,7 @@ async function handleSave() {
       const { data } = await createAgent(form)
       ElMessage.success('创建成功')
       if (data.runtimeType === 'LANGGRAPH4J') {
-        router.push(`/agent/${data.id}/studio`)
+        router.push(studioRoute(data.id))
       } else {
         router.push('/agent')
       }
@@ -712,7 +706,47 @@ async function handleSave() {
 
 function openStudio() {
   if (isNew) return
-  router.push(`/agent/${agentId}/studio`)
+  router.push(studioRoute(agentId))
+}
+
+function queryString(value: unknown) {
+  if (Array.isArray(value)) return value[0] == null ? '' : String(value[0])
+  return value == null ? '' : String(value)
+}
+
+function apiAssetNavigationQuery() {
+  const query: Record<string, string | number> = {}
+  if (form.projectId != null) query.projectId = form.projectId
+  for (const key of apiAssetQueryKeys) {
+    const value = queryString(route.query[key])
+    if (value) query[key] = value
+  }
+  return query
+}
+
+function studioRoute(id: string) {
+  return {
+    path: `/agent/${id}/studio`,
+    query: apiAssetNavigationQuery(),
+  }
+}
+
+function applyNewAgentQueryPreset() {
+  if (!isNew) return
+  const queryRuntime = queryString(route.query.runtimeType) as AgentRuntimeType
+  const queryMode = queryString(route.query.agentMode) as AgentMode
+  if (queryRuntime === 'LANGGRAPH4J' || queryMode === 'WORKFLOW' || queryString(route.query.intent) === 'api-query-template') {
+    form.runtimeType = 'LANGGRAPH4J'
+    form.agentMode = 'WORKFLOW'
+    form.type = 'single'
+    form.tools = []
+    form.toolRefs = []
+    form.skills = []
+    form.skillRefs = []
+    form.pipelineAgentIds = []
+    form.useMultiAgentModel = false
+    ensureWorkflowGraphSpec()
+  }
 }
 
 async function loadAgent() {
@@ -840,6 +874,7 @@ async function loadCompositionOptions() {
 
 onMounted(async () => {
   await Promise.all([loadRuntimeOptions(), loadScanProjects(), loadModelInstances()])
+  applyNewAgentQueryPreset()
   await loadAgent()
   await Promise.all([loadToolOptions(), loadCompositionOptions(), loadRuntimeInstances()])
 })

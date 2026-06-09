@@ -20,7 +20,7 @@
 --   ai-agent-service/sql/tool_retrieval_setting.sql  Tool 语义检索：库表持久化 Embedding 实例 ID
 --   ai-agent-service/sql/skill_draft_tool_definition.sql Skill 草稿：tool_definition.draft（kind=SKILL 时暂存）
 --   ai-agent-service/sql/skill_interaction_phase2_x.sql Phase 2.x InteractiveFormSkill 挂起/恢复表 skill_interaction
---   ai-agent-service/sql/ai_capability_metadata.sql @AiCapability 能力声明元数据
+--   ai-agent-service/sql/ai_capability_metadata.sql @ReachCapability 能力声明元数据
 --   ai-model-service/sql/model_instance_v1.sql       模型实例表
 --   ai-model-service/sql/model_instance_seed_common_v2.sql  常用模型实例种子（默认 DISABLED）
 --   ai-skills-service/sql/model_instance_binding_v11.sql  v11（知识库 / 业务索引绑定模型实例）
@@ -569,7 +569,7 @@ CREATE TABLE IF NOT EXISTS `scan_project_tool` (
     `request_body_type`   VARCHAR(256) DEFAULT NULL            COMMENT '请求体类型',
     `response_type`       VARCHAR(256) DEFAULT NULL            COMMENT '响应类型',
     `ai_description`      VARCHAR(1024) DEFAULT NULL           COMMENT 'AI 摘要（冗余）',
-    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL         COMMENT '@AiCapability 能力声明元数据 JSON',
+    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL         COMMENT '@ReachCapability 能力声明元数据 JSON',
     `sensitive_data_json` TEXT         DEFAULT NULL            COMMENT '敏感数据扫描结果 JSON',
     `enabled`             TINYINT      NOT NULL DEFAULT 0      COMMENT '是否启用',
     `agent_visible`       TINYINT      NOT NULL DEFAULT 0      COMMENT '是否对 Agent 可见',
@@ -583,7 +583,7 @@ CREATE TABLE IF NOT EXISTS `scan_project_tool` (
     KEY `idx_module_id`  (`module_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='扫描项目接口（未注册为全局 Tool 前）';
 
-CALL add_col_if_absent('scan_project_tool', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@AiCapability 能力声明元数据 JSON'' AFTER `ai_description`');
+CALL add_col_if_absent('scan_project_tool', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@ReachCapability 能力声明元数据 JSON'' AFTER `ai_description`');
 CALL add_col_if_absent('scan_project_tool', 'sensitive_data_json', 'TEXT DEFAULT NULL COMMENT ''敏感数据扫描结果 JSON'' AFTER `capability_metadata_json`');
 CALL add_col_if_absent('scan_project_tool', 'removed_from_source', 'TINYINT NOT NULL DEFAULT 0 COMMENT ''1=扫描或 SDK 源中已无此接口（墓碑行，可能仍关联全局 Tool）'' AFTER `global_tool_definition_id`');
 CALL add_col_if_absent('scan_project_tool', 'removed_at', 'DATETIME DEFAULT NULL COMMENT ''标记为从源移除的时间'' AFTER `removed_from_source`');
@@ -621,7 +621,7 @@ CREATE TABLE IF NOT EXISTS `tool_definition` (
     `kind`                VARCHAR(16)   NOT NULL DEFAULT 'TOOL' COMMENT '能力形态: TOOL / SKILL',
     `description`         TEXT          NOT NULL                COMMENT '能力描述',
     `ai_description`      MEDIUMTEXT    DEFAULT NULL            COMMENT 'LLM 生成的业务语义描述（Agent 运行时优先使用）',
-    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL          COMMENT '@AiCapability 能力声明元数据 JSON',
+    `capability_metadata_json` MEDIUMTEXT DEFAULT NULL          COMMENT '@ReachCapability 能力声明元数据 JSON',
     `parameters_json`     TEXT          DEFAULT NULL            COMMENT '参数定义 JSON',
     `spec_json`           MEDIUMTEXT    DEFAULT NULL            COMMENT 'Skill 专属 spec JSON（SubAgent: systemPrompt/toolWhitelist/modelInstanceId/maxSteps）',
     `source`              VARCHAR(32)   NOT NULL DEFAULT 'manual' COMMENT '来源: code/scanner/manual',
@@ -652,7 +652,7 @@ CREATE TABLE IF NOT EXISTS `tool_definition` (
 -- 兼容老库：如果 tool_definition 已存在但缺少 Phase 2 新列，这里补齐（CREATE TABLE IF NOT EXISTS 不会重建）
 CALL add_col_if_absent('tool_definition', 'kind',             'VARCHAR(16) NOT NULL DEFAULT ''TOOL'' COMMENT ''能力形态: TOOL / SKILL'' AFTER `name`');
 CALL add_col_if_absent('tool_definition', 'ai_description',   'MEDIUMTEXT DEFAULT NULL COMMENT ''LLM 生成的业务语义描述'' AFTER `description`');
-CALL add_col_if_absent('tool_definition', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@AiCapability 能力声明元数据 JSON'' AFTER `ai_description`');
+CALL add_col_if_absent('tool_definition', 'capability_metadata_json', 'MEDIUMTEXT DEFAULT NULL COMMENT ''@ReachCapability 能力声明元数据 JSON'' AFTER `ai_description`');
 CALL add_col_if_absent('tool_definition', 'spec_json',        'MEDIUMTEXT DEFAULT NULL COMMENT ''Skill 专属 spec JSON'' AFTER `parameters_json`');
 CALL add_col_if_absent('tool_definition', 'project_id',       'BIGINT DEFAULT NULL COMMENT ''关联的扫描项目 ID'' AFTER `response_type`');
 CALL add_col_if_absent('tool_definition', 'module_id',        'BIGINT DEFAULT NULL COMMENT ''所属模块'' AFTER `project_id`');
@@ -1800,6 +1800,50 @@ CREATE TABLE IF NOT EXISTS `eaf_page_action_event` (
     KEY `idx_page_action_session` (`session_id`, `status`, `requested_at`),
     KEY `idx_page_action_app_agent` (`tenant_id`, `app_id`, `agent_id`, `requested_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='嵌入式页面动作请求和执行结果';
+
+CREATE TABLE IF NOT EXISTS `eaf_page_registry` (
+    `id`                       BIGINT       NOT NULL AUTO_INCREMENT,
+    `project_code`             VARCHAR(96)  NOT NULL,
+    `app_id`                   VARCHAR(96)  NOT NULL,
+    `page_key`                 VARCHAR(160) NOT NULL,
+    `name`                     VARCHAR(160) NOT NULL,
+    `route_pattern`            VARCHAR(512) DEFAULT NULL,
+    `origin`                   VARCHAR(512) NOT NULL DEFAULT '',
+    `current_page_instance_id` VARCHAR(128) DEFAULT NULL,
+    `status`                   VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `last_seen_at`             DATETIME     DEFAULT NULL,
+    `metadata_json`            TEXT         DEFAULT NULL,
+    `created_at`               DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`               DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_page_registry` (`project_code`, `page_key`, `origin`),
+    KEY `idx_page_registry_project` (`project_code`, `status`, `last_seen_at`),
+    KEY `idx_page_registry_instance` (`current_page_instance_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='业务前端页面注册目录';
+
+CREATE TABLE IF NOT EXISTS `eaf_page_action_registry` (
+    `id`                     BIGINT       NOT NULL AUTO_INCREMENT,
+    `project_code`           VARCHAR(96)  NOT NULL,
+    `app_id`                 VARCHAR(96)  NOT NULL,
+    `page_key`               VARCHAR(160) NOT NULL,
+    `action_key`             VARCHAR(160) NOT NULL,
+    `title`                  VARCHAR(160) NOT NULL,
+    `description`            VARCHAR(512) DEFAULT NULL,
+    `confirm_required`       TINYINT(1)   DEFAULT 0,
+    `input_schema_json`      TEXT         DEFAULT NULL,
+    `output_schema_json`     TEXT         DEFAULT NULL,
+    `sample_args_json`       TEXT         DEFAULT NULL,
+    `allowed_agent_ids_json` TEXT         DEFAULT NULL,
+    `metadata_json`          TEXT         DEFAULT NULL,
+    `status`                 VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `last_seen_at`           DATETIME     DEFAULT NULL,
+    `created_at`             DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`             DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_page_action_registry` (`project_code`, `page_key`, `action_key`),
+    KEY `idx_page_action_registry_project` (`project_code`, `status`, `last_seen_at`),
+    KEY `idx_page_action_registry_page` (`project_code`, `page_key`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='业务前端页面动作注册目录';
 
 CREATE TABLE IF NOT EXISTS `eaf_embed_chat_event` (
     `id`           BIGINT      NOT NULL AUTO_INCREMENT,

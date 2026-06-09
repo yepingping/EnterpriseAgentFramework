@@ -1,8 +1,37 @@
 import { ref, watch } from 'vue'
 
-type Theme = 'dark' | 'light'
+export type Theme = 'dark' | 'light'
+export type BrandTheme =
+  | 'tech-purple'
+  | 'metro-green'
+  | 'aurora-cyan'
+  | 'nebula-violet'
+  | 'coral-rose'
+  | 'solar-gold'
+  | 'deep-ocean'
 
-const theme = ref<Theme>((localStorage.getItem('theme') as Theme) || 'dark')
+const brandOptions: Array<{ value: BrandTheme; label: string }> = [
+  { value: 'tech-purple', label: '科技紫' },
+  { value: 'aurora-cyan', label: '极光青' },
+  { value: 'nebula-violet', label: '星云紫' },
+  { value: 'coral-rose', label: '珊瑚玫' },
+  { value: 'metro-green', label: '翡翠绿' },
+  { value: 'solar-gold', label: '日冕金' },
+  { value: 'deep-ocean', label: '深海蓝' },
+]
+
+function isTheme(value: string | null): value is Theme {
+  return value === 'dark' || value === 'light'
+}
+
+function isBrandTheme(value: string | null): value is BrandTheme {
+  return brandOptions.some((option) => option.value === value)
+}
+
+const storedTheme = localStorage.getItem('theme')
+const storedBrand = localStorage.getItem('brandTheme')
+const theme = ref<Theme>(isTheme(storedTheme) ? storedTheme : 'dark')
+const brand = ref<BrandTheme>(isBrandTheme(storedBrand) ? storedBrand : 'tech-purple')
 
 function applyTheme(t: Theme) {
   const html = document.documentElement
@@ -15,15 +44,27 @@ function applyTheme(t: Theme) {
   localStorage.setItem('theme', t)
 }
 
+function applyBrand(value: BrandTheme) {
+  const html = document.documentElement
+  html.setAttribute('data-brand', value)
+  localStorage.setItem('brandTheme', value)
+}
+
 // Apply on load
 applyTheme(theme.value)
+applyBrand(brand.value)
 
 watch(theme, (t) => applyTheme(t))
+watch(brand, (value) => applyBrand(value))
 
 export function useTheme() {
   function toggleTheme() {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
 
-  return { theme, toggleTheme }
+  function setBrand(value: BrandTheme) {
+    brand.value = value
+  }
+
+  return { theme, brand, brandOptions, toggleTheme, setBrand }
 }

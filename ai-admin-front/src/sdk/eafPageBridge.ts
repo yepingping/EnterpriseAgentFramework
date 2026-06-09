@@ -28,13 +28,30 @@ export interface PageActionResult {
 export type PageActionHandler = (args: Record<string, unknown>, request: PageActionRequest) => unknown | Promise<unknown>
 export type PageActionConfirm = (request: PageActionRequest) => boolean | Promise<boolean>
 
+export interface PageActionRegisterOptions {
+  title?: string
+  description?: string
+  confirmRequired?: boolean
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  sampleArgs?: Record<string, unknown>
+  allowedAgentIds?: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface EafPageActionDefinition extends PageActionRegisterOptions {
+  actionKey: string
+}
+
 export interface EafPageBridge {
   readonly pageInstanceId: string
   readonly route?: string
   readonly registeredActions: string[]
-  registerAction(actionKey: string, handler: PageActionHandler): () => void
+  readonly actionDefinitions: EafPageActionDefinition[]
+  registerAction(actionKey: string, handler: PageActionHandler, options?: PageActionRegisterOptions): () => void
   handleEvent(event: unknown): Promise<PageActionResult | null>
   onResult(listener: (result: PageActionResult) => void): () => void
+  onActionDefinitionsChange(listener: (definitions: EafPageActionDefinition[]) => void): () => void
 }
 
 export interface EafPageBridgeOptions {
@@ -48,10 +65,24 @@ export function createEafPageBridge(options: EafPageBridgeOptions = {}): EafPage
   const pageInstanceId = options.pageInstanceId || createPageInstanceId()
   const actionTimeoutMs = Math.max(1000, options.actionTimeoutMs || 15000)
   const handlers = new Map<string, PageActionHandler>()
+  const definitions = new Map<string, PageActionRegisterOptions>()
   const listeners = new Set<(result: PageActionResult) => void>()
+  const definitionListeners = new Set<(definitions: EafPageActionDefinition[]) => void>()
+
+  function actionDefinitions(): EafPageActionDefinition[] {
+    return Array.from(handlers.keys()).map((actionKey) => ({
+      actionKey,
+      ...(definitions.get(actionKey) || {}),
+    }))
+  }
 
   function emit(result: PageActionResult) {
     listeners.forEach((listener) => listener(result))
+  }
+
+  function emitDefinitionsChange() {
+    const snapshot = actionDefinitions()
+    definitionListeners.forEach((listener) => listener(snapshot))
   }
 
   return {
@@ -60,9 +91,18 @@ export function createEafPageBridge(options: EafPageBridgeOptions = {}): EafPage
     get registeredActions() {
       return Array.from(handlers.keys())
     },
-    registerAction(actionKey, handler) {
+    get actionDefinitions() {
+      return actionDefinitions()
+    },
+    registerAction(actionKey, handler, registerOptions = {}) {
       handlers.set(actionKey, handler)
-      return () => handlers.delete(actionKey)
+      definitions.set(actionKey, registerOptions)
+      emitDefinitionsChange()
+      return () => {
+        handlers.delete(actionKey)
+        definitions.delete(actionKey)
+        emitDefinitionsChange()
+      }
     },
     async handleEvent(event) {
       if (!isPageActionRequest(event)) return null
@@ -94,6 +134,10 @@ export function createEafPageBridge(options: EafPageBridgeOptions = {}): EafPage
     onResult(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    onActionDefinitionsChange(listener) {
+      definitionListeners.add(listener)
+      return () => definitionListeners.delete(listener)
     },
   }
 }

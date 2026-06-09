@@ -23,14 +23,14 @@ mvn clean install
 mvn -pl ai-agent-service -am compile
 mvn -pl ai-skills-service -am compile
 mvn -pl ai-model-service -am compile
-mvn -pl ai-spring-boot-starter -am compile
+mvn -pl reachai-spring-boot2-starter -am compile
 ```
 
 目标测试示例：
 
 ```powershell
 mvn -pl ai-agent-service "-Dtest=LlmWorkflowDraftGeneratorTest,WorkflowDraftGenerationServiceTest,WorkflowDraftEditServiceTest" test
-mvn -pl ai-spring-boot-starter test
+mvn -pl reachai-spring-boot2-starter -am test
 ```
 
 ## Frontend
@@ -75,6 +75,28 @@ Use dbhub_ai_mysql to check whether target_table exists and list its columns and
 ```text
 Use Playwright to open the local admin frontend, capture a screenshot, and report visible layout, console, and network errors.
 ```
+
+## Page Action Loop
+
+当修改前端页面动作目录、嵌入式会话、Page Action 调试或业务系统接入示例时，可以在 ReachAI 后端已启动且数据库已包含目标项目凭证后执行：
+
+```powershell
+.\scripts\verify-page-action-loop.ps1 -BaseUrl http://localhost:18603
+```
+
+该脚本会完整验证：
+
+1. 项目级 `appKey/appSecret` 签名上报页面和 `actionKey`。
+2. 页面动作目录的新增、变更和 `replaceActions=true` 删除语义；脚本会检查旧动作被标记为 `REMOVED`。
+3. 动作 `inputSchema/outputSchema/sampleArgs/allowedAgentIds` 元数据写入目录。
+4. 带 `principal.externalUserId` 换取 embed token。
+5. 创建嵌入式 session。
+6. 平台侧从页面动作目录发起 debug 请求。
+7. 业务页侧 pending 接口能拉到 page action。
+8. result 接口回传 `SUCCESS`。
+9. 平台侧 debug result 查询到 `SUCCESS`。
+
+如果本地 ReachAI 运行在临时端口，显式传入 `-BaseUrl`。如果项目凭证或 Agent 不同，同时传入 `-ProjectCode`、`-AppKey`、`-AppSecret`、`-AgentId`。
 
 ## Docs And Links
 

@@ -14,12 +14,13 @@ import com.enterprise.ai.agent.scan.ScanProjectAuthSupport;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectMapper;
 import com.enterprise.ai.agent.scan.SideEffectInferrer;
+import com.enterprise.ai.agent.registry.ReachAiInvocationTokenService;
 import com.enterprise.ai.agent.tool.retrieval.ToolEmbeddingService;
 import com.enterprise.ai.agent.tools.ToolRegistry;
 import com.enterprise.ai.agent.tools.dynamic.DynamicHttpAiTool;
 import com.enterprise.ai.agent.tools.dynamic.DynamicHttpToolBaseUrlSupport;
-import com.enterprise.ai.skill.AiTool;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.AiTool;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -60,6 +61,7 @@ public class ToolDefinitionService {
     private final SubAgentSkillFactory subAgentSkillFactory;
     private final InteractiveFormSkillFactory interactiveFormSkillFactory;
     private final LLMConfig llmConfig;
+    private final ReachAiInvocationTokenService invocationTokenService;
 
     public ToolDefinitionService(ToolDefinitionMapper mapper,
                                  ScanProjectMapper scanProjectMapper,
@@ -69,7 +71,8 @@ public class ToolDefinitionService {
                                  ToolEmbeddingService toolEmbeddingService,
                                  @Lazy SubAgentSkillFactory subAgentSkillFactory,
                                  @Lazy InteractiveFormSkillFactory interactiveFormSkillFactory,
-                                 LLMConfig llmConfig) {
+                                 LLMConfig llmConfig,
+                                 ReachAiInvocationTokenService invocationTokenService) {
         this.mapper = mapper;
         this.scanProjectMapper = scanProjectMapper;
         this.toolRegistry = toolRegistry;
@@ -79,6 +82,7 @@ public class ToolDefinitionService {
         this.subAgentSkillFactory = subAgentSkillFactory;
         this.interactiveFormSkillFactory = interactiveFormSkillFactory;
         this.llmConfig = llmConfig;
+        this.invocationTokenService = invocationTokenService;
     }
 
     @PostConstruct
@@ -91,7 +95,7 @@ public class ToolDefinitionService {
         Set<String> currentNames = new LinkedHashSet<>();
         for (AiTool tool : codeTools) {
             // Skill 通过 DB 加载，不在 codeTools 里；这里只同步纯代码 Tool。
-            if (tool instanceof com.enterprise.ai.skill.AiSkill) {
+            if (tool instanceof com.enterprise.ai.runtime.contract.AiSkill) {
                 continue;
             }
             currentNames.add(tool.name());
@@ -754,9 +758,11 @@ public class ToolDefinitionService {
             ScanProjectEntity project = scanProjectMapper.selectById(entity.getProjectId());
             ToolDefinitionEntity resolved = withMergedScanProjectBaseUrl(entity, project);
             var extras = ScanProjectAuthSupport.invocationExtras(project);
-            return new DynamicHttpAiTool(resolved, objectMapper, extras, requestTimeout);
+            return new DynamicHttpAiTool(resolved, objectMapper, extras, requestTimeout,
+                    invocationTokenService::createToken);
         }
-        return new DynamicHttpAiTool(entity, objectMapper, null, requestTimeout);
+        return new DynamicHttpAiTool(entity, objectMapper, null, requestTimeout,
+                invocationTokenService::createToken);
     }
 
     private List<ToolDefinitionEntity> listBySource(String source) {

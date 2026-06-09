@@ -34,6 +34,9 @@ mysql -uroot -p < sql/init.sql
 - 全新环境：直接执行 `sql/init.sql`。
 - 已有开发/测试环境：先备份 `ai_text_service`，再按时间顺序执行根目录 `sql/upgrade-*.sql`。
 - 班组档案嵌入式对话接入已有环境需执行 `sql/upgrade-20260529-team-archive-embedded-agent.sql`，插入 `team-archive-assistant` 页面动作 Agent。
+- 旧 SDK / Starter 退役后的字段注释对齐需执行 `sql/upgrade-20260529-retire-legacy-sdk-comments.sql`。
+- 前端 SDK 页面 / 页面动作目录接入已有环境需执行 `sql/upgrade-20260601-page-action-catalog.sql`，创建 `eaf_page_registry` 与 `eaf_page_action_registry`。
+- 页面动作目录出现同一 `page_key` 重复页面时，执行 `sql/upgrade-20260602-page-registry-origin-dedupe.sql`，保留每组最近上报页面并将缺失 `origin` 归一为空字符串。
 - 不再执行 `ai-agent-service/sql`、`ai-model-service/sql`、`ai-skills-service/sql` 下的历史补丁；这些目录已清理。
 - 后续 schema 变更必须同时维护根 `sql/init.sql` 和一份新的 `sql/upgrade-YYYYMMDD-short-name.sql`，或正式引入 Flyway / Liquibase 后把本文件作为 baseline。
 - 项目默认不为旧数据做复杂兼容迁移；如果升级脚本会清理、重建、重命名或丢弃历史字段 / 数据，必须在 SQL 注释和变更说明中明确写出。

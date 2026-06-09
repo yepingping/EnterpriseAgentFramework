@@ -29,7 +29,9 @@ public class EmbedCorsFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return request.getRequestURI() == null || !request.getRequestURI().startsWith("/api/embed/");
+        String path = request.getRequestURI();
+        return path == null
+                || (!path.startsWith("/api/embed/") && !isPageCatalogRegistration(path));
     }
 
     @Override
@@ -52,6 +54,10 @@ public class EmbedCorsFilter extends OncePerRequestFilter {
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isPageCatalogRegistration(String path) {
+        return path.startsWith("/api/registry/projects/") && path.endsWith("/pages/register");
     }
 
     private boolean isAllowedOrigin(String origin) {

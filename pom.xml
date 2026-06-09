@@ -16,8 +16,7 @@
         <module>ai-common</module>
         <module>reachai-capability-sdk</module>
         <module>reachai-spring-boot2-starter</module>
-        <module>ai-skill-sdk</module>
-        <module>ai-spring-boot-starter</module>
+        <module>ai-runtime-contract</module>
         <module>ai-model-service</module>
         <module>ai-skills-service</module>
         <module>ai-agent-service</module>
@@ -109,7 +108,7 @@
             </dependency>
             <dependency>
                 <groupId>com.enterprise.ai</groupId>
-                <artifactId>ai-skill-sdk</artifactId>
+                <artifactId>ai-runtime-contract</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

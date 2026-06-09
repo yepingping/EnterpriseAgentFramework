@@ -23,7 +23,7 @@ public class ToolDefinitionEntity {
 
     private String aiDescription;
 
-    /** Java 侧 @AiCapability 声明的原始结构化元数据 JSON。 */
+    /** Java 侧 @ReachCapability 声明的原始结构化元数据 JSON。 */
     private String capabilityMetadataJson;
 
     private String parametersJson;

@@ -1,6 +1,47 @@
 <template>
   <div class="registry-detail-page" :class="{ 'is-dark-detail': theme === 'dark' }">
     <section class="project-hero">
+      <div class="hero-corner-actions">
+        <el-tooltip content="设为当前项目" placement="top">
+          <el-button
+            class="primary-icon-action"
+            circle
+            :icon="Star"
+            :disabled="!project"
+            aria-label="设为当前项目"
+            @click="setCurrentProject"
+          />
+        </el-tooltip>
+        <el-tooltip content="刷新" placement="top">
+          <el-button
+            circle
+            :icon="Refresh"
+            aria-label="刷新"
+            @click="refresh"
+          />
+        </el-tooltip>
+        <el-tooltip content="编辑项目" placement="top">
+          <el-button
+            circle
+            :icon="EditPen"
+            :disabled="!project?.id"
+            aria-label="编辑项目"
+            @click="openEditDialog"
+          />
+        </el-tooltip>
+        <el-tooltip content="删除项目" placement="top">
+          <el-button
+            class="danger-icon-action"
+            circle
+            :icon="Delete"
+            :disabled="!project?.id"
+            :loading="deleteLoading"
+            aria-label="删除项目"
+            @click="handleDeleteProject"
+          />
+        </el-tooltip>
+      </div>
+
       <el-button class="back-btn" link :icon="ArrowLeft" @click="router.back()">返回</el-button>
 
       <div class="hero-main">
@@ -29,113 +70,58 @@
               <el-icon><User /></el-icon>
               负责人：<b>{{ project?.owner || '-' }}</b>
             </span>
-            <span>
-              <el-icon><Grid /></el-icon>
-              能力数：<b>{{ project?.toolCount ?? 0 }}</b>
-            </span>
-            <span>
-              <el-icon><Clock /></el-icon>
-              最近心跳：<b>{{ latestHeartbeat }}</b>
-            </span>
           </div>
-        </div>
-
-        <div class="hero-actions">
-          <el-button type="primary" :icon="Star" :disabled="!project" @click="setCurrentProject">
-            设为当前项目
-          </el-button>
-          <el-button :icon="Refresh" @click="refresh">刷新</el-button>
-          <el-button :icon="EditPen" :disabled="!project?.id" @click="openEditDialog">编辑项目</el-button>
-          <el-button
-            class="danger-action"
-            :icon="Delete"
-            :disabled="!project?.id"
-            :loading="deleteLoading"
-            @click="handleDeleteProject"
-          >
-            删除项目
-          </el-button>
         </div>
       </div>
     </section>
 
-    <section class="content-grid">
-      <el-card class="detail-card overview-card" shadow="never">
+    <el-card class="detail-card health-card" shadow="never">
+      <div class="health-summary">
+        <div v-for="item in healthMetrics" :key="item.label" class="health-item" :class="item.tone">
+          <div class="health-icon">
+            <el-icon><component :is="item.icon" /></el-icon>
+          </div>
+          <div>
+            <div class="health-label">{{ item.label }}</div>
+            <strong>{{ item.value }}</strong>
+            <small>{{ item.desc }}</small>
+          </div>
+        </div>
+      </div>
+    </el-card>
+
+    <section class="workbench-grid">
+      <el-card v-for="group in workbenchGroups" :key="group.title" class="detail-card workbench-card" shadow="never">
         <template #header>
           <div class="section-title">
             <span class="title-mark" />
-            <span>项目概览</span>
+            <span>{{ group.title }}</span>
           </div>
         </template>
 
-        <div class="overview-grid">
-          <div v-for="item in overviewItems" :key="item.label" class="overview-item">
-            <div class="item-icon">
+        <div class="task-list">
+          <button
+            v-for="item in group.items"
+            :key="item.title"
+            class="task-entry"
+            type="button"
+            :disabled="item.disabled"
+            @click="item.action"
+          >
+            <span class="task-icon" :class="item.tone">
               <el-icon><component :is="item.icon" /></el-icon>
-            </div>
-            <div>
-              <div class="item-label">{{ item.label }}</div>
-              <a v-if="item.isLink && item.value !== '-'" class="item-value link-value" :href="item.value" target="_blank">
-                {{ item.value }}
-              </a>
-              <div v-else class="item-value">{{ item.value }}</div>
-            </div>
-          </div>
-        </div>
-      </el-card>
-
-      <el-card class="detail-card config-card" shadow="never">
-        <template #header>
-          <div class="config-header">
-            <div class="section-title">
-              <span class="title-mark" />
-              <span>SDK / 业务系统配置示例</span>
-              <el-tooltip content="业务系统接入注册中心时使用的 YAML 示例" placement="top">
-                <el-icon class="info-icon"><InfoFilled /></el-icon>
-              </el-tooltip>
-            </div>
-            <el-button :icon="DocumentCopy" @click="copyConfigSnippet">复制</el-button>
-          </div>
-        </template>
-
-        <div class="code-panel">
-          <div v-for="(line, index) in configLines" :key="`${index}-${line}`" class="code-line">
-            <span class="line-no">{{ index + 1 }}</span>
-            <code v-html="highlightYaml(line)" />
-          </div>
+            </span>
+            <span class="task-content">
+              <span class="task-topline">
+                <strong>{{ item.title }}</strong>
+              </span>
+              <small>{{ item.desc }}</small>
+            </span>
+            <el-icon class="task-arrow"><ArrowRight /></el-icon>
+          </button>
         </div>
       </el-card>
     </section>
-
-    <el-card class="detail-card quick-card" shadow="never">
-      <template #header>
-        <div class="section-title">
-          <span class="title-mark" />
-          <span>快捷入口</span>
-        </div>
-      </template>
-
-      <div class="quick-grid">
-        <button
-          v-for="entry in quickEntries"
-          :key="entry.title"
-          class="quick-entry"
-          type="button"
-          :class="entry.tone"
-          :disabled="entry.disabled"
-          @click="entry.action"
-        >
-          <span class="quick-icon">
-            <el-icon><component :is="entry.icon" /></el-icon>
-          </span>
-          <span class="quick-copy">
-            <strong>{{ entry.title }}</strong>
-            <small>{{ entry.desc }}</small>
-          </span>
-          <el-icon class="quick-arrow"><ArrowRight /></el-icon>
-        </button>
-      </div>
-    </el-card>
 
     <el-card class="detail-card instance-card" shadow="never">
       <template #header>
@@ -305,6 +291,7 @@
         <el-button type="primary" :loading="editSaving" @click="saveEditProject">保存</el-button>
       </template>
     </el-dialog>
+
   </div>
 </template>
 
@@ -318,10 +305,8 @@ import {
   Clock,
   Collection,
   Delete,
-  DocumentCopy,
   EditPen,
   Grid,
-  InfoFilled,
   Link,
   Lock,
   Monitor,
@@ -344,6 +329,12 @@ import {
   purgeRegistryProjectOfflineInstances,
   updateRegistryProjectInstanceStatus,
 } from '@/api/registry'
+import {
+  listPageActionCatalog,
+  listPageRegistry,
+  type PageActionRegistryView,
+  type PageRegistryView,
+} from '@/api/embedOps'
 import type { ProjectKind, ProjectVisibility } from '@/types/registry'
 import type { ScanProject, ScanProjectUpsertRequest } from '@/types/scanProject'
 import type { ProjectInstance } from '@/types/registry'
@@ -368,7 +359,10 @@ const { theme } = useTheme()
 const projectCode = computed(() => String(route.params.projectCode || ''))
 const project = ref<ScanProject | null>(null)
 const instances = ref<ProjectInstance[]>([])
+const pageRegistry = ref<PageRegistryView[]>([])
+const pageActions = ref<PageActionRegistryView[]>([])
 const loadingInstances = ref(false)
+const loadingPageCatalog = ref(false)
 const purgingOffline = ref(false)
 const offlineInstanceCount = computed(() =>
   instances.value.filter((item) => item.status === 'OFFLINE' || item.status === 'STALE').length,
@@ -428,122 +422,129 @@ function emptyEditForm(): ScanProjectUpsertRequest {
 
 const editForm = reactive<ScanProjectUpsertRequest>(emptyEditForm())
 
-/** 与 ai-agent-service 实际监听地址一致，由 VITE_AI_AGENT_SERVICE_URL 注入，默认本地 18603 */
-const agentServiceBaseUrl = computed(() => {
-  const raw = import.meta.env.VITE_AI_AGENT_SERVICE_URL?.trim()
-  const fallback = 'http://localhost:18603'
-  if (!raw) return fallback
-  return raw.replace(/\/$/, '')
+const isSdkBackedProject = computed(() => {
+  const kind = project.value?.projectKind || 'REGISTERED'
+  return kind === 'REGISTERED' || kind === 'HYBRID'
 })
-
-const exampleBusinessBaseUrl = computed(() => {
-  const raw = import.meta.env.VITE_EXAMPLE_BUSINESS_BASE_URL?.trim()
-  if (raw) return raw.replace(/\/$/, '')
-  return 'http://127.0.0.1:8611'
-})
-
-const configSnippet = computed(() => `eaf:
-  registry:
-    enabled: true
-    url: ${agentServiceBaseUrl.value}
-  project:
-    code: ${project.value?.projectCode || projectCode.value}
-    name: ${project.value?.name || ''}
-    base-url: ${displayBaseUrl.value}
-    context-path: ${project.value?.contextPath || ''}
-    environment: ${project.value?.environment || 'dev'}
-    owner: ${project.value?.owner || 'your-team'}
-    visibility: ${project.value?.visibility || 'PRIVATE'}
-  capability:
-    scan-controller: true
-    sync-on-startup: true`)
-
-const configLines = computed(() => configSnippet.value.split('\n'))
 
 const latestHeartbeat = computed(() => {
   const raw = instances.value[0]?.lastHeartbeatAt || project.value?.lastScannedAt
   return formatHeartbeatDisplay(raw ?? null)
 })
 
-const displayBaseUrl = computed(() => normalizeHttpUrl(project.value?.baseUrl || exampleBusinessBaseUrl.value))
+const activePageActionCount = computed(() => pageActions.value.filter((item) => item.status === 'ACTIVE').length)
+const removedPageActionCount = computed(() => pageActions.value.filter((item) => item.status === 'REMOVED').length)
+const lastPageActionSeenAt = computed(() => {
+  const raw = pageActions.value[0]?.lastSeenAt || pageRegistry.value[0]?.lastSeenAt
+  return formatHeartbeatDisplay(raw ?? null)
+})
 
-const overviewItems = computed(() => [
-  { label: '项目编码', value: project.value?.projectCode || projectCode.value || '-', icon: Link },
-  { label: '项目形态', value: formatProjectKindLabel(project.value?.projectKind || 'REGISTERED'), icon: Setting },
-  { label: '环境', value: project.value?.environment || '-', icon: Monitor },
-  { label: '可见性', value: formatVisibilityLabel(project.value?.visibility || 'PRIVATE'), icon: Lock },
-  { label: '负责人', value: project.value?.owner || '-', icon: User },
-  { label: '能力数', value: String(project.value?.toolCount ?? 0), icon: Grid },
-  { label: '根地址', value: project.value?.baseUrl ? displayBaseUrl.value : '-', icon: Collection, isLink: true },
-  { label: '上下文路径', value: project.value?.contextPath || '-', icon: Box },
-])
-
-const quickEntries = computed(() => [
+const healthMetrics = computed(() => [
   {
-    title: 'API 目录',
-    desc: '管理 API 与工具的关联关系',
-    icon: Link,
-    tone: 'purple',
-    disabled: !project.value?.id,
-    action: goApiCatalog,
+    label: '实例心跳',
+    value: `${instances.value.filter((item) => item.status === 'ONLINE').length} 在线`,
+    desc: `最近心跳 ${latestHeartbeat.value}`,
+    icon: Monitor,
+    tone: instances.value.some((item) => item.status === 'ONLINE') ? 'good' : 'attention',
   },
   {
-    title: '能力变更评审',
-    desc: '发起与查看能力变更评审',
-    icon: Lock,
-    tone: 'green',
-    disabled: !project.value?.id,
-    action: goCapabilitySync,
-  },
-  {
-    title: '查看工具',
-    desc: '管理项目下的工具列表',
-    icon: Tools,
-    tone: 'blue',
-    disabled: !project.value?.id,
-    action: () => goCapability('/tool'),
-  },
-  {
-      title: '查看能力',
-      desc: '管理项目下的粗粒度能力列表',
+    label: '能力资产',
+    value: `${project.value?.toolCount ?? 0} 能力`,
+    desc: (project.value?.toolCount ?? 0) > 0 ? '项目能力资产已形成目录' : '建议检查后端接口管理或能力上报',
     icon: Collection,
-    tone: 'violet',
-    disabled: !project.value?.id,
-    action: () => goCapability('/capability'),
+    tone: (project.value?.toolCount ?? 0) > 0 ? 'good' : 'attention',
   },
   {
-    title: '查看智能体',
-    desc: '管理项目下的智能体列表',
-    icon: User,
-    tone: 'orange',
-    disabled: !project.value?.id,
-    action: () => goCapability('/agent'),
+    label: '前端页面管理',
+    value: `${pageRegistry.value.length} 页面 / ${pageActions.value.length} 动作`,
+    desc: `${activePageActionCount.value} ACTIVE / ${removedPageActionCount.value} REMOVED`,
+    icon: Link,
+    tone: activePageActionCount.value > 0 ? 'good' : 'neutral',
+  },
+  {
+    label: '最近上报',
+    value: lastPageActionSeenAt.value,
+    desc: '页面、动作、实例的最近观测时间',
+    icon: Clock,
+    tone: lastPageActionSeenAt.value !== '-' ? 'good' : 'neutral',
   },
 ])
 
-function highlightYaml(line: string) {
-  const escaped = line
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  return escaped
-    .replace(/^(\s*)([A-Za-z0-9_-]+:)/, '$1<span class="yaml-key">$2</span>')
-    .replace(/\b(true|false)\b/g, '<span class="yaml-bool">$1</span>')
-    .replace(/(http:\/\/[^\s]+)/g, '<span class="yaml-url">$1</span>')
-}
-
-function normalizeHttpUrl(value: string) {
-  return value.replace(/^http:(?!\/\/)/, 'http://').replace(/^https:(?!\/\/)/, 'https://')
-}
-
-async function copyConfigSnippet() {
-  try {
-    await navigator.clipboard.writeText(configSnippet.value)
-    ElMessage.success('已复制到剪贴板')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择文本复制')
-  }
-}
+const workbenchGroups = computed(() => [
+  {
+    title: '接入与上报',
+    items: [
+      ...(isSdkBackedProject.value
+        ? [{
+            title: 'SDK 接入向导',
+            desc: '从后端 Starter、网关路由、业务服务校验、前端 embed token 到最终自检逐步完成接入。',
+            icon: Star,
+            tone: 'green',
+            disabled: !project.value?.id,
+            action: goSdkAccessWizard,
+          }]
+        : []),
+      {
+        title: '后端接口管理',
+        desc: '管理扫描接口、模块列表和接口图谱，处理 Tool 关联与语义文档。',
+        icon: Grid,
+        tone: 'blue',
+        disabled: !project.value?.id,
+        action: goScanProjectDetail,
+      },
+      {
+        title: '前端页面管理',
+        desc: '管理业务页面、可执行动作、嵌入授权和会话审计。',
+        icon: Collection,
+        tone: 'orange',
+        disabled: !project.value,
+        action: goPageActionGovernance,
+      },
+    ],
+  },
+  {
+    title: '资产与评审',
+    items: [
+      {
+        title: '工具管理',
+        desc: '查看项目下可被 Agent Runtime 调用的 Tool 清单。',
+        icon: Tools,
+        tone: 'blue',
+        disabled: !project.value?.id,
+        action: () => goCapability('/tool'),
+      },
+    ],
+  },
+  {
+    title: '编排与发布',
+    items: [
+      {
+        title: '能力变更评审',
+        desc: '发布前处理能力快照 diff、字段变化、apply / ignore。',
+        icon: Lock,
+        tone: 'green',
+        disabled: !project.value?.id,
+        action: goCapabilitySync,
+      },
+      {
+        title: '创建页面助手',
+        desc: '从后端接口资产 + 前端页面动作生成 Agent Studio 草稿。',
+        icon: Star,
+        tone: 'violet',
+        disabled: !project.value?.id,
+        action: goPageAssistantWizard,
+      },
+      {
+        title: 'Agent管理',
+        desc: '管理版本、发布状态、Trace、页面动作闭环和权限决策。',
+        icon: User,
+        tone: 'orange',
+        disabled: !project.value?.id,
+        action: () => goCapability('/agent'),
+      },
+    ],
+  },
+])
 
 onMounted(refresh)
 
@@ -563,6 +564,7 @@ async function refresh() {
     project.value = found
   }
   await loadInstances()
+  await loadPageCatalog()
 }
 
 async function loadInstances() {
@@ -573,6 +575,22 @@ async function loadInstances() {
     instances.value = data
   } finally {
     loadingInstances.value = false
+  }
+}
+
+async function loadPageCatalog() {
+  const code = project.value?.projectCode || projectCode.value
+  if (!code) return
+  loadingPageCatalog.value = true
+  try {
+    const [pages, actions] = await Promise.all([
+      listPageRegistry({ projectCode: code, limit: 200 }),
+      listPageActionCatalog({ projectCode: code, limit: 500 }),
+    ])
+    pageRegistry.value = pages.data
+    pageActions.value = actions.data
+  } finally {
+    loadingPageCatalog.value = false
   }
 }
 
@@ -748,7 +766,7 @@ function goCapability(path: string) {
   }
 }
 
-function goApiCatalog() {
+function goScanProjectDetail() {
   if (!project.value?.id) return
   projectStore.setCurrentProject(project.value.id)
   router.push({ name: 'ScanProjectDetail', params: { id: String(project.value.id) } })
@@ -759,24 +777,86 @@ function goCapabilitySync() {
   projectStore.setCurrentProject(project.value.id)
   router.push({ name: 'CapabilitySyncDebug' })
 }
+
+function goPageActionGovernance() {
+  router.push({
+    name: 'EmbedOpsMonitor',
+    params: { projectCode: project.value?.projectCode || projectCode.value },
+  })
+}
+
+function goPageAssistantWizard() {
+  router.push({
+    name: 'PageAssistantWizard',
+    params: { projectCode: project.value?.projectCode || projectCode.value },
+  })
+}
+
+function goSdkAccessWizard() {
+  router.push({
+    name: 'SdkAccessWizard',
+    params: { projectCode: project.value?.projectCode || projectCode.value },
+  })
+}
 </script>
 
 <style scoped lang="scss">
 .registry-detail-page {
   min-height: calc(100vh - 56px);
   padding: 24px 32px 36px;
-  background:
-    radial-gradient(circle at 28% -8%, rgba(91, 61, 245, 0.08), transparent 32%),
-    #f7f8fc;
+  background: var(--brand-page-bg);
+  background-size: 28px 28px, 28px 28px, auto, auto, auto, auto;
   color: #111827;
 }
 
 .project-hero {
-  margin-bottom: 22px;
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.hero-corner-actions {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  :deep(.el-button) {
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    border-color: rgb(var(--brand-hover-rgb) / 0.28);
+    background: rgba(255, 255, 255, 0.64);
+    color: #27364f;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      0 10px 24px rgb(var(--brand-primary-rgb) / 0.1);
+    backdrop-filter: blur(14px);
+  }
+
+  .primary-icon-action {
+    color: var(--brand-active);
+    border-color: rgb(var(--brand-primary-rgb) / 0.34);
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgb(var(--brand-selected-rgb) / 0.64));
+  }
+
+  .danger-icon-action {
+    color: #d92d20;
+    border-color: #fda29b;
+
+    &:hover {
+      color: #b42318;
+      border-color: #f97066;
+      background: #fff5f4;
+    }
+  }
 }
 
 .back-btn {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
   padding: 0;
   color: #344054;
   font-size: 14px;
@@ -784,24 +864,25 @@ function goCapabilitySync() {
 
 .hero-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 20px;
+  gap: 16px;
+  padding-right: 148px;
 }
 
 .project-mark {
-  width: 78px;
-  height: 78px;
+  width: 56px;
+  height: 56px;
   display: grid;
   place-items: center;
   border-radius: 8px;
   background: linear-gradient(180deg, #f7f5ff 0%, #eef0ff 100%);
   border: 1px solid #d8d4ff;
   box-shadow: 0 12px 30px rgba(87, 71, 255, 0.12);
-  color: #4f46e5;
+  color: var(--brand-active);
 
   .el-icon {
-    font-size: 38px;
+    font-size: 30px;
   }
 }
 
@@ -817,7 +898,7 @@ function goCapabilitySync() {
 
   h1 {
     margin: 0;
-    font-size: 32px;
+    font-size: 26px;
     line-height: 1.15;
     font-weight: 750;
     letter-spacing: 0;
@@ -849,8 +930,8 @@ function goCapabilitySync() {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 18px;
-  margin-top: 14px;
+  gap: 14px;
+  margin-top: 10px;
   color: #475467;
   font-size: 14px;
 
@@ -879,32 +960,6 @@ function goCapabilitySync() {
   box-shadow: 0 0 0 3px rgba(23, 178, 106, 0.12);
 }
 
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-
-  .el-button {
-    height: 40px;
-    border-radius: 6px;
-    font-weight: 600;
-  }
-
-  .danger-action {
-    color: #d92d20;
-    border-color: #fda29b;
-    background: #fff;
-
-    &:hover {
-      color: #b42318;
-      border-color: #f97066;
-      background: #fff5f4;
-    }
-  }
-}
-
 .content-grid {
   display: grid;
   grid-template-columns: minmax(480px, 0.42fr) minmax(520px, 0.58fr);
@@ -927,6 +982,206 @@ function goCapabilitySync() {
   }
 }
 
+.health-card,
+.workbench-grid,
+.page-action-summary-card {
+  margin-bottom: 14px;
+}
+
+.health-card :deep(.el-card__body),
+.page-action-summary-card :deep(.el-card__body) {
+  padding: 10px 16px;
+}
+
+.health-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.health-item {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 14px;
+  border-right: 1px solid rgb(var(--brand-hover-rgb) / 0.16);
+  background: transparent;
+
+  &:last-child {
+    border-right: 0;
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 2px;
+    color: #101828;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 750;
+  }
+
+  small {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+
+.health-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--brand-selected-bg);
+  color: var(--brand-active);
+
+  .el-icon {
+    font-size: 18px;
+  }
+}
+
+.health-label {
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.workbench-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.task-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.task-entry {
+  min-width: 0;
+  min-height: 86px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e7ebf3;
+  border-radius: 7px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+
+  &:hover:not(:disabled) {
+    border-color: var(--brand-selected-bg);
+    box-shadow: 0 12px 26px rgb(var(--brand-active-rgb) / 0.08);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.56;
+  }
+}
+
+.task-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+
+  &.blue {
+    background: var(--brand-primary-gradient);
+  }
+
+  &.green {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+  }
+
+  &.purple,
+  &.violet {
+    background: linear-gradient(135deg, var(--brand-hover), var(--brand-active));
+  }
+
+  &.orange {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+  }
+
+  .el-icon {
+    font-size: 22px;
+  }
+}
+
+.task-content {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+
+  small {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}
+
+.task-topline {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+
+  strong {
+    min-width: 0;
+    color: #101828;
+    font-size: 14px;
+    font-weight: 750;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.task-arrow {
+  color: #98a2b3;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.summary-metric {
+  min-height: 74px;
+  padding: 12px 14px;
+  border: 1px solid #e7ebf3;
+  border-radius: 7px;
+  background: #fbfcff;
+
+  strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #101828;
+    font-size: 22px;
+    line-height: 1.15;
+  }
+
+  span {
+    color: #667085;
+    font-size: 12px;
+  }
+}
+
 .section-title,
 .config-header,
 .table-header {
@@ -945,8 +1200,8 @@ function goCapabilitySync() {
   width: 4px;
   height: 18px;
   border-radius: 2px;
-  background: linear-gradient(180deg, #3b82f6 0%, #6d28d9 100%);
-  box-shadow: 5px 0 0 rgba(79, 70, 229, 0.18);
+  background: linear-gradient(180deg, var(--brand-primary) 0%, var(--brand-hover) 100%);
+  box-shadow: 5px 0 0 rgb(var(--brand-active-rgb) / 0.18);
 }
 
 .overview-grid {
@@ -997,7 +1252,7 @@ function goCapabilitySync() {
 }
 
 .link-value {
-  color: #4f46e5;
+  color: var(--brand-active);
   text-decoration: none;
 }
 
@@ -1028,6 +1283,11 @@ function goCapabilitySync() {
   line-height: 1.55;
 }
 
+.config-warning {
+  margin: 0 12px 12px;
+  font-family: inherit;
+}
+
 .code-line {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
@@ -1050,7 +1310,7 @@ function goCapabilitySync() {
 }
 
 :deep(.yaml-key) {
-  color: #1d4ed8;
+  color: var(--brand-active);
   font-weight: 700;
 }
 
@@ -1063,12 +1323,122 @@ function goCapabilitySync() {
   color: #475467;
 }
 
+:global(.sdk-config-dialog .el-dialog__body) {
+  padding-top: 8px;
+}
+
+:global(.sdk-config-layout) {
+  display: grid;
+  gap: 14px;
+}
+
+:global(.sdk-credential-form) {
+  padding: 16px 16px 2px;
+  border: 1px solid #e7ebf3;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+:global(.sdk-code-shell) {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #111827;
+  background: #05070d;
+}
+
+:global(.sdk-code-toolbar) {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: #0b1020;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+:global(.sdk-code-panel) {
+  max-height: 430px;
+  min-height: 320px;
+  margin: 0;
+  overflow: auto;
+  padding: 18px 20px;
+  background: #05070d;
+  color: #e5e7eb;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+:global(.sdk-code-panel code) {
+  display: block;
+  min-width: max-content;
+  white-space: pre;
+}
+
 .quick-card {
+  margin-bottom: 18px;
+}
+
+.page-catalog-card {
   margin-bottom: 18px;
 }
 
 .quick-card :deep(.el-card__body) {
   padding: 18px 24px;
+}
+
+.page-catalog-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.page-catalog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.48fr) minmax(0, 0.52fr);
+}
+
+.page-catalog-grid > .el-table:first-child {
+  border-right: 1px solid #edf0f5;
+}
+
+.catalog-main {
+  font-weight: 600;
+  color: #101828;
+}
+
+.catalog-sub {
+  margin-top: 3px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.debug-action-title {
+  display: grid;
+  gap: 4px;
+
+  small {
+    color: #667085;
+  }
+}
+
+.debug-result-lines {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.debug-event-alert {
+  margin-top: 12px;
+}
+
+.config-card :deep(.el-segmented) {
+  --el-segmented-item-selected-bg-color: #ffffff;
+  --el-segmented-item-selected-color: var(--brand-active);
 }
 
 .quick-grid {
@@ -1093,8 +1463,8 @@ function goCapabilitySync() {
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 
   &:hover:not(:disabled) {
-    border-color: #c7d2fe;
-    box-shadow: 0 12px 26px rgba(79, 70, 229, 0.08);
+    border-color: var(--brand-selected-bg);
+    box-shadow: 0 12px 26px rgb(var(--brand-active-rgb) / 0.08);
     transform: translateY(-1px);
   }
 
@@ -1118,7 +1488,7 @@ function goCapabilitySync() {
 }
 
 .quick-entry.purple .quick-icon {
-  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  background: linear-gradient(135deg, var(--brand-hover), var(--brand-primary));
 }
 
 .quick-entry.green .quick-icon {
@@ -1126,11 +1496,11 @@ function goCapabilitySync() {
 }
 
 .quick-entry.blue .quick-icon {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background: var(--brand-primary-gradient);
 }
 
 .quick-entry.violet .quick-icon {
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  background: linear-gradient(135deg, var(--brand-hover), var(--brand-active));
 }
 
 .quick-entry.orange .quick-icon {
@@ -1184,7 +1554,7 @@ function goCapabilitySync() {
 }
 
 .instance-id {
-  color: #4f46e5;
+  color: var(--brand-active);
   font-weight: 500;
 }
 
@@ -1257,27 +1627,82 @@ function goCapabilitySync() {
 }
 
 @media (max-width: 1360px) {
-  .hero-main,
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hero-main {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding-right: 140px;
+  }
+
+  .project-mark {
+    width: 52px;
+    height: 52px;
+  }
+
+  .hero-corner-actions {
+    top: 14px;
+    right: 14px;
+  }
+
+  .quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workbench-grid,
+  .summary-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .page-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-catalog-grid > .el-table:first-child {
+    border-right: none;
+    border-bottom: 1px solid #edf0f5;
+  }
+}
+
+@media (max-width: 980px) {
+  .hero-main {
+    grid-template-columns: 1fr;
+    padding-right: 0;
+    padding-top: 34px;
   }
 
   .project-mark {
     display: none;
   }
 
-  .hero-actions {
-    justify-content: flex-start;
+  .health-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .quick-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .health-item:nth-child(2) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .health-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .health-item {
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--brand-hover-rgb) / 0.16);
+
+    &:last-child {
+      border-bottom: 0;
+    }
   }
 }
 
 .registry-detail-page.is-dark-detail {
   background:
-    radial-gradient(circle at 28% -8%, rgba(99, 102, 241, 0.18), transparent 34%),
+    radial-gradient(circle at 28% -8%, rgb(var(--brand-primary-rgb) / 0.18), transparent 34%),
     #0b1020;
   color: #e5e7eb;
 
@@ -1290,9 +1715,9 @@ function goCapabilitySync() {
   }
 
   .project-mark {
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.22), rgba(30, 41, 59, 0.8));
-    border-color: rgba(129, 140, 248, 0.45);
-    color: #c4b5fd;
+    background: linear-gradient(180deg, rgb(var(--brand-primary-rgb) / 0.22), rgba(30, 41, 59, 0.8));
+    border-color: rgb(var(--brand-hover-rgb) / 0.45);
+    color: var(--brand-selected-bg);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
   }
 
@@ -1305,7 +1730,7 @@ function goCapabilitySync() {
   }
 
   .code-tag {
-    color: #dbeafe;
+    color: var(--brand-selected-bg);
     border-color: rgba(148, 163, 184, 0.35);
     background: rgba(15, 23, 42, 0.82);
   }
@@ -1335,32 +1760,6 @@ function goCapabilitySync() {
     }
   }
 
-  .hero-actions {
-    .el-button:not(.el-button--primary):not(.danger-action) {
-      background: rgba(15, 23, 42, 0.86);
-      border-color: rgba(148, 163, 184, 0.25);
-      color: #cbd5e1;
-
-      &:hover {
-        background: rgba(30, 41, 59, 0.96);
-        border-color: rgba(129, 140, 248, 0.55);
-        color: #ffffff;
-      }
-    }
-
-    .danger-action {
-      color: #fca5a5;
-      border-color: rgba(248, 113, 113, 0.44);
-      background: rgba(127, 29, 29, 0.18);
-
-      &:hover {
-        color: #fecaca;
-        border-color: rgba(248, 113, 113, 0.72);
-        background: rgba(127, 29, 29, 0.32);
-      }
-    }
-  }
-
   .overview-item {
     border-right-color: rgba(148, 163, 184, 0.14);
     border-bottom-color: rgba(148, 163, 184, 0.14);
@@ -1379,7 +1778,7 @@ function goCapabilitySync() {
   }
 
   .link-value {
-    color: #a5b4fc;
+    color: var(--brand-disabled);
   }
 
   .info-icon,
@@ -1393,7 +1792,7 @@ function goCapabilitySync() {
 
   .code-line {
     code {
-      color: #dbeafe;
+      color: var(--brand-selected-bg);
     }
   }
 
@@ -1402,7 +1801,7 @@ function goCapabilitySync() {
   }
 
   :deep(.yaml-key) {
-    color: #93c5fd;
+    color: var(--brand-disabled);
   }
 
   :deep(.yaml-bool) {
@@ -1418,9 +1817,44 @@ function goCapabilitySync() {
     border-color: rgba(148, 163, 184, 0.18);
 
     &:hover:not(:disabled) {
-      border-color: rgba(129, 140, 248, 0.62);
+      border-color: rgb(var(--brand-hover-rgb) / 0.62);
       box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
     }
+  }
+
+  .health-item,
+  .task-entry,
+  .summary-metric {
+    background: rgba(15, 23, 42, 0.72);
+    border-color: rgba(148, 163, 184, 0.18);
+  }
+
+  .health-item.good {
+    background: rgba(20, 83, 45, 0.24);
+    border-color: rgba(34, 197, 94, 0.32);
+  }
+
+  .health-item.attention {
+    background: rgba(120, 53, 15, 0.2);
+    border-color: rgba(245, 158, 11, 0.32);
+  }
+
+  .health-icon {
+    background: rgb(var(--brand-primary-rgb) / 0.2);
+    color: var(--brand-selected-bg);
+  }
+
+  .health-item strong,
+  .task-topline strong,
+  .summary-metric strong {
+    color: #f8fafc;
+  }
+
+  .health-label,
+  .health-item small,
+  .task-content small,
+  .summary-metric span {
+    color: #94a3b8;
   }
 
   .instance-table {
@@ -1449,7 +1883,7 @@ function goCapabilitySync() {
   }
 
   .instance-id {
-    color: #a5b4fc;
+    color: var(--brand-disabled);
   }
 
   .status-pill {
@@ -1475,12 +1909,298 @@ function goCapabilitySync() {
   }
 }
 
+/* Purple glass alignment for the registry project detail page. */
+:global(.main-layout.registry-shell:has(.registry-detail-page) .topbar) {
+  border-bottom-color: rgba(255, 255, 255, 0.48) !important;
+  background:
+    var(--brand-topbar-bg) !important;
+  color: #f8fbff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 16px 34px rgb(var(--brand-primary-rgb) / 0.18) !important;
+  backdrop-filter: blur(24px) saturate(1.18) !important;
+}
+
+:global(.main-layout.registry-shell:has(.registry-detail-page) .breadcrumb-area .el-breadcrumb__inner),
+:global(.main-layout.registry-shell:has(.registry-detail-page) .breadcrumb-area .el-breadcrumb__separator) {
+  color: rgba(255, 255, 255, 0.84) !important;
+}
+
+:global(.main-layout.registry-shell:has(.registry-detail-page) .breadcrumb-area .el-breadcrumb__item:last-child .el-breadcrumb__inner) {
+  color: #ffffff !important;
+}
+
+:global(.main-layout.registry-shell:has(.registry-detail-page) .topbar-btn) {
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  background: rgba(255, 255, 255, 0.48) !important;
+  color: var(--brand-active) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 20px rgb(var(--brand-primary-rgb) / 0.14) !important;
+}
+
+.registry-detail-page {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    radial-gradient(circle at 14% 4%, rgb(var(--brand-selected-rgb) / 0.26), transparent 32%),
+    radial-gradient(circle at 80% 0%, rgb(var(--brand-hover-rgb) / 0.16), transparent 34%),
+    #edf8f2 !important;
+  background-size: 28px 28px, 28px 28px, auto, auto, auto;
+}
+
+.project-hero,
+.detail-card {
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.5) !important;
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.7), rgb(var(--brand-selected-rgb) / 0.28)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 14px 34px rgb(var(--brand-primary-rgb) / 0.09) !important;
+  backdrop-filter: blur(18px) saturate(1.02);
+}
+
+.project-hero {
+  padding: 14px 22px 16px;
+}
+
+.project-mark {
+  border-color: rgb(var(--brand-hover-rgb) / 0.28) !important;
+  background:
+    linear-gradient(145deg, rgba(238, 242, 255, 0.96), rgb(var(--brand-selected-rgb) / 0.72)) !important;
+  color: var(--brand-active) !important;
+  box-shadow: 0 14px 32px rgb(var(--brand-primary-rgb) / 0.18) !important;
+}
+
+.title-row h1 {
+  color: #11183a !important;
+}
+
+.project-meta,
+.project-meta .el-icon,
+.back-btn,
+.health-label,
+.health-item small,
+.task-content small,
+.table-footer {
+  color: #4f5f81 !important;
+}
+
+.project-meta b,
+.health-item strong,
+.task-topline strong,
+.section-title {
+  color: #11183a !important;
+}
+
+.code-tag {
+  border-color: rgb(var(--brand-hover-rgb) / 0.22) !important;
+  background: rgb(var(--brand-selected-rgb) / 0.68) !important;
+  color: var(--brand-active) !important;
+}
+
+.env-tag {
+  border-color: rgb(var(--brand-primary-rgb) / 0.22) !important;
+  background: rgb(var(--brand-selected-rgb) / 0.7) !important;
+  color: var(--brand-active) !important;
+}
+
+.detail-card {
+  :deep(.el-card__header) {
+    border-bottom-color: rgb(var(--brand-selected-rgb) / 0.36) !important;
+    background: rgba(255, 255, 255, 0.26) !important;
+  }
+}
+
+.health-item,
+.task-entry,
+.summary-metric {
+  border-color: rgb(var(--brand-hover-rgb) / 0.24) !important;
+  background: rgba(255, 255, 255, 0.52) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.health-card {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.66), rgb(var(--brand-selected-rgb) / 0.22)) !important;
+}
+
+.health-item {
+  border-color: rgb(var(--brand-hover-rgb) / 0.16) !important;
+  background: transparent !important;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.health-item.good {
+  border-color: rgba(34, 197, 94, 0.18) !important;
+}
+
+.health-item.attention {
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.health-icon,
+.task-icon {
+  border: 1px solid rgb(var(--brand-hover-rgb) / 0.24);
+  background: rgb(var(--brand-selected-rgb) / 0.72) !important;
+  color: var(--brand-primary) !important;
+  box-shadow: 0 10px 24px rgb(var(--brand-primary-rgb) / 0.14);
+}
+
+.task-icon.blue,
+.task-icon.green,
+.task-icon.purple,
+.task-icon.violet,
+.task-icon.orange {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-hover)) !important;
+  color: #fff !important;
+}
+
+.task-entry:hover:not(:disabled) {
+  border-color: rgb(var(--brand-hover-rgb) / 0.44) !important;
+  box-shadow: 0 16px 34px rgb(var(--brand-primary-rgb) / 0.16) !important;
+}
+
+.title-mark {
+  background: linear-gradient(180deg, var(--brand-primary) 0%, var(--brand-hover) 100%) !important;
+  box-shadow: 0 0 18px rgb(var(--brand-hover-rgb) / 0.32);
+}
+
+.instance-table {
+  :deep(th.el-table__cell) {
+    background: rgb(var(--brand-selected-rgb) / 0.7) !important;
+    color: var(--brand-active) !important;
+    border-bottom-color: rgb(var(--brand-selected-rgb) / 0.36) !important;
+  }
+
+  :deep(td.el-table__cell) {
+    background: rgba(255, 255, 255, 0.4) !important;
+    border-bottom-color: rgb(var(--brand-selected-rgb) / 0.24) !important;
+  }
+
+  :deep(.el-table__row:hover > td.el-table__cell) {
+    background: rgb(var(--brand-selected-rgb) / 0.56) !important;
+  }
+}
+
+.instance-id,
+.link-value {
+  color: var(--brand-active) !important;
+}
+
+.registry-detail-page.is-dark-detail {
+  background:
+    radial-gradient(circle at 28% -8%, rgb(var(--brand-hover-rgb) / 0.22), transparent 34%),
+    radial-gradient(circle at 80% 8%, rgb(var(--brand-primary-rgb) / 0.16), transparent 30%),
+    #0b1020 !important;
+
+  .project-hero,
+  .detail-card {
+    border-color: rgb(var(--brand-hover-rgb) / 0.2) !important;
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.78), rgb(var(--brand-primary-rgb) / 0.24)) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 24px 54px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .title-row h1,
+  .project-meta b,
+  .health-item strong,
+  .task-topline strong,
+  .section-title {
+    color: #f8fafc !important;
+  }
+
+  .project-meta,
+  .project-meta .el-icon,
+  .back-btn,
+  .health-label,
+  .health-item small,
+  .task-content small,
+  .table-footer {
+    color: #aeb8d4 !important;
+  }
+
+  .health-item,
+  .task-entry,
+  .summary-metric {
+    border-color: rgb(var(--brand-hover-rgb) / 0.2) !important;
+    background: rgba(15, 23, 42, 0.62) !important;
+  }
+
+  .instance-table {
+    :deep(th.el-table__cell) {
+      background: rgb(var(--brand-primary-rgb) / 0.36) !important;
+      color: var(--brand-selected-bg) !important;
+    }
+
+    :deep(td.el-table__cell) {
+      background: rgba(15, 23, 42, 0.54) !important;
+    }
+  }
+}
+
 </style>
 
 <style lang="scss">
+.sdk-config-dialog .el-dialog__body {
+  padding-top: 8px;
+}
+
+.sdk-config-dialog .sdk-config-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.sdk-config-dialog .sdk-credential-form {
+  padding: 16px 16px 2px;
+  border: 1px solid #e7ebf3;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.sdk-config-dialog .sdk-code-shell {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #111827;
+  background: #05070d;
+}
+
+.sdk-config-dialog .sdk-code-toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: #0b1020;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sdk-config-dialog .sdk-code-panel {
+  max-height: 430px;
+  min-height: 320px;
+  margin: 0;
+  overflow: auto;
+  padding: 18px 20px;
+  background: #05070d;
+  color: #e5e7eb;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.sdk-config-dialog .sdk-code-panel code {
+  display: block;
+  min-width: max-content;
+  white-space: pre;
+}
+
 [data-theme="dark"] .registry-detail-page {
   background:
-    radial-gradient(circle at 28% -8%, rgba(99, 102, 241, 0.18), transparent 34%),
+    radial-gradient(circle at 28% -8%, rgb(var(--brand-primary-rgb) / 0.18), transparent 34%),
     #0b1020;
   color: #e5e7eb;
 
@@ -1493,9 +2213,9 @@ function goCapabilitySync() {
   }
 
   .project-mark {
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.22), rgba(30, 41, 59, 0.8));
-    border-color: rgba(129, 140, 248, 0.45);
-    color: #c4b5fd;
+    background: linear-gradient(180deg, rgb(var(--brand-primary-rgb) / 0.22), rgba(30, 41, 59, 0.8));
+    border-color: rgb(var(--brand-hover-rgb) / 0.45);
+    color: var(--brand-selected-bg);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
   }
 
@@ -1508,7 +2228,7 @@ function goCapabilitySync() {
   }
 
   .code-tag {
-    color: #dbeafe;
+    color: var(--brand-selected-bg);
     border-color: rgba(148, 163, 184, 0.35);
     background: rgba(15, 23, 42, 0.82);
   }
@@ -1538,32 +2258,6 @@ function goCapabilitySync() {
     }
   }
 
-  .hero-actions {
-    .el-button:not(.el-button--primary):not(.danger-action) {
-      background: rgba(15, 23, 42, 0.86);
-      border-color: rgba(148, 163, 184, 0.25);
-      color: #cbd5e1;
-
-      &:hover {
-        background: rgba(30, 41, 59, 0.96);
-        border-color: rgba(129, 140, 248, 0.55);
-        color: #ffffff;
-      }
-    }
-
-    .danger-action {
-      color: #fca5a5;
-      border-color: rgba(248, 113, 113, 0.44);
-      background: rgba(127, 29, 29, 0.18);
-
-      &:hover {
-        color: #fecaca;
-        border-color: rgba(248, 113, 113, 0.72);
-        background: rgba(127, 29, 29, 0.32);
-      }
-    }
-  }
-
   .overview-item {
     border-right-color: rgba(148, 163, 184, 0.14);
     border-bottom-color: rgba(148, 163, 184, 0.14);
@@ -1582,7 +2276,7 @@ function goCapabilitySync() {
   }
 
   .link-value {
-    color: #a5b4fc;
+    color: var(--brand-disabled);
   }
 
   .info-icon,
@@ -1596,7 +2290,7 @@ function goCapabilitySync() {
 
   .code-line {
     code {
-      color: #dbeafe;
+      color: var(--brand-selected-bg);
     }
   }
 
@@ -1605,7 +2299,7 @@ function goCapabilitySync() {
   }
 
   .yaml-key {
-    color: #93c5fd;
+    color: var(--brand-disabled);
   }
 
   .yaml-bool {
@@ -1621,9 +2315,44 @@ function goCapabilitySync() {
     border-color: rgba(148, 163, 184, 0.18);
 
     &:hover:not(:disabled) {
-      border-color: rgba(129, 140, 248, 0.62);
+      border-color: rgb(var(--brand-hover-rgb) / 0.62);
       box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
     }
+  }
+
+  .health-item,
+  .task-entry,
+  .summary-metric {
+    background: rgba(15, 23, 42, 0.72);
+    border-color: rgba(148, 163, 184, 0.18);
+  }
+
+  .health-item.good {
+    background: rgba(20, 83, 45, 0.24);
+    border-color: rgba(34, 197, 94, 0.32);
+  }
+
+  .health-item.attention {
+    background: rgba(120, 53, 15, 0.2);
+    border-color: rgba(245, 158, 11, 0.32);
+  }
+
+  .health-icon {
+    background: rgb(var(--brand-primary-rgb) / 0.2);
+    color: var(--brand-selected-bg);
+  }
+
+  .health-item strong,
+  .task-topline strong,
+  .summary-metric strong {
+    color: #f8fafc;
+  }
+
+  .health-label,
+  .health-item small,
+  .task-content small,
+  .summary-metric span {
+    color: #94a3b8;
   }
 
   .instance-table {
@@ -1652,7 +2381,7 @@ function goCapabilitySync() {
   }
 
   .instance-id {
-    color: #a5b4fc;
+    color: var(--brand-disabled);
   }
 
   .status-pill {

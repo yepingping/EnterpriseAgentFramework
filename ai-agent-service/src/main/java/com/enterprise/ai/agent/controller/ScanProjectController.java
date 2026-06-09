@@ -5,6 +5,7 @@ import com.enterprise.ai.agent.registry.AiRegistryService;
 import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
+import com.enterprise.ai.agent.registry.SdkAccessCheckService;
 import com.enterprise.ai.agent.scan.ApiToolLinkStatus;
 import com.enterprise.ai.agent.scan.ScanModuleEntity;
 import com.enterprise.ai.agent.scan.ScanModuleService;
@@ -52,6 +53,7 @@ public class ScanProjectController {
     private final ScanProjectToolService scanProjectToolService;
     private final AiRegistryService aiRegistryService;
     private final RegistrySecurityService registrySecurityService;
+    private final SdkAccessCheckService sdkAccessCheckService;
     private final SensitiveDataScanOrchestrator sensitiveDataScanOrchestrator;
 
     @PostMapping
@@ -117,6 +119,33 @@ public class ScanProjectController {
             if (ex.getMessage() != null && ex.getMessage().contains("不存在")) {
                 return ResponseEntity.notFound().build();
             }
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @PatchMapping("/{id}/registry-credential")
+    public ResponseEntity<?> updateRegistryCredential(@PathVariable Long id,
+                                                      @RequestBody(required = false) RegistryCredentialUpdateRequest request) {
+        try {
+            ScanProjectEntity project = scanProjectService.getById(id);
+            registrySecurityService.savePrimaryCredential(
+                    project.getId(),
+                    project.getProjectCode(),
+                    request == null ? null : request.appKey(),
+                    request == null ? null : request.appSecret());
+            return ResponseEntity.ok(toDto(project, true));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/sdk-access-check")
+    public ResponseEntity<?> sdkAccessCheck(@PathVariable Long id,
+                                            @RequestBody(required = false)
+                                            SdkAccessCheckService.SdkAccessCheckRequest request) {
+        try {
+            return ResponseEntity.ok(sdkAccessCheckService.check(id, request));
+        } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
         }
     }
@@ -437,12 +466,14 @@ public class ScanProjectController {
                 : entity.getLastScannedAt().atZone(ZoneId.systemDefault()).toInstant().toString();
         String registryAppKey = null;
         String registryAppSecret = null;
+        boolean registryCredentialConfigured = false;
         if (includeRegistryCredential && StringUtils.hasText(entity.getProjectCode())) {
             Optional<RegistryCredentialEntity> cred =
                     registrySecurityService.findPrimaryActiveCredential(entity.getProjectCode());
             if (cred.isPresent()) {
+                registryCredentialConfigured = true;
                 registryAppKey = cred.get().getAppKey();
-                registryAppSecret = cred.get().getAppSecret();
+                registryAppSecret = isSdkBackedProject(entity) ? null : cred.get().getAppSecret();
             }
         }
         return new ScanProjectDTO(
@@ -471,9 +502,15 @@ public class ScanProjectController {
                 entity.getToolCount() == null ? 0 : entity.getToolCount(),
                 resolveRegistryStatusSummary(entity),
                 lastScanned,
+                registryCredentialConfigured,
                 registryAppKey,
                 registryAppSecret
         );
+    }
+
+    private boolean isSdkBackedProject(ScanProjectEntity entity) {
+        String kind = entity.getProjectKind();
+        return "REGISTERED".equalsIgnoreCase(kind) || "HYBRID".equalsIgnoreCase(kind);
     }
 
     private String resolveProjectDescription(ScanProjectEntity entity) {
@@ -688,6 +725,7 @@ public class ScanProjectController {
             int apiCount,
             String registryStatusSummary,
             String lastScannedAt,
+            boolean registryCredentialConfigured,
             String registryAppKey,
             String registryAppSecret
     ) {
@@ -698,6 +736,12 @@ public class ScanProjectController {
             String authApiKeyIn,
             String authApiKeyName,
             String authApiKeyValue
+    ) {
+    }
+
+    record RegistryCredentialUpdateRequest(
+            String appKey,
+            String appSecret
     ) {
     }
 

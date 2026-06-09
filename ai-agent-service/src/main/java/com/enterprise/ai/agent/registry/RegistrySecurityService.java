@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import javax.crypto.Mac;
@@ -48,6 +49,40 @@ public class RegistrySecurityService {
         } else {
             credentialMapper.updateById(entity);
         }
+    }
+
+    @Transactional
+    public RegistryCredentialEntity savePrimaryCredential(Long projectId,
+                                                          String projectCode,
+                                                          String appKey,
+                                                          String appSecret) {
+        if (projectId == null || !StringUtils.hasText(projectCode)) {
+            throw new IllegalArgumentException("registry project is required");
+        }
+        if (!StringUtils.hasText(appKey) || !StringUtils.hasText(appSecret)) {
+            throw new IllegalArgumentException("registry credential appKey/appSecret is required");
+        }
+        RegistryCredentialEntity entity = credentialMapper.selectOne(Wrappers.<RegistryCredentialEntity>lambdaQuery()
+                .eq(RegistryCredentialEntity::getProjectCode, projectCode.trim())
+                .eq(RegistryCredentialEntity::getStatus, "ACTIVE")
+                .orderByDesc(RegistryCredentialEntity::getUpdatedAt)
+                .last("limit 1"));
+        if (entity == null) {
+            entity = new RegistryCredentialEntity();
+            entity.setProjectId(projectId);
+            entity.setProjectCode(projectCode.trim());
+            entity.setCreatedAt(LocalDateTime.now());
+        }
+        entity.setAppKey(appKey.trim());
+        entity.setAppSecret(appSecret.trim());
+        entity.setStatus("ACTIVE");
+        entity.setUpdatedAt(LocalDateTime.now());
+        if (entity.getId() == null) {
+            credentialMapper.insert(entity);
+        } else {
+            credentialMapper.updateById(entity);
+        }
+        return entity;
     }
 
     public void updateEmbedPolicy(String projectCode,

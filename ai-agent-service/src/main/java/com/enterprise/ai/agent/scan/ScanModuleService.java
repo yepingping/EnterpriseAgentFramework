@@ -332,7 +332,7 @@ public class ScanModuleService {
     }
 
     /**
-     * SDK 同步写入的 {@code capability_metadata_json}：优先 {@code @AiCapability#module()}，其次 Controller 短类名 / domain。
+     * SDK 同步写入的 {@code capability_metadata_json}：优先 {@code @ReachCapability#module()}，其次 Controller 短类名 / domain。
      */
     private String sdkModuleNameFromMetadata(String capabilityMetadataJson) {
         if (!StringUtils.hasText(capabilityMetadataJson)) {

@@ -5,8 +5,9 @@ import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
 import com.enterprise.ai.agent.tools.schema.LlmJsonSchemaProvider;
-import com.enterprise.ai.skill.AiTool;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.reach.sdk.auth.ReachAiInvocationToken;
+import com.enterprise.ai.runtime.contract.AiTool;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,11 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
     private final List<ToolDefinitionParameter> parameters;
     private final HttpInvocationExtras invocationExtras;
     private final Duration requestTimeout;
+    private final InvocationTokenProvider invocationTokenProvider;
+
+    public interface InvocationTokenProvider {
+        String createToken(ToolDefinitionEntity definition, ToolExecutionContext context);
+    }
 
     public DynamicHttpAiTool(ToolDefinitionEntity definition, ObjectMapper objectMapper) {
         this(definition, objectMapper, null, null);
@@ -74,6 +80,13 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
     public DynamicHttpAiTool(ToolDefinitionEntity definition, ObjectMapper objectMapper,
                              HttpInvocationExtras invocationExtras,
                              Duration requestTimeout) {
+        this(definition, objectMapper, invocationExtras, requestTimeout, null);
+    }
+
+    public DynamicHttpAiTool(ToolDefinitionEntity definition, ObjectMapper objectMapper,
+                             HttpInvocationExtras invocationExtras,
+                             Duration requestTimeout,
+                             InvocationTokenProvider invocationTokenProvider) {
         this.definition = Objects.requireNonNull(definition, "definition must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.requestTimeout = normalizeRequestTimeout(requestTimeout);
@@ -87,6 +100,7 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
         this.invocationExtras = invocationExtras == null || invocationExtras.isEmpty()
                 ? HttpInvocationExtras.EMPTY
                 : invocationExtras;
+        this.invocationTokenProvider = invocationTokenProvider;
     }
 
     @Override
@@ -168,9 +182,21 @@ public class DynamicHttpAiTool implements AiTool, LlmJsonSchemaProvider {
     }
 
     private Map<String, String> invocationHeaders() {
-        Map<String, String> headers = new LinkedHashMap<>(contextHeaders(ToolExecutionContextHolder.get()));
+        ToolExecutionContext context = ToolExecutionContextHolder.get();
+        Map<String, String> headers = new LinkedHashMap<>(contextHeaders(context));
         headers.putAll(invocationExtras.extraHeaders());
+        String invocationToken = invocationToken(context);
+        if (invocationToken != null && !invocationToken.isBlank()) {
+            headers.put(ReachAiInvocationToken.HEADER_NAME, invocationToken);
+        }
         return headers;
+    }
+
+    private String invocationToken(ToolExecutionContext context) {
+        if (!isReachAiCapabilityHostProtocol() || invocationTokenProvider == null || context == null) {
+            return null;
+        }
+        return invocationTokenProvider.createToken(definition, context);
     }
 
     private Map<String, String> contextHeaders(ToolExecutionContext context) {

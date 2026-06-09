@@ -1,15 +1,22 @@
 package com.enterprise.ai.agent.agent;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
+import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.registry.AiRegistryService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
+import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
+import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
 import com.enterprise.ai.agent.runtime.AgentRuntimeRequest;
 import com.enterprise.ai.agent.runtime.AgentRuntimeSelector;
 import com.enterprise.ai.agent.runtime.AgentRuntimeValidationResult;
 import com.enterprise.ai.agent.runtime.RuntimeInstanceRoles;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -46,6 +53,9 @@ public class AgentReleaseValidationService {
     private final AgentRuntimeSelector runtimeSelector;
     private final ToolDefinitionService toolDefinitionService;
     private final AiRegistryService registryService;
+    private final PageActionRegistryMapper pageActionRegistryMapper;
+    private final RegistryCredentialMapper registryCredentialMapper;
+    private final ObjectMapper objectMapper;
 
     public AgentReleaseValidationResult validate(AgentDefinition definition) {
         AgentReleaseValidationResult.Builder report = AgentReleaseValidationResult.builder();
@@ -247,7 +257,7 @@ public class AgentReleaseValidationService {
             validateInteractionNode(id, config, report);
         }
         if ("PAGE_ACTION".equals(type)) {
-            validatePageActionNode(id, config, report);
+            validatePageActionNode(id, definition, config, report);
         }
         if ("VARIABLE_ASSIGN".equals(type)) {
             Object assignments = config.get("assignments");
@@ -412,6 +422,7 @@ public class AgentReleaseValidationService {
     }
 
     private void validatePageActionNode(String nodeId,
+                                        AgentDefinition definition,
                                         Map<String, Object> config,
                                         AgentReleaseValidationResult.Builder report) {
         String actionKey = text(config.get("actionKey"));
@@ -422,9 +433,128 @@ public class AgentReleaseValidationService {
         if (args != null && !(args instanceof Map<?, ?>)) {
             report.error("GRAPH_PAGE_ACTION_ARGS_INVALID", nodeId, "PAGE_ACTION args must be an object");
         }
+        PageActionRegistryEntity action = validatePageActionCatalogReference(nodeId, config, actionKey, report);
+        if (action != null) {
+            validatePageActionArgsSchema(nodeId, action, asMap(args), report);
+            validatePageActionAgentAuthorization(nodeId, definition, action, report);
+        }
         Object confirm = config.get("confirm");
         if (confirm != null && !(confirm instanceof Boolean)) {
             report.error("GRAPH_PAGE_ACTION_CONFIRM_INVALID", nodeId, "PAGE_ACTION confirm must be boolean");
+        }
+    }
+
+    private PageActionRegistryEntity validatePageActionCatalogReference(String nodeId,
+                                                                        Map<String, Object> config,
+                                                                        String actionKey,
+                                                                        AgentReleaseValidationResult.Builder report) {
+        String projectCode = text(config.get("projectCode"));
+        String pageKey = text(config.get("pageKey"));
+        if (!StringUtils.hasText(projectCode) || !StringUtils.hasText(pageKey) || !StringUtils.hasText(actionKey)) {
+            return null;
+        }
+        PageActionRegistryEntity action = pageActionRegistryMapper.selectOne(new LambdaQueryWrapper<PageActionRegistryEntity>()
+                .eq(PageActionRegistryEntity::getProjectCode, projectCode)
+                .eq(PageActionRegistryEntity::getPageKey, pageKey)
+                .eq(PageActionRegistryEntity::getActionKey, actionKey)
+                .last("LIMIT 1"));
+        if (action == null) {
+            report.error("GRAPH_PAGE_ACTION_CATALOG_MISSING", nodeId,
+                    "PAGE_ACTION 引用的页面动作目录不存在: " + projectCode + "/" + pageKey + "/" + actionKey);
+            return null;
+        }
+        if (!"ACTIVE".equalsIgnoreCase(action.getStatus())) {
+            report.error("GRAPH_PAGE_ACTION_CATALOG_INACTIVE", nodeId,
+                    "PAGE_ACTION 引用的页面动作不是 ACTIVE: " + projectCode + "/" + pageKey + "/" + actionKey);
+        }
+        return action;
+    }
+
+    private void validatePageActionArgsSchema(String nodeId,
+                                              PageActionRegistryEntity action,
+                                              Map<String, Object> args,
+                                              AgentReleaseValidationResult.Builder report) {
+        Map<String, Object> schema = readObject(action.getInputSchemaJson());
+        if (schema.isEmpty()) {
+            return;
+        }
+        Map<String, Object> properties = asMap(schema.get("properties"));
+        Set<String> required = new HashSet<>(readStringList(schema.get("required")));
+        for (String field : required) {
+            if (!args.containsKey(field)) {
+                report.error("GRAPH_PAGE_ACTION_ARG_REQUIRED_MISSING", nodeId,
+                        "PAGE_ACTION 缺少必填参数映射: " + field);
+            }
+        }
+        if (properties.isEmpty()) {
+            return;
+        }
+        boolean additionalAllowed = !Boolean.FALSE.equals(schema.get("additionalProperties"));
+        for (Map.Entry<String, Object> entry : args.entrySet()) {
+            String name = entry.getKey();
+            if (!properties.containsKey(name)) {
+                if (additionalAllowed) {
+                    report.warn("GRAPH_PAGE_ACTION_ARG_UNKNOWN", nodeId,
+                            "PAGE_ACTION 参数不在 inputSchema 中: " + name);
+                } else {
+                    report.error("GRAPH_PAGE_ACTION_ARG_UNKNOWN", nodeId,
+                            "PAGE_ACTION 参数不在 inputSchema 中: " + name);
+                }
+                continue;
+            }
+            validatePageActionLiteralType(nodeId, name, entry.getValue(), asMap(properties.get(name)), report);
+        }
+    }
+
+    private void validatePageActionLiteralType(String nodeId,
+                                               String name,
+                                               Object value,
+                                               Map<String, Object> property,
+                                               AgentReleaseValidationResult.Builder report) {
+        String type = normalize(text(property.get("type")), "");
+        if (!StringUtils.hasText(type) || value == null || value instanceof String) {
+            return;
+        }
+        boolean valid = switch (type) {
+            case "NUMBER" -> value instanceof Number;
+            case "INTEGER" -> value instanceof Integer || value instanceof Long;
+            case "BOOLEAN" -> value instanceof Boolean;
+            case "OBJECT" -> value instanceof Map<?, ?>;
+            case "ARRAY" -> value instanceof List<?>;
+            case "STRING" -> value instanceof String;
+            default -> true;
+        };
+        if (!valid) {
+            report.error("GRAPH_PAGE_ACTION_ARG_TYPE_INVALID", nodeId,
+                    "PAGE_ACTION 参数类型不匹配: " + name + " should be " + type.toLowerCase(Locale.ROOT));
+        }
+    }
+
+    private void validatePageActionAgentAuthorization(String nodeId,
+                                                      AgentDefinition definition,
+                                                      PageActionRegistryEntity action,
+                                                      AgentReleaseValidationResult.Builder report) {
+        List<String> actionAllowedAgents = readStringList(action.getAllowedAgentIdsJson());
+        if (!actionAllowedAgents.isEmpty() && !agentAllowed(definition, actionAllowedAgents)) {
+            report.error("GRAPH_PAGE_ACTION_AGENT_NOT_ALLOWED", nodeId,
+                    "PAGE_ACTION 动作目录未授权当前 Agent: " + action.getActionKey());
+        }
+        List<RegistryCredentialEntity> credentials = registryCredentialMapper.selectList(
+                new LambdaQueryWrapper<RegistryCredentialEntity>()
+                        .eq(RegistryCredentialEntity::getProjectCode, action.getProjectCode())
+                        .eq(RegistryCredentialEntity::getStatus, "ACTIVE"));
+        if (credentials == null || credentials.isEmpty()) {
+            report.error("GRAPH_PAGE_ACTION_EMBED_CREDENTIAL_MISSING", nodeId,
+                    "PAGE_ACTION 所属项目没有 ACTIVE 的前端 SDK / 嵌入凭证: " + action.getProjectCode());
+            return;
+        }
+        boolean allowed = credentials.stream()
+                .map(RegistryCredentialEntity::getAllowedAgentIdsJson)
+                .map(this::readStringList)
+                .anyMatch(allowedAgents -> allowedAgents.isEmpty() || agentAllowed(definition, allowedAgents));
+        if (!allowed) {
+            report.error("GRAPH_PAGE_ACTION_EMBED_AGENT_DENIED", nodeId,
+                    "PAGE_ACTION 所属项目凭证未授权当前 Agent 嵌入: " + action.getProjectCode());
         }
     }
 
@@ -726,6 +856,48 @@ public class AgentReleaseValidationService {
             return (Map<String, Object>) map;
         }
         return Map.of();
+    }
+
+    private Map<String, Object> readObject(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {
+            });
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private List<String> readStringList(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(this::text)
+                    .filter(StringUtils::hasText)
+                    .toList();
+        }
+        if (value instanceof String json && StringUtils.hasText(json)) {
+            try {
+                return objectMapper.readValue(json, new TypeReference<List<String>>() {
+                }).stream()
+                        .map(this::text)
+                        .filter(StringUtils::hasText)
+                        .toList();
+            } catch (Exception ignored) {
+                return List.of();
+            }
+        }
+        return List.of();
+    }
+
+    private boolean agentAllowed(AgentDefinition definition, List<String> allowedAgents) {
+        if (allowedAgents == null || allowedAgents.isEmpty()) {
+            return true;
+        }
+        String id = text(definition == null ? null : definition.getId());
+        String keySlug = text(definition == null ? null : definition.getKeySlug());
+        return allowedAgents.stream().anyMatch(item -> item.equals(id) || item.equals(keySlug));
     }
 
     private String text(Object value) {

@@ -132,6 +132,8 @@ AI 修改工作流走 `/api/agent/studio/edit-draft`，由 `WorkflowDraftEditSer
 
 `WorkflowCredentialController` 提供 `/api/agent/workflow-credentials`，`WorkflowCredentialService` 负责按项目或全局范围解析凭证。`agent_workflow_credential` 表用于 Studio 节点在调用 HTTP、MCP 或外部系统时复用凭证引用，避免把密钥写进画布。
 
+SDK 注册的 `REACHAI_CAPABILITY_HTTP` 业务能力不应在工作流凭证中保存浏览器临时 token。平台运行时会基于 `registry_project_credential` 为单次能力调用签发 `X-ReachAI-Invocation-Token`，业务系统 starter 验签后通过 `ReachAiInvocationContext` 暴露委托用户。
+
 ## 仍待补齐
 
 - Studio 节点类型已经很多，仍需要更稳定的用户级操作手册和节点能力矩阵。

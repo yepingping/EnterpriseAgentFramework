@@ -24,12 +24,47 @@ export interface PageActionEventView {
   appId: string
   agentId: string
   actionKey?: string
+  title?: string
+  argsJson?: string
   targetPageInstanceId?: string
   confirmRequired?: boolean
   status: string
+  resultJson?: string
   errorMessage?: string
   requestedAt?: string
   completedAt?: string
+}
+
+export interface PageRegistryView {
+  id: number
+  projectCode: string
+  appId: string
+  pageKey: string
+  name: string
+  routePattern?: string
+  origin?: string
+  currentPageInstanceId?: string
+  status: string
+  lastSeenAt?: string
+  metadataJson?: string
+}
+
+export interface PageActionRegistryView {
+  id: number
+  projectCode: string
+  appId: string
+  pageKey: string
+  actionKey: string
+  title: string
+  description?: string
+  confirmRequired?: boolean
+  inputSchemaJson?: string
+  outputSchemaJson?: string
+  sampleArgsJson?: string
+  allowedAgentIdsJson?: string
+  metadataJson?: string
+  status: string
+  lastSeenAt?: string
 }
 
 export interface EmbedChatEventView {
@@ -84,12 +119,88 @@ export interface EmbedCredentialPolicyPayload {
   status?: string
 }
 
+export interface PageActionDebugRequest {
+  sessionId?: string
+  args?: Record<string, unknown>
+}
+
+export interface PageActionDebugResponse {
+  requestId?: string
+  sessionId?: string
+  projectCode: string
+  pageKey: string
+  actionKey: string
+  targetPageInstanceId?: string
+  status: string
+  message: string
+}
+
+export interface PageActionReferenceView {
+  agentId: string
+  agentName?: string
+  agentKeySlug?: string
+  agentProjectCode?: string
+  agentEnabled?: boolean
+  nodeId: string
+  nodeName?: string
+  projectCode: string
+  pageKey: string
+  actionKey: string
+}
+
+export interface PageActionManualDeclarePayload {
+  projectCode: string
+  appId?: string
+  pageKey: string
+  pageName?: string
+  routePattern?: string
+  actionKey: string
+  title?: string
+  description?: string
+  confirmRequired?: boolean
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  sampleArgs?: Record<string, unknown>
+  allowedAgentIds?: string[]
+  status?: string
+}
+
+export interface PageActionManualDeclareResponse {
+  source: string
+  page: PageRegistryView
+  action: PageActionRegistryView
+}
+
 export function listEmbedSessions(params: Record<string, unknown> = {}) {
   return agentRequest.get<EmbedSessionView[]>('/api/platform/embed/sessions', { params })
 }
 
 export function listPageActionEvents(params: Record<string, unknown> = {}) {
   return agentRequest.get<PageActionEventView[]>('/api/platform/embed/page-actions', { params })
+}
+
+export function listPageRegistry(params: Record<string, unknown> = {}) {
+  return agentRequest.get<PageRegistryView[]>('/api/platform/embed/pages', { params })
+}
+
+export function listPageActionCatalog(params: Record<string, unknown> = {}) {
+  return agentRequest.get<PageActionRegistryView[]>('/api/platform/embed/page-actions/catalog', { params })
+}
+
+export function debugPageActionCatalog(id: number, payload: PageActionDebugRequest) {
+  return agentRequest.post<PageActionDebugResponse>(`/api/platform/embed/page-actions/catalog/${id}/debug`, payload)
+}
+
+export function getPageActionDebugResult(requestId: string) {
+  return agentRequest.get<PageActionEventView>(`/api/platform/embed/page-actions/debug/${requestId}`)
+}
+
+export function listPageActionReferences(id: number) {
+  return agentRequest.get<PageActionReferenceView[]>(`/api/platform/embed/page-actions/catalog/${id}/references`)
+}
+
+export function declarePageActionCatalog(payload: PageActionManualDeclarePayload) {
+  return agentRequest.post<PageActionManualDeclareResponse>('/api/platform/embed/page-actions/catalog/manual', payload)
 }
 
 export function listEmbedChatEvents(sessionId: string, limit = 200) {

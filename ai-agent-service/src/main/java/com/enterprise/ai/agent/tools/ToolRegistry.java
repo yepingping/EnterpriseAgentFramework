@@ -7,16 +7,16 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 工具注册中心（Spring 管理层）— 继承 ai-skill-sdk 的 ToolRegistry
+ * 工具注册中心（Spring 管理层）— 继承 ai-runtime-contract 的 ToolRegistry
  * <p>
  * 在 Spring 容器中自动发现和注册所有 AiTool Bean。
- * 底层能力由 sdk 的 {@link com.enterprise.ai.skill.ToolRegistry} 提供。
+ * 底层能力由 sdk 的 {@link com.enterprise.ai.runtime.contract.ToolRegistry} 提供。
  */
 @Slf4j
 @Component
-public class ToolRegistry extends com.enterprise.ai.skill.ToolRegistry {
+public class ToolRegistry extends com.enterprise.ai.runtime.contract.ToolRegistry {
 
-    public ToolRegistry(List<com.enterprise.ai.skill.AiTool> aiTools) {
+    public ToolRegistry(List<com.enterprise.ai.runtime.contract.AiTool> aiTools) {
         super(aiTools);
     }
 

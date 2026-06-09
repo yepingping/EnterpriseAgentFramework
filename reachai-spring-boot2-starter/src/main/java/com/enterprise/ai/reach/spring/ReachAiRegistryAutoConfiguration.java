@@ -8,6 +8,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
+
 @Configuration
 @EnableConfigurationProperties(ReachAiRegistryProperties.class)
 public class ReachAiRegistryAutoConfiguration {
@@ -41,9 +43,24 @@ public class ReachAiRegistryAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public ReachCapabilityInvocationVerifier reachCapabilityInvocationVerifier(ReachAiRegistryProperties properties) {
+        return new ReachCapabilityInvocationVerifier(properties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnClass(name = "org.springframework.web.bind.annotation.RestController")
-    public ReachCapabilityEndpoint reachCapabilityEndpoint(ReachCapabilityInvoker invoker) {
-        return new ReachCapabilityEndpoint(invoker);
+    public ReachCapabilityEndpoint reachCapabilityEndpoint(ReachCapabilityInvoker invoker,
+                                                           ReachCapabilityInvocationVerifier invocationVerifier,
+                                                           List<ReachAiSecurityContextBridge> securityContextBridges) {
+        return new ReachCapabilityEndpoint(invoker, invocationVerifier, securityContextBridges);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(name = "org.springframework.web.bind.annotation.ControllerAdvice")
+    public ReachAiInvocationExceptionHandler reachAiInvocationExceptionHandler() {
+        return new ReachAiInvocationExceptionHandler();
     }
 
     @Bean

@@ -22,7 +22,7 @@
 
 ```text
 ai-agent-service
-├── ai-skill-sdk      Tool 契约与注册中心
+├── ai-runtime-contract  Tool / Skill 运行时契约
 ├── ai-skills-service   知识检索 + scanner 核心代码
 ├── ai-model-service  LLM 调用网关（Feign / OpenAI 兼容代理）
 └── ai-admin-front    管理端入口（通过 REST API 调用本服务）

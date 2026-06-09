@@ -17,7 +17,7 @@ ReachAI 是面向 Java 企业系统的 AI 能力中台，不只是 Workflow Buil
 
 当前主线是：
 
-1. 业务系统通过 `ai-spring-boot-starter`、`@AiCapability`、`@AiParam` 主动注册项目、实例、能力和 SDK 图。
+1. 业务系统通过 `reachai-spring-boot2-starter`、`reachai-capability-sdk`、`@ReachCapability`、`@ReachParam` 主动注册项目、实例、能力和 SDK 图。
 2. 平台侧形成能力快照、字段级 diff、评审 apply/ignore，并沉淀到能力资产目录。
 3. Agent Studio 使用 `GraphSpec` 编排、AI 生成/局部修改、调试、发布和回放。
 4. Runtime 通过 `AgentRuntimeAdapter` 解耦 AgentScope、LangGraph4j 和未来运行时。
@@ -29,8 +29,9 @@ ReachAI 是面向 Java 企业系统的 AI 能力中台，不只是 Workflow Buil
 - `ai-agent-service/`: Agent、Studio、Runtime、注册中心、身份、开放协议等核心后端。
 - `ai-skills-service/`: 知识库、业务索引、语义文档等能力支撑服务。
 - `ai-model-service/`: 模型实例中心。
-- `ai-skill-sdk/`: 业务系统声明 AI 能力的 SDK 契约。
-- `ai-spring-boot-starter/`: Spring Boot 接入、扫描、注册和 SDK 图同步。
+- `reachai-capability-sdk/`: JDK8 兼容的业务能力声明 SDK 契约。
+- `reachai-spring-boot2-starter/`: Spring Boot 2 业务系统接入、扫描、注册和 SDK 图同步。
+- `ai-runtime-contract/`: 中台内部 Tool / Skill 运行时契约。
 - `sql/init.sql`: 当前唯一 SQL 基线入口。
 - `sql/upgrade-*.sql`: 已有环境升级脚本。
 - `docs/`: 当前权威知识库。

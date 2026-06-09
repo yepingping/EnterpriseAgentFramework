@@ -12,8 +12,8 @@
 
 ## Main Flow
 
-1. 业务系统引入 `ai-spring-boot-starter`。
-2. 业务方法或 Controller 使用 `@AiCapability`、`@AiParam`、`@AiOutput` 补充 AI 可理解的语义。
+1. 业务系统引入 `reachai-spring-boot2-starter` 和 `reachai-capability-sdk`。
+2. 业务方法或 Controller 使用 `@ReachCapability`、`@ReachParam`、`@ReachOutput` 补充 AI 可理解的语义。
 3. Starter 在启动时同步项目、实例、能力快照和 SDK 图。
 4. 平台形成字段级 diff、评审 apply/ignore，并沉淀正式能力资产。
 5. Agent Studio 基于能力资产编排 `GraphSpec`。
@@ -27,8 +27,9 @@
 - `ai-skills-service/`: 知识库、文件、chunk、业务索引、语义文档等能力支撑。
 - `ai-model-service/`: 模型实例中心和模型配置。
 - `ai-common/`: 通用模型、响应、工具类。
-- `ai-skill-sdk/`: 业务系统声明 AI 能力的 SDK 契约。
-- `ai-spring-boot-starter/`: Spring Boot 接入、扫描、注册、心跳、能力同步和 SDK 图同步。
+- `reachai-capability-sdk/`: JDK8 兼容的业务系统能力声明 SDK 契约。
+- `reachai-spring-boot2-starter/`: Spring Boot 2 接入、扫描、注册、心跳、能力同步和 SDK 图同步。
+- `ai-runtime-contract/`: 中台内部 Tool / Skill 运行时契约。
 - `sql/`: 根 SQL 基线与升级脚本。
 - `docs/`: 当前权威知识库。
 
@@ -105,14 +106,14 @@ AI 局部编辑工作流：
 
 ## Registration And Capability Assets
 
-推荐新系统和核心系统使用 `ai-spring-boot-starter` 主动注册。Controller/OpenAPI 扫描保留给存量系统和低改造场景。
+推荐新系统和核心系统使用 `reachai-spring-boot2-starter` 与 `reachai-capability-sdk` 主动注册。Controller/OpenAPI 扫描保留给存量系统和低改造场景。
 
 重要概念：
 
-- `@AiCapability`: 声明业务方法或接口可作为 Agent 能力。
-- `@AiParam`: 声明参数语义。
-- `EafRegistryProperties`: 使用 `eaf.registry`、`eaf.project`、`eaf.capability` 配置。
-- `EafCapabilityScanner`: 从 Spring MVC Mapping、注解和请求体结构生成能力描述。
+- `@ReachCapability`: 声明业务方法或接口可作为 Agent 能力。
+- `@ReachParam`: 声明参数语义。
+- `ReachAiRegistryProperties`: 使用 `reachai.registry`、`reachai.project`、`reachai.capability` 配置。
+- `ReachCapabilityBeanScanner`: 从 ReachAI 注解和请求体结构生成能力描述。
 - `tool_definition`: 统一承载 Tool 与粗粒度 Capability。
 
 ## Identity And Embed Chat

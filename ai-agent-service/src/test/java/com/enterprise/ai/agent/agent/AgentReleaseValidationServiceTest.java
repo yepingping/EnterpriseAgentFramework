@@ -2,12 +2,17 @@ package com.enterprise.ai.agent.agent;
 
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
+import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.registry.AiRegistryService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
+import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
+import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
 import com.enterprise.ai.agent.runtime.AgentRuntimeSelector;
 import com.enterprise.ai.agent.runtime.AgentRuntimeValidationResult;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +30,8 @@ class AgentReleaseValidationServiceTest {
     private AgentRuntimeSelector runtimeSelector;
     private ToolDefinitionService toolDefinitionService;
     private AiRegistryService registryService;
+    private PageActionRegistryMapper pageActionRegistryMapper;
+    private RegistryCredentialMapper registryCredentialMapper;
     private AgentReleaseValidationService service;
 
     @BeforeEach
@@ -32,10 +39,18 @@ class AgentReleaseValidationServiceTest {
         runtimeSelector = mock(AgentRuntimeSelector.class);
         toolDefinitionService = mock(ToolDefinitionService.class);
         registryService = mock(AiRegistryService.class);
-        service = new AgentReleaseValidationService(runtimeSelector, toolDefinitionService, registryService);
+        pageActionRegistryMapper = mock(PageActionRegistryMapper.class);
+        registryCredentialMapper = mock(RegistryCredentialMapper.class);
+        service = new AgentReleaseValidationService(runtimeSelector, toolDefinitionService, registryService,
+                pageActionRegistryMapper, registryCredentialMapper, new ObjectMapper());
         when(runtimeSelector.validate(any())).thenReturn(AgentRuntimeValidationResult.builder()
                 .valid(true)
                 .build());
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setProjectCode("team-system");
+        credential.setStatus("ACTIVE");
+        credential.setAllowedAgentIdsJson("[]");
+        when(registryCredentialMapper.selectList(any())).thenReturn(List.of(credential));
     }
 
     @Test
@@ -277,6 +292,93 @@ class AgentReleaseValidationServiceTest {
         assertFalse(result.valid());
         List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
         assertTrue(codes.contains("GRAPH_PAGE_ACTION_KEY_EMPTY"));
+    }
+
+    @Test
+    void validateRejectsPageActionCatalogReferenceThatIsNotActive() {
+        PageActionRegistryEntity removed = new PageActionRegistryEntity();
+        removed.setProjectCode("team-system");
+        removed.setPageKey("teamArchive.list");
+        removed.setActionKey("teamArchive.search");
+        removed.setStatus("REMOVED");
+        when(pageActionRegistryMapper.selectOne(any())).thenReturn(removed);
+
+        AgentReleaseValidationResult result = service.validate(baseDefinition(GraphSpec.builder()
+                .entry("search")
+                .finishNode("search")
+                .node(GraphSpec.Node.builder()
+                        .id("search")
+                        .type("PAGE_ACTION")
+                        .config(Map.of(
+                                "projectCode", "team-system",
+                                "pageKey", "teamArchive.list",
+                                "actionKey", "teamArchive.search",
+                                "args", Map.of("teamName", "input.teamName")))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("search").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("search").to("END").condition("always").build())
+                .build()));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_PAGE_ACTION_CATALOG_INACTIVE"));
+    }
+
+    @Test
+    void validateRejectsPageActionMissingRequiredSchemaArg() {
+        PageActionRegistryEntity action = activePageAction();
+        action.setInputSchemaJson("""
+                {"type":"object","required":["teamName"],"properties":{"teamName":{"type":"string"}}}
+                """);
+        when(pageActionRegistryMapper.selectOne(any())).thenReturn(action);
+
+        AgentReleaseValidationResult result = service.validate(baseDefinition(pageActionGraph(Map.of(
+                "projectCode", "team-system",
+                "pageKey", "teamArchive.list",
+                "actionKey", "teamArchive.search",
+                "args", Map.of()))));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_PAGE_ACTION_ARG_REQUIRED_MISSING"));
+    }
+
+    @Test
+    void validateRejectsPageActionWhenActionDoesNotAllowAgent() {
+        PageActionRegistryEntity action = activePageAction();
+        action.setAllowedAgentIdsJson("[\"another-agent\"]");
+        when(pageActionRegistryMapper.selectOne(any())).thenReturn(action);
+
+        AgentReleaseValidationResult result = service.validate(baseDefinition(pageActionGraph(Map.of(
+                "projectCode", "team-system",
+                "pageKey", "teamArchive.list",
+                "actionKey", "teamArchive.search",
+                "args", Map.of("teamName", "input.teamName")))));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_PAGE_ACTION_AGENT_NOT_ALLOWED"));
+    }
+
+    @Test
+    void validateRejectsPageActionWhenEmbedCredentialDoesNotAllowAgent() {
+        PageActionRegistryEntity action = activePageAction();
+        when(pageActionRegistryMapper.selectOne(any())).thenReturn(action);
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setProjectCode("team-system");
+        credential.setStatus("ACTIVE");
+        credential.setAllowedAgentIdsJson("[\"another-agent\"]");
+        when(registryCredentialMapper.selectList(any())).thenReturn(List.of(credential));
+
+        AgentReleaseValidationResult result = service.validate(baseDefinition(pageActionGraph(Map.of(
+                "projectCode", "team-system",
+                "pageKey", "teamArchive.list",
+                "actionKey", "teamArchive.search",
+                "args", Map.of("teamName", "input.teamName")))));
+
+        assertFalse(result.valid());
+        List<String> codes = result.errors().stream().map(AgentReleaseValidationResult.Item::code).toList();
+        assertTrue(codes.contains("GRAPH_PAGE_ACTION_EMBED_AGENT_DENIED"));
     }
 
     @Test
@@ -594,6 +696,29 @@ class AgentReleaseValidationServiceTest {
                 .runtimeType("LANGGRAPH4J")
                 .runtimePlacement("CENTRAL")
                 .graphSpec(graphSpec)
+                .build();
+    }
+
+    private PageActionRegistryEntity activePageAction() {
+        PageActionRegistryEntity action = new PageActionRegistryEntity();
+        action.setProjectCode("team-system");
+        action.setPageKey("teamArchive.list");
+        action.setActionKey("teamArchive.search");
+        action.setStatus("ACTIVE");
+        return action;
+    }
+
+    private GraphSpec pageActionGraph(Map<String, Object> config) {
+        return GraphSpec.builder()
+                .entry("search")
+                .finishNode("search")
+                .node(GraphSpec.Node.builder()
+                        .id("search")
+                        .type("PAGE_ACTION")
+                        .config(config)
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("search").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("search").to("END").condition("always").build())
                 .build();
     }
 }

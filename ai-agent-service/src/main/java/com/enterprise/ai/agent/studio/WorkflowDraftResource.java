@@ -22,4 +22,6 @@ public class WorkflowDraftResource {
     private String projectCode;
 
     private String description;
+
+    private java.util.Map<String, Object> metadata;
 }

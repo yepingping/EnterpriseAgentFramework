@@ -1,9 +1,9 @@
 package com.enterprise.ai.agent.skill;
 
-import com.enterprise.ai.skill.AiSkill;
-import com.enterprise.ai.skill.SkillKind;
-import com.enterprise.ai.skill.SkillMetadata;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.AiSkill;
+import com.enterprise.ai.runtime.contract.SkillKind;
+import com.enterprise.ai.runtime.contract.SkillMetadata;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 
 import java.util.List;
 import java.util.Map;
@@ -15,7 +15,7 @@ import java.util.Objects;
  * <p>
  * 之所以让 Skill 持有 Executor 引用而非 Executor 自己去找 Skill：
  * <ol>
- *   <li>保持 {@link com.enterprise.ai.skill.AiTool#execute} 签名不变，AiToolAgentAdapter 可无修改复用；</li>
+ *   <li>保持 {@link com.enterprise.ai.runtime.contract.AiTool#execute} 签名不变，AiToolAgentAdapter 可无修改复用；</li>
  *   <li>Skill 是"数据驱动"的运行期产物（从 tool_definition 反序列化），
  *       Executor 是 @Component，所以 Skill 反过来依赖 Executor 是正常的。</li>
  * </ol>

@@ -210,6 +210,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '注册中心 · 项目详情' },
       },
       {
+        path: 'registry/api-assets',
+        name: 'ApiAssetCatalog',
+        component: () => import('@/views/registry/ApiAssetCatalog.vue'),
+        meta: { title: '注册中心 · API 资产目录' },
+      },
+      {
         path: 'registry/capability-sync',
         name: 'CapabilitySyncDebug',
         component: () => import('@/views/registry/CapabilitySyncDebug.vue'),
@@ -222,9 +228,39 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Runtime 纳管' },
       },
       {
+        path: 'registry/projects/:projectCode/page-actions',
+        name: 'EmbedOpsMonitor',
+        component: () => import('@/views/settings/EmbedOpsMonitor.vue'),
+        meta: {
+          title: '前端页面管理',
+          breadcrumb: [
+            { title: '注册中心 · 项目详情' },
+            { title: '前端页面管理' },
+          ],
+        },
+      },
+      {
+        path: 'registry/projects/:projectCode/page-assistant',
+        name: 'PageAssistantWizard',
+        component: () => import('@/views/registry/PageAssistantWizard.vue'),
+        meta: { title: '创建页面助手' },
+      },
+      {
+        path: 'registry/projects/:projectCode/sdk-access',
+        name: 'SdkAccessWizard',
+        component: () => import('@/views/registry/SdkAccessWizard.vue'),
+        meta: { title: 'SDK 接入向导' },
+      },
+      {
+        path: 'registry/projects/:projectCode/page-actions/sessions',
+        name: 'EmbedSessionAudit',
+        component: () => import('@/views/settings/EmbedSessionAudit.vue'),
+        meta: { title: '嵌入式会话审计' },
+      },
+      {
         path: 'scan-project',
         name: 'ScanProjectList',
-        redirect: '/registry/projects',
+        redirect: '/registry/api-assets',
         meta: { title: '项目与 API 接入' },
       },
       {
@@ -292,12 +328,6 @@ const routes: RouteRecordRaw[] = [
         name: 'AuthProviderSettings',
         component: () => import('@/views/settings/AuthProviderSettings.vue'),
         meta: { title: '认证源配置' },
-      },
-      {
-        path: 'settings/embed-ops',
-        name: 'EmbedOpsMonitor',
-        component: () => import('@/views/settings/EmbedOpsMonitor.vue'),
-        meta: { title: '嵌入式对话审计' },
       },
       {
         path: 'settings/tool-acl',

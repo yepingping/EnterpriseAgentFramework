@@ -2,8 +2,13 @@ package com.enterprise.ai.agent.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.enterprise.ai.agent.agent.persist.AgentDefinitionEntity;
+import com.enterprise.ai.agent.agent.persist.AgentDefinitionMapper;
+import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.identity.EmbedChatEventEntity;
 import com.enterprise.ai.agent.identity.EmbedChatEventMapper;
+import com.enterprise.ai.agent.identity.EmbedAuditEventService;
 import com.enterprise.ai.agent.identity.EmbedRendererEntity;
 import com.enterprise.ai.agent.identity.EmbedRendererMapper;
 import com.enterprise.ai.agent.identity.EmbedSessionEntity;
@@ -11,6 +16,10 @@ import com.enterprise.ai.agent.identity.EmbedSessionMapper;
 import com.enterprise.ai.agent.identity.EmbedTokenRevocationService;
 import com.enterprise.ai.agent.identity.PageActionEventEntity;
 import com.enterprise.ai.agent.identity.PageActionEventMapper;
+import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
+import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
+import com.enterprise.ai.agent.identity.PageRegistryEntity;
+import com.enterprise.ai.agent.identity.PageRegistryMapper;
 import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
 import com.enterprise.ai.common.dto.ApiResult;
@@ -29,8 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/platform/embed")
@@ -43,6 +55,10 @@ public class PlatformEmbedOpsController {
     private final EmbedTokenRevocationService revocationService;
     private final EmbedRendererMapper rendererMapper;
     private final RegistryCredentialMapper credentialMapper;
+    private final PageRegistryMapper pageRegistryMapper;
+    private final PageActionRegistryMapper pageActionRegistryMapper;
+    private final AgentDefinitionMapper agentDefinitionMapper;
+    private final EmbedAuditEventService embedAuditEventService;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/sessions")
@@ -73,6 +89,219 @@ public class PlatformEmbedOpsController {
         if (StringUtils.hasText(status)) query.eq(PageActionEventEntity::getStatus, status);
         query.orderByDesc(PageActionEventEntity::getId).last("LIMIT " + safeLimit(limit));
         return ApiResult.ok(pageActionEventMapper.selectList(query));
+    }
+
+    @GetMapping("/pages")
+    public ApiResult<List<PageRegistryEntity>> pages(@RequestParam(required = false) String projectCode,
+                                                     @RequestParam(required = false) String status,
+                                                     @RequestParam(defaultValue = "100") Integer limit) {
+        LambdaQueryWrapper<PageRegistryEntity> query = Wrappers.lambdaQuery();
+        if (StringUtils.hasText(projectCode)) query.eq(PageRegistryEntity::getProjectCode, projectCode);
+        if (StringUtils.hasText(status)) query.eq(PageRegistryEntity::getStatus, status);
+        query.orderByDesc(PageRegistryEntity::getLastSeenAt).orderByDesc(PageRegistryEntity::getId).last("LIMIT " + safeLimit(limit));
+        return ApiResult.ok(pageRegistryMapper.selectList(query));
+    }
+
+    @GetMapping("/page-actions/catalog")
+    public ApiResult<List<PageActionRegistryEntity>> pageActionCatalog(@RequestParam(required = false) String projectCode,
+                                                                       @RequestParam(required = false) String pageKey,
+                                                                       @RequestParam(required = false) String status,
+                                                                       @RequestParam(defaultValue = "200") Integer limit) {
+        LambdaQueryWrapper<PageActionRegistryEntity> query = Wrappers.lambdaQuery();
+        if (StringUtils.hasText(projectCode)) query.eq(PageActionRegistryEntity::getProjectCode, projectCode);
+        if (StringUtils.hasText(pageKey)) query.eq(PageActionRegistryEntity::getPageKey, pageKey);
+        if (StringUtils.hasText(status)) query.eq(PageActionRegistryEntity::getStatus, status);
+        query.orderByDesc(PageActionRegistryEntity::getLastSeenAt).orderByDesc(PageActionRegistryEntity::getId).last("LIMIT " + safeLimit(limit));
+        return ApiResult.ok(pageActionRegistryMapper.selectList(query));
+    }
+
+    @PostMapping("/page-actions/catalog/manual")
+    public ApiResult<PageActionManualDeclareResponse> declarePageActionCatalog(@RequestBody PageActionManualDeclareRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("page action declaration request is required");
+        }
+        String projectCode = requireText(request.projectCode(), "projectCode");
+        String pageKey = requireText(request.pageKey(), "pageKey");
+        String actionKey = requireText(request.actionKey(), "actionKey");
+        String appId = StringUtils.hasText(request.appId()) ? request.appId().trim() : projectCode;
+        LocalDateTime now = LocalDateTime.now();
+
+        PageRegistryEntity page = new PageRegistryEntity();
+        page.setProjectCode(projectCode);
+        page.setAppId(appId);
+        page.setPageKey(pageKey);
+        page.setName(StringUtils.hasText(request.pageName()) ? request.pageName().trim() : pageKey);
+        page.setRoutePattern(StringUtils.hasText(request.routePattern()) ? request.routePattern().trim() : "");
+        page.setOrigin("manual");
+        page.setStatus("ACTIVE");
+        page.setLastSeenAt(now);
+        page.setMetadataJson(toJson(Map.of("source", "MANUAL_DRAFT")));
+        page.setCreatedAt(now);
+        page.setUpdatedAt(now);
+        pageRegistryMapper.upsert(page);
+
+        PageActionRegistryEntity action = new PageActionRegistryEntity();
+        action.setProjectCode(projectCode);
+        action.setAppId(appId);
+        action.setPageKey(pageKey);
+        action.setActionKey(actionKey);
+        action.setTitle(StringUtils.hasText(request.title()) ? request.title().trim() : actionKey);
+        action.setDescription(StringUtils.hasText(request.description()) ? request.description().trim() : "");
+        action.setConfirmRequired(Boolean.TRUE.equals(request.confirmRequired()));
+        action.setInputSchemaJson(toJson(request.inputSchema() == null ? Map.of() : request.inputSchema()));
+        action.setOutputSchemaJson(toJson(request.outputSchema() == null ? Map.of() : request.outputSchema()));
+        action.setSampleArgsJson(toJson(request.sampleArgs() == null ? Map.of() : request.sampleArgs()));
+        action.setAllowedAgentIdsJson(toJson(request.allowedAgentIds() == null ? List.of() : request.allowedAgentIds()));
+        action.setMetadataJson(toJson(Map.of("source", "MANUAL_DRAFT")));
+        action.setStatus(StringUtils.hasText(request.status()) ? request.status().trim() : "ACTIVE");
+        action.setLastSeenAt(now);
+        action.setCreatedAt(now);
+        action.setUpdatedAt(now);
+        pageActionRegistryMapper.upsert(action);
+
+        return ApiResult.ok(new PageActionManualDeclareResponse("MANUAL_DRAFT", page, action));
+    }
+
+    @GetMapping("/page-actions/catalog/{id}/references")
+    public ApiResult<List<PageActionReferenceView>> pageActionReferences(@PathVariable Long id) {
+        PageActionRegistryEntity action = pageActionRegistryMapper.selectById(id);
+        if (action == null) {
+            throw new IllegalArgumentException("page action catalog not found: " + id);
+        }
+        LambdaQueryWrapper<AgentDefinitionEntity> query = Wrappers.<AgentDefinitionEntity>lambdaQuery()
+                .isNotNull(AgentDefinitionEntity::getGraphSpecJson)
+                .orderByDesc(AgentDefinitionEntity::getUpdatedAt)
+                .last("LIMIT 500");
+        List<PageActionReferenceView> references = new ArrayList<>();
+        for (AgentDefinitionEntity agent : agentDefinitionMapper.selectList(query)) {
+            references.addAll(findPageActionReferences(action, agent));
+        }
+        return ApiResult.ok(references);
+    }
+
+    @PostMapping("/page-actions/catalog/{id}/debug")
+    public ApiResult<PageActionDebugResponse> debugPageAction(@PathVariable Long id,
+                                                              @RequestBody PageActionDebugRequest request) {
+        PageActionRegistryEntity action = pageActionRegistryMapper.selectById(id);
+        if (action == null) {
+            throw new IllegalArgumentException("page action catalog not found: " + id);
+        }
+        if (!"ACTIVE".equalsIgnoreCase(action.getStatus())) {
+            throw new IllegalArgumentException("page action is not ACTIVE: " + action.getActionKey());
+        }
+        EmbedSessionEntity session = resolveDebugSession(action, request);
+        if (session == null) {
+            return ApiResult.ok(new PageActionDebugResponse(
+                    null,
+                    null,
+                    action.getProjectCode(),
+                    action.getPageKey(),
+                    action.getActionKey(),
+                    null,
+                    "NO_ACTIVE_SESSION",
+                    "没有找到该页面当前在线的嵌入式会话，请先打开业务页面并初始化 ReachAI 前端 SDK。"));
+        }
+        String requestId = "debug-" + UUID.randomUUID();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", "page.action.requested");
+        payload.put("protocolVersion", "1.0");
+        payload.put("requestId", requestId);
+        payload.put("actionKey", action.getActionKey());
+        payload.put("title", StringUtils.hasText(action.getTitle()) ? action.getTitle() : action.getActionKey());
+        payload.put("args", request == null || request.args() == null ? Map.of() : request.args());
+        payload.put("confirm", false);
+        payload.put("debug", true);
+        payload.put("target", Map.of("pageInstanceId", session.getPageInstanceId()));
+        embedAuditEventService.recordPageActionDebugRequest(session, payload);
+        return ApiResult.ok(new PageActionDebugResponse(
+                requestId,
+                session.getSessionId(),
+                action.getProjectCode(),
+                action.getPageKey(),
+                action.getActionKey(),
+                session.getPageInstanceId(),
+                "REQUESTED",
+                "调试请求已创建，业务页面 SDK 轮询到请求后会执行并回传结果。"));
+    }
+
+    @GetMapping("/page-actions/debug/{requestId}")
+    public ApiResult<PageActionEventEntity> pageActionDebugResult(@PathVariable String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            throw new IllegalArgumentException("requestId is required");
+        }
+        PageActionEventEntity event = pageActionEventMapper.selectOne(Wrappers.<PageActionEventEntity>lambdaQuery()
+                .eq(PageActionEventEntity::getRequestId, requestId)
+                .last("LIMIT 1"));
+        if (event == null) {
+            throw new IllegalArgumentException("page action debug request not found: " + requestId);
+        }
+        return ApiResult.ok(event);
+    }
+
+    private EmbedSessionEntity resolveDebugSession(PageActionRegistryEntity action, PageActionDebugRequest request) {
+        if (request != null && StringUtils.hasText(request.sessionId())) {
+            EmbedSessionEntity session = sessionMapper.selectOne(Wrappers.<EmbedSessionEntity>lambdaQuery()
+                    .eq(EmbedSessionEntity::getSessionId, request.sessionId())
+                    .eq(EmbedSessionEntity::getStatus, "ACTIVE")
+                    .last("LIMIT 1"));
+            if (session != null) {
+                return session;
+            }
+        }
+        PageRegistryEntity page = pageRegistryMapper.selectOne(Wrappers.<PageRegistryEntity>lambdaQuery()
+                .eq(PageRegistryEntity::getProjectCode, action.getProjectCode())
+                .eq(PageRegistryEntity::getPageKey, action.getPageKey())
+                .eq(PageRegistryEntity::getStatus, "ACTIVE")
+                .last("LIMIT 1"));
+        if (page == null || !StringUtils.hasText(page.getCurrentPageInstanceId())) {
+            return null;
+        }
+        return sessionMapper.selectOne(Wrappers.<EmbedSessionEntity>lambdaQuery()
+                .eq(EmbedSessionEntity::getProjectCode, action.getProjectCode())
+                .eq(EmbedSessionEntity::getPageInstanceId, page.getCurrentPageInstanceId())
+                .eq(EmbedSessionEntity::getStatus, "ACTIVE")
+                .orderByDesc(EmbedSessionEntity::getId)
+                .last("LIMIT 1"));
+    }
+
+    private List<PageActionReferenceView> findPageActionReferences(PageActionRegistryEntity action,
+                                                                   AgentDefinitionEntity agent) {
+        if (agent == null || !StringUtils.hasText(agent.getGraphSpecJson())) {
+            return List.of();
+        }
+        GraphSpec graphSpec;
+        try {
+            graphSpec = objectMapper.readValue(agent.getGraphSpecJson(), GraphSpec.class);
+        } catch (Exception ignored) {
+            return List.of();
+        }
+        List<GraphSpec.Node> nodes = graphSpec.getNodes() == null ? List.of() : graphSpec.getNodes();
+        List<PageActionReferenceView> references = new ArrayList<>();
+        for (GraphSpec.Node node : nodes) {
+            if (!"PAGE_ACTION".equals(AgentGraphNodeType.normalize(node.getType()))) {
+                continue;
+            }
+            Map<String, Object> config = node.getConfig() == null ? Map.of() : node.getConfig();
+            String projectCode = text(config.get("projectCode"));
+            String pageKey = text(config.get("pageKey"));
+            String actionKey = text(config.get("actionKey"));
+            if (action.getProjectCode().equals(projectCode)
+                    && action.getPageKey().equals(pageKey)
+                    && action.getActionKey().equals(actionKey)) {
+                references.add(new PageActionReferenceView(
+                        agent.getId(),
+                        agent.getName(),
+                        agent.getKeySlug(),
+                        agent.getProjectCode(),
+                        Boolean.TRUE.equals(agent.getEnabled()),
+                        node.getId(),
+                        node.getName(),
+                        projectCode,
+                        pageKey,
+                        actionKey));
+            }
+        }
+        return references;
     }
 
     @GetMapping("/chat-events")
@@ -207,10 +436,15 @@ public class PlatformEmbedOpsController {
         }
     }
 
-    private void requireText(String value, String field) {
+    private String requireText(String value, String field) {
         if (!StringUtils.hasText(value)) {
             throw new IllegalArgumentException(field + " is required");
         }
+        return value.trim();
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private int safeLimit(Integer limit) {
@@ -228,6 +462,56 @@ public class PlatformEmbedOpsController {
             Map<String, Object> inputSchema,
             List<String> allowedAgentIds,
             String status) {
+    }
+
+    public record PageActionManualDeclareRequest(
+            String projectCode,
+            String appId,
+            String pageKey,
+            String pageName,
+            String routePattern,
+            String actionKey,
+            String title,
+            String description,
+            Boolean confirmRequired,
+            Map<String, Object> inputSchema,
+            Map<String, Object> outputSchema,
+            Map<String, Object> sampleArgs,
+            List<String> allowedAgentIds,
+            String status) {
+    }
+
+    public record PageActionManualDeclareResponse(
+            String source,
+            PageRegistryEntity page,
+            PageActionRegistryEntity action) {
+    }
+
+    public record PageActionDebugRequest(String sessionId, Map<String, Object> args) {
+    }
+
+    public record PageActionDebugResponse(
+            String requestId,
+            String sessionId,
+            String projectCode,
+            String pageKey,
+            String actionKey,
+            String targetPageInstanceId,
+            String status,
+            String message) {
+    }
+
+    public record PageActionReferenceView(
+            String agentId,
+            String agentName,
+            String agentKeySlug,
+            String agentProjectCode,
+            Boolean agentEnabled,
+            String nodeId,
+            String nodeName,
+            String projectCode,
+            String pageKey,
+            String actionKey) {
     }
 
     public record CredentialPolicyRequest(

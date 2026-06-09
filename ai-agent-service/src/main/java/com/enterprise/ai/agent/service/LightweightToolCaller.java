@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.service;
 
-import com.enterprise.ai.skill.AiTool;
+import com.enterprise.ai.runtime.contract.AiTool;
 import com.enterprise.ai.agent.tools.ToolRegistry;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionService;
 import lombok.RequiredArgsConstructor;

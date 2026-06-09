@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -307,6 +308,48 @@ public class EmbedChatController {
         }
     }
 
+    @GetMapping("/chat/sessions/{sessionId}/page-actions/pending")
+    public ResponseEntity<ApiResult<List<PageActionDispatchResponse>>> pendingPageActions(
+            @PathVariable String sessionId,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(defaultValue = "10") Integer limit) {
+        try {
+            EmbedTokenClaims claims = verifyBearer(authorization);
+            EmbedSessionEntity session = embedSessionService.requireActiveSession(sessionId, claims);
+            List<PageActionDispatchResponse> actions = embedAuditEventService
+                    .pendingPageActionRequests(session, limit == null ? 10 : limit)
+                    .stream()
+                    .map(this::toPageActionDispatch)
+                    .toList();
+            return ResponseEntity.ok(ApiResult.ok(actions));
+        } catch (EmbedTokenException ex) {
+            recordEmbedDeny(
+                    "EMBED_PAGE_ACTION_PENDING",
+                    "SESSION",
+                    sessionId,
+                    ex.getMessage(),
+                    Map.of("sessionId", sessionId, "operation", "PAGE_ACTION_PENDING"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResult.fail(401, ex.getMessage()));
+        }
+    }
+
+    private PageActionDispatchResponse toPageActionDispatch(com.enterprise.ai.agent.identity.PageActionEventEntity event) {
+        Map<String, Object> args = readObjectMap(event.getArgsJson());
+        Map<String, Object> target = new LinkedHashMap<>();
+        if (StringUtils.hasText(event.getTargetPageInstanceId())) {
+            target.put("pageInstanceId", event.getTargetPageInstanceId());
+        }
+        return new PageActionDispatchResponse(
+                "page.action.requested",
+                "1.0",
+                event.getRequestId(),
+                event.getActionKey(),
+                event.getTitle(),
+                args,
+                target,
+                Boolean.TRUE.equals(event.getConfirmRequired()));
+    }
+
     private ChatResponse executeMessage(String sessionId, String authorization, EmbedChatMessageRequest request) {
         EmbedTokenClaims claims = verifyBearer(authorization);
         EmbedSessionEntity session = embedSessionService.requireActiveSession(sessionId, claims);
@@ -348,6 +391,19 @@ public class EmbedChatController {
         return agentDefinitionService.findById(agentId)
                 .or(() -> agentDefinitionService.findByKeySlug(agentId))
                 .orElseThrow(() -> new IllegalArgumentException("agent not found: " + agentId));
+    }
+
+    private Map<String, Object> readObjectMap(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(json, new TypeReference<>() {
+            });
+            return parsed == null ? Map.of() : parsed;
+        } catch (Exception ignored) {
+            return Map.of();
+        }
     }
 
     private ResponseEntity<ApiResult<BusinessUserSyncResult>> markUser(String projectCode,
@@ -587,5 +643,16 @@ public class EmbedChatController {
     }
 
     public record PageActionResultResponse(String requestId, String status) {
+    }
+
+    public record PageActionDispatchResponse(
+            String type,
+            String protocolVersion,
+            String requestId,
+            String actionKey,
+            String title,
+            Map<String, Object> args,
+            Map<String, Object> target,
+            boolean confirm) {
     }
 }

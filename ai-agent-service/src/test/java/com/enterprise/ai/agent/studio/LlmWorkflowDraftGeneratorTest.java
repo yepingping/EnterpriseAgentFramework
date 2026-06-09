@@ -173,6 +173,143 @@ class LlmWorkflowDraftGeneratorTest {
         assertTrue(result.warnings().stream().anyMatch(item -> item.contains("archive_contract_tool")));
     }
 
+    @Test
+    void bindsSuppliedPageActionResourceToPageActionNode() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面查询助手",
+                  "nodes": [
+                    { "id": "collect_query", "kind": "userInput", "label": "收集查询条件", "config": { "fields": [{ "name": "teamName", "type": "string" }] } },
+                    { "id": "dispatch_page_query", "kind": "pageAction", "label": "触发页面查询", "config": { "ref": "qmssmp.teamArchive.search", "args": { "teamName": "{{ params.teamName }}" } } },
+                    { "id": "reply", "kind": "answer", "label": "回复", "config": { "template": "已为你触发页面查询" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "collect_query" },
+                    { "from": "collect_query", "to": "dispatch_page_query" },
+                    { "from": "dispatch_page_query", "to": "reply" },
+                    { "from": "reply", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("班组页面助手")
+                .requirement("根据用户输入触发班组档案页面查询")
+                .projectCode("qmssmp-teams-construction-service")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(WorkflowDraftResource.builder()
+                        .kind("PAGE_ACTION")
+                        .name("qmssmp.teamArchive.search")
+                        .qualifiedName("teamArchive.list/qmssmp.teamArchive.search")
+                        .projectCode("qmssmp-teams-construction-service")
+                        .description("查询班组档案")
+                        .metadata(Map.of(
+                                "pageKey", "teamArchive.list",
+                                "routePattern", "/teams/archive",
+                                "confirmRequired", false,
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "required", List.of("teamName"),
+                                        "properties", Map.of("teamName", Map.of("type", "string"))),
+                                "sampleArgs", Map.of("teamName", "一班")))
+                        .build()))
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        GraphSpec.Node pageAction = result.graphSpec().getNodes().stream()
+                .filter(node -> "dispatch_page_query".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("PAGE_ACTION", pageAction.getType());
+        assertEquals("qmssmp-teams-construction-service", pageAction.getConfig().get("projectCode"));
+        assertEquals("teamArchive.list", pageAction.getConfig().get("pageKey"));
+        assertEquals("qmssmp.teamArchive.search", pageAction.getConfig().get("actionKey"));
+        assertEquals("触发页面查询", pageAction.getConfig().get("title"));
+        assertEquals(Boolean.FALSE, pageAction.getConfig().get("confirm"));
+        assertEquals(Map.of("teamName", "{{ params.teamName }}"), pageAction.getConfig().get("args"));
+        assertEquals("page_action_result", pageAction.getConfig().get("outputAlias"));
+    }
+
+    @Test
+    void normalizesPageActionDraftWhenModelOmitsActionRefAndInventsExtractionAlias() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "班组档案查询助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "参数提取", "kind": "llm", "label": "参数提取", "config": { "userPrompt": "从 {{ params.question }} 提取查询条件", "outputFormat": "json", "structuredOutput": true } },
+                    {
+                      "id": "execute_query",
+                      "kind": "pageAction",
+                      "label": "执行查询",
+                      "config": {
+                        "args": {
+                          "teamName": "{{ extract_params_llm.result.teamName }}",
+                          "managerName": "{{ extract_params_llm.result.managerName }}"
+                        }
+                      },
+                      "inputs": [
+                        { "id": "teamName", "name": "teamName", "type": "string", "source": "extract_params_llm.result.teamName" },
+                        { "id": "managerName", "name": "managerName", "type": "string", "source": "extract_params_llm.result.managerName" }
+                      ]
+                    },
+                    { "id": "reply", "kind": "answer", "label": "回复结果", "config": { "template": "已触发查询" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "参数提取" },
+                    { "from": "参数提取", "to": "execute_query" },
+                    { "from": "execute_query", "to": "reply" },
+                    { "from": "reply", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("班组页面助手")
+                .requirement("根据用户输入触发班组档案页面查询")
+                .projectCode("qmssmp-teams-construction-service")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(WorkflowDraftResource.builder()
+                        .kind("PAGE_ACTION")
+                        .name("qmssmp.teamArchive.search")
+                        .qualifiedName("teamArchive.list/qmssmp.teamArchive.search")
+                        .projectCode("qmssmp-teams-construction-service")
+                        .description("查询班组档案")
+                        .metadata(Map.of(
+                                "pageKey", "teamArchive.list",
+                                "routePattern", "/teams/archive",
+                                "confirmRequired", false,
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "required", List.of("teamName"),
+                                        "properties", Map.of(
+                                                "teamName", Map.of("type", "string"),
+                                                "managerName", Map.of("type", "string"))),
+                                "sampleArgs", Map.of("teamName", "一班")))
+                        .build()))
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        GraphSpec.Node extractNode = result.graphSpec().getNodes().stream()
+                .filter(node -> "参数提取".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("extract_params_llm", extractNode.getConfig().get("outputAlias"));
+
+        GraphSpec.Node pageAction = result.graphSpec().getNodes().stream()
+                .filter(node -> "execute_query".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("qmssmp.teamArchive.search", pageAction.getConfig().get("actionKey"));
+        assertEquals("teamArchive.list", pageAction.getConfig().get("pageKey"));
+        assertEquals("extract_params_llm.result.teamName", pageAction.getInputs().get(0).getSource());
+    }
+
     private void assertCanvasContainsNode(WorkflowDraftGenerationResult result, String id, String kind) {
         Map<String, Object> node = canvasNodes(result).stream()
                 .filter(item -> id.equals(item.get("id")))

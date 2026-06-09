@@ -219,6 +219,9 @@ export interface InteractionNodeConfig {
 }
 
 export interface PageActionNodeConfig {
+  projectCode?: string
+  pageKey?: string
+  routePattern?: string
   actionKey: string
   title: string
   confirm: boolean

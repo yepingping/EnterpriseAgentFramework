@@ -4,8 +4,8 @@ import com.enterprise.ai.agent.acl.ToolAclDecision;
 import com.enterprise.ai.agent.acl.ToolAclService;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
 import com.enterprise.ai.agent.tools.ToolRegistry;
-import com.enterprise.ai.skill.AiTool;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.AiTool;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 

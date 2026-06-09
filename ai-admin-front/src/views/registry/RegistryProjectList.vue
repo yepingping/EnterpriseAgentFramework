@@ -298,7 +298,7 @@
           show-icon
           :closable="false"
           title="接入思路"
-          description="在本页创建 SDK 接入后，业务系统引入 ai-spring-boot-starter，配置注册中心地址与项目信息；应用启动后会自动注册项目、上报心跳、扫描 Controller 能力并同步到平台。"
+          description="在本页创建 SDK 接入后，业务系统引入 reachai-spring-boot2-starter 和 reachai-capability-sdk，配置注册中心地址与项目信息；应用启动后会自动注册项目、上报心跳、扫描 ReachAI 能力并同步到平台。"
         />
 
         <h3 class="guide-h3">1. Maven 依赖</h3>
@@ -549,14 +549,13 @@ const yamlSnippet = computed(() => {
   const env = p?.environment?.trim() || 'dev'
   const ctx = (p?.contextPath ?? '').trim()
   const appKey = p?.registryAppKey?.trim() || 'your-app-key'
-  const appSecret = p?.registryAppSecret?.trim() || 'your-app-secret'
   const ctxLine = ctx ? `\n    context-path: ${yamlSafeScalar(ctx)}` : ''
-  return `eaf:
+  return `reachai:
   registry:
     enabled: true
     url: ${registryUrl}
     app-key: ${yamlSafeScalar(appKey)}
-    app-secret: ${yamlSafeScalar(appSecret)}
+    app-secret: \${REACHAI_REGISTRY_APP_SECRET}
   project:
     code: ${yamlSafeScalar(code)}
     name: ${yamlSafeScalar(name)}
@@ -591,16 +590,21 @@ watch(guideDrawerVisible, async (open) => {
 const mavenSnippet = `<!-- 与睿池 ReachAI 根 pom 版本一致，或改为你们私服坐标 -->
 <dependency>
   <groupId>com.enterprise.ai</groupId>
-  <artifactId>ai-spring-boot-starter</artifactId>
+  <artifactId>reachai-capability-sdk</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+</dependency>
+<dependency>
+  <groupId>com.enterprise.ai</groupId>
+  <artifactId>reachai-spring-boot2-starter</artifactId>
   <version>1.0.0-SNAPSHOT</version>
 </dependency>`
 
 const javaSnippet = `@RestController
 @RequestMapping("/api/orders")
 public class OrderApi {
-    @AiCapability(name = "queryOrder", title = "查询订单")
+    @ReachCapability(name = "queryOrder", title = "查询订单", sideEffect = ReachSideEffectLevel.READ)
     @GetMapping("/{orderNo}")
-    public OrderDTO get(@AiParam("订单号") @PathVariable String orderNo) {
+    public OrderDTO get(@ReachParam(name = "orderNo", description = "订单号") @PathVariable String orderNo) {
         return orderService.get(orderNo);
     }
 }`
@@ -800,9 +804,8 @@ function goDetail(project: ScanProject) {
   gap: 16px;
   min-height: 100%;
   padding: 24px 28px 32px;
-  background:
-    radial-gradient(circle at 14% 8%, rgba(99, 102, 241, 0.08), transparent 26%),
-    linear-gradient(180deg, #f8f9ff 0%, #f6f7fb 42%, #f8fafc 100%);
+  background: var(--brand-page-bg);
+  background-size: 28px 28px, 28px 28px, auto, auto, auto, auto;
 }
 
 .page-hero {
@@ -840,13 +843,13 @@ function goDetail(project: ScanProject) {
 }
 
 .primary-action {
-  --el-button-bg-color: #5b3df5;
-  --el-button-border-color: #5b3df5;
-  --el-button-hover-bg-color: #4f34df;
-  --el-button-hover-border-color: #4f34df;
+  --el-button-bg-color: var(--brand-primary);
+  --el-button-border-color: var(--brand-primary);
+  --el-button-hover-bg-color: var(--brand-hover);
+  --el-button-hover-border-color: var(--brand-hover);
   min-width: 142px;
   border-radius: 8px;
-  box-shadow: 0 10px 20px rgba(91, 61, 245, 0.22);
+  box-shadow: 0 10px 20px rgb(var(--brand-primary-rgb) / 0.22);
 }
 
 .secondary-action {
@@ -895,14 +898,14 @@ function goDetail(project: ScanProject) {
     box-shadow 0.15s ease;
 
   &:hover {
-    border-color: #c7d2fe;
-    color: #5b3df5;
-    background: #f5f3ff;
-    box-shadow: 0 1px 6px rgba(91, 61, 245, 0.1);
+    border-color: var(--brand-selected-bg);
+    color: var(--brand-primary);
+    background: rgb(var(--brand-selected-rgb) / 0.5);
+    box-shadow: 0 1px 6px rgb(var(--brand-primary-rgb) / 0.1);
   }
 
   &:focus-visible {
-    outline: 2px solid rgba(91, 61, 245, 0.35);
+    outline: 2px solid rgb(var(--brand-primary-rgb) / 0.35);
     outline-offset: 2px;
   }
 }
@@ -938,7 +941,7 @@ function goDetail(project: ScanProject) {
   align-self: stretch;
   border-radius: 22px;
   overflow: hidden;
-  background: linear-gradient(135deg, #ede9fe, #eff6ff);
+  background: linear-gradient(135deg, var(--brand-selected-bg), rgba(255, 255, 255, 0.88));
 }
 
 .empty-illustration-img {
@@ -959,7 +962,7 @@ function goDetail(project: ScanProject) {
   height: 48px;
   border-radius: 14px;
   overflow: hidden;
-  background: linear-gradient(135deg, #ede9fe, #eff6ff);
+  background: linear-gradient(135deg, var(--brand-selected-bg), rgba(255, 255, 255, 0.88));
 }
 
 .banner-icon-img {
@@ -1054,15 +1057,15 @@ function goDetail(project: ScanProject) {
   }
 
   &.purple {
-    color: #6d28d9;
-    border-color: #eadcff;
-    background: linear-gradient(135deg, #f7f0ff, #ede9fe);
+    color: var(--brand-active);
+    border-color: rgb(var(--brand-hover-rgb) / 0.22);
+    background: linear-gradient(135deg, rgb(var(--brand-selected-rgb) / 0.7), rgba(255, 255, 255, 0.86));
   }
 
   &.blue {
-    color: #2563eb;
-    border-color: #d8e6ff;
-    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    color: var(--brand-primary);
+    border-color: rgb(var(--brand-primary-rgb) / 0.2);
+    background: linear-gradient(135deg, rgb(var(--brand-selected-rgb) / 0.72), rgba(255, 255, 255, 0.88));
   }
 
   &.green {
@@ -1105,11 +1108,11 @@ function goDetail(project: ScanProject) {
   }
 
   :deep(.el-tabs__item.is-active) {
-    color: #5b3df5;
+    color: var(--brand-primary);
   }
 
   :deep(.el-tabs__active-bar) {
-    background-color: #5b3df5;
+    background-color: var(--brand-primary);
   }
 }
 
@@ -1144,9 +1147,9 @@ function goDetail(project: ScanProject) {
   align-items: center;
   gap: 8px;
   padding: 10px 22px;
-  color: #5b3df5;
-  background: #f4f2ff;
-  border-bottom: 1px solid #e7e3ff;
+  color: var(--brand-primary);
+  background: rgb(var(--brand-selected-rgb) / 0.52);
+  border-bottom: 1px solid rgb(var(--brand-selected-rgb) / 0.72);
   font-size: 13px;
 }
 
@@ -1155,8 +1158,8 @@ function goDetail(project: ScanProject) {
 
   :deep(th.el-table__cell) {
     height: 44px;
-    color: #475467;
-    background: #f8f9fc;
+    color: var(--brand-active);
+    background: rgb(var(--brand-selected-rgb) / 0.34);
     font-size: 12px;
     font-weight: 700;
   }
@@ -1168,7 +1171,7 @@ function goDetail(project: ScanProject) {
   }
 
   :deep(.el-table__row:hover > td.el-table__cell) {
-    background: #fbfbff;
+    background: rgb(var(--brand-selected-rgb) / 0.22);
   }
 
   /* 固定操作列不透明，避免与下方行叠字 */
@@ -1179,7 +1182,7 @@ function goDetail(project: ScanProject) {
 
   :deep(th.el-table-fixed-column--right),
   :deep(th.el-table-fixed-column--left) {
-    background-color: #f8f9fc !important;
+    background-color: rgb(var(--brand-selected-rgb) / 0.34) !important;
   }
 
   :deep(td.el-table-fixed-column--right),
@@ -1193,7 +1196,7 @@ function goDetail(project: ScanProject) {
   :deep(.el-table__body tr.hover-row > td.el-table-fixed-column--left),
   :deep(.el-table__body tr.current-row > td.el-table-fixed-column--right),
   :deep(.el-table__body tr.current-row > td.el-table-fixed-column--left) {
-    background-color: #fbfbff !important;
+    background-color: rgb(var(--brand-selected-rgb) / 0.22) !important;
   }
 
   :deep(.el-table__fixed-right-patch) {
@@ -1235,11 +1238,11 @@ function goDetail(project: ScanProject) {
   min-width: 0;
 
   &:hover strong {
-    color: #5b3df5;
+    color: var(--brand-primary);
   }
 
   &:focus-visible {
-    outline: 2px solid rgba(91, 61, 245, 0.35);
+    outline: 2px solid rgb(var(--brand-primary-rgb) / 0.35);
     outline-offset: 2px;
     border-radius: 10px;
   }
@@ -1255,7 +1258,7 @@ function goDetail(project: ScanProject) {
   font-weight: 800;
 
   &.sdk {
-    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    background: linear-gradient(135deg, var(--brand-hover), var(--brand-active));
   }
 
   &.hybrid {
@@ -1301,10 +1304,10 @@ function goDetail(project: ScanProject) {
 }
 
 .status-scanning {
-  color: #2563eb;
+  color: var(--brand-primary);
 
   i {
-    background: #3b82f6;
+    background: var(--brand-primary);
   }
 }
 
@@ -1329,9 +1332,9 @@ function goDetail(project: ScanProject) {
   gap: 0;
   margin: 20px;
   padding: 28px 32px;
-  border: 1px dashed rgba(99, 102, 241, 0.28);
+  border: 1px dashed rgb(var(--brand-primary-rgb) / 0.28);
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(59, 130, 246, 0.03));
+  background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.06), rgb(var(--brand-hover-rgb) / 0.03));
 
   h3 {
     margin: 0 0 8px;
@@ -1365,7 +1368,7 @@ function goDetail(project: ScanProject) {
   font-size: 13px;
 
   :deep(.el-pagination.is-background .el-pager li.is-active) {
-    background-color: #5b3df5;
+    background-color: var(--brand-primary);
   }
 }
 
@@ -1406,7 +1409,7 @@ function goDetail(project: ScanProject) {
 
 .registry-project-page.is-dark {
   background:
-    radial-gradient(circle at 14% 8%, rgba(99, 102, 241, 0.18), transparent 28%),
+    radial-gradient(circle at 14% 8%, rgb(var(--brand-primary-rgb) / 0.18), transparent 28%),
     linear-gradient(180deg, #0a0a0f 0%, #10101a 48%, #0a0a0f 100%);
 
   .page-hero {
@@ -1426,21 +1429,21 @@ function goDetail(project: ScanProject) {
 
     &:hover {
       color: #e2e8f0;
-      background: rgba(99, 102, 241, 0.12);
-      border-color: rgba(99, 102, 241, 0.35);
+      background: rgb(var(--brand-primary-rgb) / 0.12);
+      border-color: rgb(var(--brand-primary-rgb) / 0.35);
     }
   }
 
   .primary-action {
-    box-shadow: 0 10px 22px rgba(99, 102, 241, 0.28);
+    box-shadow: 0 10px 22px rgb(var(--brand-primary-rgb) / 0.28);
   }
 
   .banner-links {
     :deep(.el-button.is-link) {
-      color: #a5b4fc;
+      color: var(--brand-disabled);
 
       &:hover {
-        color: #e0e7ff;
+        color: var(--brand-selected-bg);
       }
     }
   }
@@ -1453,8 +1456,8 @@ function goDetail(project: ScanProject) {
 
       &:hover {
         color: #e2e8f0;
-        background: rgba(99, 102, 241, 0.12);
-        border-color: rgba(99, 102, 241, 0.35);
+        background: rgb(var(--brand-primary-rgb) / 0.12);
+        border-color: rgb(var(--brand-primary-rgb) / 0.35);
       }
     }
   }
@@ -1470,7 +1473,7 @@ function goDetail(project: ScanProject) {
 
   .access-banner {
     background:
-      radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.13), transparent 34%),
+      radial-gradient(circle at 0% 0%, rgb(var(--brand-primary-rgb) / 0.13), transparent 34%),
       rgba(255, 255, 255, 0.035);
   }
 
@@ -1480,16 +1483,16 @@ function goDetail(project: ScanProject) {
     background: rgba(15, 23, 42, 0.92);
 
     &:hover {
-      color: #c7d2fe;
-      border-color: rgba(129, 140, 248, 0.45);
-      background: rgba(99, 102, 241, 0.18);
-      box-shadow: 0 1px 8px rgba(99, 102, 241, 0.16);
+      color: var(--brand-selected-bg);
+      border-color: rgb(var(--brand-hover-rgb) / 0.45);
+      background: rgb(var(--brand-primary-rgb) / 0.18);
+      box-shadow: 0 1px 8px rgb(var(--brand-primary-rgb) / 0.16);
     }
   }
 
   .banner-icon,
   .empty-illustration {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(34, 211, 238, 0.08));
+    background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.22), rgb(var(--brand-hover-rgb) / 0.08));
   }
 
   .banner-copy {
@@ -1527,9 +1530,9 @@ function goDetail(project: ScanProject) {
     }
 
     &.purple {
-      color: #c4b5fd;
-      border-color: rgba(196, 181, 253, 0.18);
-      background: rgba(124, 58, 237, 0.18);
+      color: var(--brand-selected-bg);
+      border-color: rgb(var(--brand-hover-rgb) / 0.22);
+      background: rgb(var(--brand-hover-rgb) / 0.18);
     }
 
     &.blue {
@@ -1574,11 +1577,11 @@ function goDetail(project: ScanProject) {
 
     :deep(.el-tabs__item.is-active),
     :deep(.el-tabs__item:hover) {
-      color: #c7d2fe;
+      color: var(--brand-selected-bg);
     }
 
     :deep(.el-tabs__active-bar) {
-      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      background: linear-gradient(90deg, var(--brand-primary), var(--brand-hover));
     }
 
     :deep(.el-tabs__nav-wrap::after) {
@@ -1634,22 +1637,22 @@ function goDetail(project: ScanProject) {
 
       &:hover {
         color: #e2e8f0;
-        background: rgba(99, 102, 241, 0.12);
-        border-color: rgba(99, 102, 241, 0.35);
+        background: rgb(var(--brand-primary-rgb) / 0.12);
+        border-color: rgb(var(--brand-primary-rgb) / 0.35);
       }
     }
   }
 
   .context-filter {
-    color: #c7d2fe;
-    background: rgba(99, 102, 241, 0.12);
-    border-bottom-color: rgba(99, 102, 241, 0.22);
+    color: var(--brand-selected-bg);
+    background: rgb(var(--brand-primary-rgb) / 0.12);
+    border-bottom-color: rgb(var(--brand-primary-rgb) / 0.22);
 
     :deep(.el-button.is-link) {
-      color: #a5b4fc;
+      color: var(--brand-disabled);
 
       &:hover {
-        color: #e0e7ff;
+        color: var(--brand-selected-bg);
       }
     }
   }
@@ -1660,7 +1663,7 @@ function goDetail(project: ScanProject) {
 
   .owner-cell :deep(.el-avatar) {
     border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(99, 102, 241, 0.22);
+    background: rgb(var(--brand-primary-rgb) / 0.22);
     color: #e2e8f0;
   }
 
@@ -1668,7 +1671,7 @@ function goDetail(project: ScanProject) {
     --el-table-bg-color: transparent;
     --el-table-tr-bg-color: transparent;
     --el-table-header-bg-color: rgba(255, 255, 255, 0.045);
-    --el-table-row-hover-bg-color: rgba(99, 102, 241, 0.08);
+    --el-table-row-hover-bg-color: rgb(var(--brand-primary-rgb) / 0.08);
     --el-table-border-color: rgba(255, 255, 255, 0.06);
     --el-table-text-color: #cbd5e1;
     --el-table-header-text-color: #94a3b8;
@@ -1693,7 +1696,7 @@ function goDetail(project: ScanProject) {
 
     :deep(.el-table__row:hover > td.el-table__cell),
     :deep(.el-table__body tr.hover-row > td.el-table__cell) {
-      background: rgba(99, 102, 241, 0.08) !important;
+      background: rgb(var(--brand-primary-rgb) / 0.08) !important;
     }
 
     :deep(.el-table__inner-wrapper),
@@ -1740,10 +1743,10 @@ function goDetail(project: ScanProject) {
     }
 
     :deep(.el-button.is-link) {
-      color: #a5b4fc;
+      color: var(--brand-disabled);
 
       &:hover {
-        color: #e0e7ff;
+        color: var(--brand-selected-bg);
       }
 
       &.is-disabled {
@@ -1756,7 +1759,7 @@ function goDetail(project: ScanProject) {
       color: #94a3b8;
 
       &:hover {
-        color: #c7d2fe;
+        color: var(--brand-selected-bg);
       }
     }
 
@@ -1806,7 +1809,7 @@ function goDetail(project: ScanProject) {
   }
 
   .project-name-cell-btn:hover strong {
-    color: #a5b4fc;
+    color: var(--brand-disabled);
   }
 
   .project-name-cell-btn:focus-visible {
@@ -1819,8 +1822,8 @@ function goDetail(project: ScanProject) {
   }
 
   .empty-state {
-    border-color: rgba(99, 102, 241, 0.22);
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(34, 211, 238, 0.04));
+    border-color: rgb(var(--brand-primary-rgb) / 0.22);
+    background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.1), rgb(var(--brand-hover-rgb) / 0.04));
 
     h3 {
       color: #e2e8f0;
@@ -1845,13 +1848,13 @@ function goDetail(project: ScanProject) {
     :deep(.el-pagination.is-background .btn-prev:hover),
     :deep(.el-pagination.is-background .btn-next:hover),
     :deep(.el-pagination.is-background .el-pager li:hover) {
-      color: #c7d2fe;
-      background: rgba(99, 102, 241, 0.12);
+      color: var(--brand-selected-bg);
+      background: rgb(var(--brand-primary-rgb) / 0.12);
     }
 
     :deep(.el-pagination.is-background .el-pager li.is-active) {
       color: #fff;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-hover));
     }
 
     :deep(.el-pagination.is-background .btn-prev.is-disabled),

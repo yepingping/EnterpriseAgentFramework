@@ -1,2 +1,0 @@
-org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-com.enterprise.ai.spring.registry.EafRegistryAutoConfiguration

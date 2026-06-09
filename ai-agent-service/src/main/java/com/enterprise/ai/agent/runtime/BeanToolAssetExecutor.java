@@ -2,7 +2,7 @@ package com.enterprise.ai.agent.runtime;
 
 import com.enterprise.ai.agent.capability.ToolAssetEntity;
 import com.enterprise.ai.agent.capability.ToolAssetExecutor;
-import com.enterprise.ai.skill.AiTool;
+import com.enterprise.ai.runtime.contract.AiTool;
 import org.springframework.stereotype.Component;
 
 import java.util.List;

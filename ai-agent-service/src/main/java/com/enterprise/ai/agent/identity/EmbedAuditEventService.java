@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -72,6 +73,29 @@ public class EmbedAuditEventService {
         pageActionEventMapper.updateById(entity);
         recordChatEvent(session.getSessionId(), "page.action.result", "page", null, result, null);
         return entity;
+    }
+
+    public PageActionEventEntity recordPageActionDebugRequest(EmbedSessionEntity session, Map<String, Object> request) {
+        if (session == null) {
+            throw new EmbedTokenException("debug page action session is required");
+        }
+        recordPageActionRequest(session, request == null ? Map.of() : request);
+        String requestId = asString(request == null ? null : request.get("requestId"));
+        return pageActionEventMapper.selectOne(Wrappers.<PageActionEventEntity>lambdaQuery()
+                .eq(PageActionEventEntity::getSessionId, session.getSessionId())
+                .eq(PageActionEventEntity::getRequestId, requestId)
+                .last("LIMIT 1"));
+    }
+
+    public List<PageActionEventEntity> pendingPageActionRequests(EmbedSessionEntity session, int limit) {
+        if (session == null) {
+            return List.of();
+        }
+        return pageActionEventMapper.selectList(Wrappers.<PageActionEventEntity>lambdaQuery()
+                .eq(PageActionEventEntity::getSessionId, session.getSessionId())
+                .eq(PageActionEventEntity::getStatus, "REQUESTED")
+                .orderByAsc(PageActionEventEntity::getId)
+                .last("LIMIT " + Math.max(1, Math.min(limit, 50))));
     }
 
     private void recordPageActionRequestIfPresent(EmbedSessionEntity session, UiRequestPayload uiRequest) {

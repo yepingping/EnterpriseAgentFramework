@@ -6,9 +6,9 @@ import com.enterprise.ai.agent.tool.governance.ToolRateLimiter;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import com.enterprise.ai.agent.tools.schema.LlmJsonSchemaProvider;
-import com.enterprise.ai.skill.AiSkill;
-import com.enterprise.ai.skill.AiTool;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.AiSkill;
+import com.enterprise.ai.runtime.contract.AiTool;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
@@ -126,7 +126,7 @@ public class AiToolAgentAdapter implements AgentTool {
     /**
      * Phase 3.0 护栏：IRREVERSIBLE Tool 的最小闸门。
      * <p>
-     * 未来扩展：可以在这里接入 HITL（{@link com.enterprise.ai.skill.HitlPolicy}）、
+     * 未来扩展：可以在这里接入 HITL（{@link com.enterprise.ai.runtime.contract.HitlPolicy}）、
      * ACL（{@code tool_acl}）、限流（Redis 令牌桶）等；当前仅拦截 IRREVERSIBLE + 未授权的组合。
      */
     private String checkSideEffectGate() {

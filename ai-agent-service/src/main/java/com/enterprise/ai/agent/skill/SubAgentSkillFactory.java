@@ -2,9 +2,9 @@ package com.enterprise.ai.agent.skill;
 
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionParameter;
-import com.enterprise.ai.skill.SideEffectLevel;
-import com.enterprise.ai.skill.SkillMetadata;
-import com.enterprise.ai.skill.ToolParameter;
+import com.enterprise.ai.runtime.contract.SideEffectLevel;
+import com.enterprise.ai.runtime.contract.SkillMetadata;
+import com.enterprise.ai.runtime.contract.ToolParameter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;

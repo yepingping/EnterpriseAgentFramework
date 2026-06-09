@@ -1,4 +1,9 @@
-import { createEafPageBridge, type EafPageBridge, type PageActionResult } from './eafPageBridge'
+import {
+  createEafPageBridge,
+  type EafPageActionDefinition,
+  type EafPageBridge,
+  type PageActionResult,
+} from './eafPageBridge'
 
 const SDK_VERSION = '1.0.0'
 
@@ -7,6 +12,8 @@ export interface EafChatOptions {
   mount: string | HTMLElement
   tokenProvider: () => Promise<string> | string
   bridge?: EafPageBridge
+  pageRegistry?: EafPageRegistryOptions
+  page?: EafPageDescriptor
   apiBase?: string
   stream?: boolean
   theme?: EafChatTheme
@@ -25,8 +32,24 @@ export interface EafChatClient {
   close(): void
   toggle(): void
   send(message: string): Promise<EafChatMessageResponse>
+  registerPageCatalog(): Promise<void>
   setContext(context: Record<string, unknown>): void
   destroy(): void
+}
+
+export interface EafPageRegistryOptions {
+  projectCode: string
+  appKey: string
+  appSecret: string
+  registerOnStart?: boolean
+}
+
+export interface EafPageDescriptor {
+  pageKey: string
+  name?: string
+  routePattern?: string
+  origin?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface EafChatTheme {
@@ -62,6 +85,17 @@ interface EmbedSessionResponse {
   principal?: Record<string, string>
 }
 
+interface PageActionDispatchRequest {
+  type: 'page.action.requested'
+  protocolVersion?: string
+  requestId: string
+  actionKey: string
+  title?: string
+  args?: Record<string, unknown>
+  target?: Record<string, unknown>
+  confirm?: boolean
+}
+
 export async function createEafChat(options: EafChatOptions): Promise<EafChatClient> {
   if (!options.agentId) throw new Error('agentId is required')
   const mount = typeof options.mount === 'string'
@@ -74,6 +108,10 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
   let token = await options.tokenProvider()
   let session = await createSession(apiBase, token, bridge)
   let context: Record<string, unknown> = { ...(options.context || {}) }
+  const pendingPageActions = new Set<string>()
+  let pendingPollInFlight = false
+  let pageCatalogTimer: number | undefined
+  let destroyed = false
 
   const root = document.createElement('div')
   root.className = 'eaf-chat'
@@ -104,6 +142,32 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
   const messagesEl = root.querySelector<HTMLElement>('.eaf-chat__messages')!
   const inputForm = root.querySelector<HTMLFormElement>('.eaf-chat__input')!
   const input = inputForm.elements.namedItem('message') as HTMLInputElement
+  const pendingPoller = window.setInterval(() => {
+    void pollPendingPageActions().catch(reportError)
+  }, 5000)
+  const unregisterPageCatalogChange = bridge.onActionDefinitionsChange(() => schedulePageCatalogRegistration())
+
+  schedulePageCatalogRegistration(0)
+
+  function reportPageCatalogError(error: unknown) {
+    const wrapped = { message: error instanceof Error ? error.message : String(error), cause: error }
+    options.onError?.(wrapped)
+    appendSystemMessage(messagesEl, wrapped.message)
+  }
+
+  function schedulePageCatalogRegistration(delay = 250) {
+    if (!options.pageRegistry || options.pageRegistry.registerOnStart === false || !options.page) return
+    if (pageCatalogTimer) window.clearTimeout(pageCatalogTimer)
+    pageCatalogTimer = window.setTimeout(() => {
+      pageCatalogTimer = undefined
+      void registerPageCatalog().catch(reportPageCatalogError)
+    }, delay)
+  }
+
+  async function registerPageCatalog() {
+    if (destroyed) return
+    await registerPageCatalogIfConfigured(apiBase, options, bridge)
+  }
 
   function syncOpenState() {
     const open = !root.classList.contains('eaf-chat--closed')
@@ -222,6 +286,45 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
     appendSystemMessage(messagesEl, wrapped.message)
   }
 
+  async function pollPendingPageActions() {
+    if (pendingPollInFlight || destroyed) return
+    pendingPollInFlight = true
+    try {
+      const active = await ensureSession()
+      const pendingUrl = `${apiBase}/api/embed/chat/sessions/${encodeURIComponent(active.sessionId)}/page-actions/pending?limit=10`
+      let requests: PageActionDispatchRequest[]
+      try {
+        requests = await getJson<PageActionDispatchRequest[]>(pendingUrl, token)
+      } catch (error) {
+        if (!isUnauthorized(error)) throw error
+        await refreshTokenForCurrentSession()
+        requests = await getJson<PageActionDispatchRequest[]>(pendingUrl, token)
+      }
+      for (const request of requests) {
+        if (!request?.requestId || pendingPageActions.has(request.requestId)) continue
+        pendingPageActions.add(request.requestId)
+        try {
+          options.onEvent?.({ type: 'page.action.requested', data: request })
+          const result = await bridge.handleEvent(request)
+          if (result) {
+            appendActionResult(messagesEl, result)
+            try {
+              await postPageActionResult(apiBase, active.sessionId, token, result)
+            } catch (error) {
+              if (!isUnauthorized(error)) throw error
+              await refreshTokenForCurrentSession()
+              await postPageActionResult(apiBase, active.sessionId, token, result)
+            }
+          }
+        } finally {
+          pendingPageActions.delete(request.requestId)
+        }
+      }
+    } finally {
+      pendingPollInFlight = false
+    }
+  }
+
   inputForm.addEventListener('submit', (event) => {
     event.preventDefault()
     const text = input.value
@@ -252,10 +355,15 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
       syncOpenState()
     },
     send,
+    registerPageCatalog,
     setContext(nextContext) {
       context = { ...context, ...(nextContext || {}) }
     },
     destroy() {
+      destroyed = true
+      unregisterPageCatalogChange()
+      if (pageCatalogTimer) window.clearTimeout(pageCatalogTimer)
+      window.clearInterval(pendingPoller)
       root.remove()
     },
   }
@@ -268,6 +376,41 @@ async function createSession(apiBase: string, token: string, bridge: EafPageBrid
     bridgeActions: bridge.registeredActions,
     sdkVersion: SDK_VERSION,
   }, token)
+}
+
+async function registerPageCatalogIfConfigured(apiBase: string, options: EafChatOptions, bridge: EafPageBridge) {
+  const registry = options.pageRegistry
+  const page = options.page
+  if (!registry || registry.registerOnStart === false || !page) return
+  if (!registry.projectCode || !registry.appKey || !registry.appSecret) return
+  await postJsonWithSignature(
+    `${apiBase}/api/registry/projects/${encodeURIComponent(registry.projectCode)}/pages/register`,
+    {
+      pageKey: page.pageKey,
+      name: page.name || page.pageKey,
+      routePattern: page.routePattern || bridge.route || location.pathname,
+      origin: page.origin || location.origin,
+      pageInstanceId: bridge.pageInstanceId,
+      replaceActions: true,
+      actions: bridge.actionDefinitions.map(toCatalogAction),
+      metadata: page.metadata || {},
+    },
+    registry,
+  )
+}
+
+function toCatalogAction(action: EafPageActionDefinition) {
+  return {
+    actionKey: action.actionKey,
+    title: action.title || action.actionKey,
+    description: action.description || '',
+    confirmRequired: action.confirmRequired === true,
+    inputSchema: action.inputSchema || {},
+    outputSchema: action.outputSchema || {},
+    sampleArgs: action.sampleArgs || {},
+    allowedAgentIds: action.allowedAgentIds || [],
+    metadata: action.metadata || {},
+  }
 }
 
 async function postJson<T>(url: string, body: unknown, token: string): Promise<T> {
@@ -284,6 +427,67 @@ async function postJson<T>(url: string, body: unknown, token: string): Promise<T
     throw requestError(payload.message || `Request failed: ${response.status}`, response.status)
   }
   return (payload.data ?? payload) as T
+}
+
+async function getJson<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || (payload.code && payload.code !== 200 && payload.code !== 0)) {
+    throw requestError(payload.message || `Request failed: ${response.status}`, response.status)
+  }
+  return (payload.data ?? payload) as T
+}
+
+async function postJsonWithSignature<T>(url: string, body: unknown, registry: EafPageRegistryOptions): Promise<T> {
+  const timestamp = String(Date.now())
+  const nonce = createNonce()
+  const signature = await hmacSha256Hex(registry.appSecret, `${registry.projectCode}\n${timestamp}\n${nonce}`)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-ReachAI-App-Key': registry.appKey,
+      'X-ReachAI-Timestamp': timestamp,
+      'X-ReachAI-Nonce': nonce,
+      'X-ReachAI-Signature': signature,
+    },
+    body: JSON.stringify(body),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || (payload.code && payload.code !== 200 && payload.code !== 0)) {
+    throw requestError(payload.message || `Page catalog registration failed: ${response.status}`, response.status)
+  }
+  return (payload.data ?? payload) as T
+}
+
+async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  if (!crypto?.subtle) {
+    throw new Error('Web Crypto API is required for ReachAI page catalog registration')
+  }
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(message))
+  return Array.from(new Uint8Array(digest))
+    .map((item) => item.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function createNonce(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 async function postSseJson(

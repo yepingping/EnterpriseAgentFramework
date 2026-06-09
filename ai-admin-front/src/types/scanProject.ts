@@ -108,6 +108,7 @@ export interface ScanProject {
   /** 列表展示状态摘要 */
   registryStatusSummary?: string | null
   /** 仅 GET /api/scan-projects/:id 返回；列表不含 */
+  registryCredentialConfigured?: boolean
   registryAppKey?: string | null
   registryAppSecret?: string | null
   lastScannedAt?: string | null
@@ -133,6 +134,36 @@ export interface ScanProjectAuthSaveRequest {
   authApiKeyIn?: ScanProjectAuthApiKeyIn | null
   authApiKeyName?: string | null
   authApiKeyValue?: string | null
+}
+
+/** PATCH /api/scan-projects/:id/registry-credential */
+export interface ScanProjectRegistryCredentialSaveRequest {
+  appKey: string
+  appSecret: string
+}
+
+export type SdkAccessCheckStatus = 'PASS' | 'WARN' | 'FAIL'
+
+export interface SdkAccessCheckRequest {
+  apiAssetId?: number | null
+  args?: Record<string, unknown>
+  gatewayBaseUrl?: string | null
+  embedTokenPath?: string | null
+}
+
+export interface SdkAccessCheckItem {
+  key: string
+  label: string
+  status: SdkAccessCheckStatus
+  message: string
+  evidence?: string | null
+}
+
+export interface SdkAccessCheckResponse {
+  projectId: number
+  projectCode: string
+  overallStatus: SdkAccessCheckStatus
+  checks: SdkAccessCheckItem[]
 }
 
 export interface ScanProjectScanResult {

@@ -2,12 +2,17 @@ package com.enterprise.ai.reach.spring;
 
 import com.enterprise.ai.reach.sdk.annotation.ReachCapability;
 import com.enterprise.ai.reach.sdk.annotation.ReachParam;
+import com.enterprise.ai.reach.sdk.auth.ReachAiInvocationClaims;
+import com.enterprise.ai.reach.sdk.auth.ReachAiInvocationToken;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ReachCapabilityEndpointTest {
 
@@ -23,10 +28,75 @@ class ReachCapabilityEndpointTest {
         assertEquals("contract:HT-002", result);
     }
 
+    @Test
+    void rejectsInvocationWithoutReachAiInvocationToken() {
+        ReachAiRegistryProperties properties = invocationProperties();
+        ReachCapabilityEndpoint endpoint = new ReachCapabilityEndpoint(
+                new ReachCapabilityInvoker(new Object[]{new ContractCapability()}),
+                new ReachCapabilityInvocationVerifier(properties),
+                Collections.<ReachAiSecurityContextBridge>emptyList());
+
+        Map<String, Object> arguments = new LinkedHashMap<String, Object>();
+        arguments.put("contractNo", "HT-002");
+
+        assertThrows(ReachAiInvocationUnauthorizedException.class, () -> endpoint.invoke(
+                "contract.query", null, arguments));
+    }
+
+    @Test
+    void verifiesInvocationTokenAndExposesDelegatedUserContext() {
+        ReachAiRegistryProperties properties = invocationProperties();
+        AtomicReference<ReachAiInvocationContext> bridged = new AtomicReference<ReachAiInvocationContext>();
+        ReachCapabilityEndpoint endpoint = new ReachCapabilityEndpoint(
+                new ReachCapabilityInvoker(new Object[]{new ContextAwareCapability()}),
+                new ReachCapabilityInvocationVerifier(properties),
+                Collections.<ReachAiSecurityContextBridge>singletonList(new ReachAiSecurityContextBridge() {
+                    @Override
+                    public Object runWith(ReachAiInvocationContext context, Invocation invocation) throws Exception {
+                        bridged.set(context);
+                        return invocation.proceed();
+                    }
+                }));
+        String token = ReachAiInvocationToken.sign("secret", ReachAiInvocationClaims.builder()
+                .projectCode("bzsdk")
+                .appKey("demo-key")
+                .capabilityName("contract.context")
+                .externalUserId("ADMIN001")
+                .globalUserId("emp-0001")
+                .agentId("team-agent")
+                .sessionId("session-1")
+                .traceId("trace-1")
+                .roles(Collections.singletonList("admin"))
+                .build(), System.currentTimeMillis(), 120);
+
+        Object result = endpoint.invoke("contract.context", token, Collections.<String, Object>emptyMap());
+
+        assertEquals("ADMIN001|team-agent", result);
+        assertEquals("ADMIN001", bridged.get().getExternalUserId());
+        assertEquals("team-agent", bridged.get().getAgentId());
+    }
+
+    private ReachAiRegistryProperties invocationProperties() {
+        ReachAiRegistryProperties properties = new ReachAiRegistryProperties();
+        properties.getProject().setCode("bzsdk");
+        properties.getRegistry().setAppKey("demo-key");
+        properties.getRegistry().setAppSecret("secret");
+        properties.getCapability().setRequireInvocationToken(true);
+        return properties;
+    }
+
     static class ContractCapability {
         @ReachCapability(name = "contract.query")
         public String query(@ReachParam(name = "contractNo", required = true) String contractNo) {
             return "contract:" + contractNo;
+        }
+    }
+
+    static class ContextAwareCapability {
+        @ReachCapability(name = "contract.context")
+        public String query() {
+            ReachAiInvocationContext context = ReachAiInvocationContextHolder.getRequired();
+            return context.getExternalUserId() + "|" + context.getAgentId();
         }
     }
 }

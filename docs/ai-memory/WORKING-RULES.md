@@ -19,7 +19,7 @@
 - 本项目默认不为旧数据做复杂兼容。
 - 当前正确设计优先，允许重命名、删字段、调整结构、改种子数据。
 - 如果 SQL 具有破坏性，必须在 upgrade SQL 注释和最终说明中明确写出影响。
-- 对外协议、SDK 契约、Maven artifact、`eaf.*` 配置、`X-EAF-*` header、`Eaf*` 类名属于兼容敏感边界，不能因为品牌或文案调整顺手改。
+- 新业务接入协议、SDK 契约、Maven artifact 使用 `reachai.*`、`X-ReachAI-*`、`Reach*`、`reachai-*`。历史 `eaf.*`、`X-EAF-*`、`Eaf*` 属于旧兼容边界；旧 `ai-spring-boot-starter` 已退役。
 
 ## SQL Change Policy
 
