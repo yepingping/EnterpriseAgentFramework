@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
 
 @Service
 public class ScanProjectService {
@@ -91,6 +92,8 @@ public class ScanProjectService {
         entity.setAuthApiKeyIn(null);
         entity.setAuthApiKeyName(null);
         entity.setAuthApiKeyValue(null);
+        entity.setAiCodingAccessKey(generateAiCodingAccessKey());
+        entity.setAiCodingAccessEnabled(true);
         projectMapper.insert(entity);
         return entity;
     }
@@ -172,6 +175,44 @@ public class ScanProjectService {
         }
         projectMapper.updateById(existing);
         return existing;
+    }
+
+    public ScanProjectEntity updateAiCodingAccess(Long id, AiCodingAccessUpdate request) {
+        if (request == null) {
+            throw new IllegalArgumentException("璇锋眰涓嶈兘涓虹┖");
+        }
+        ScanProjectEntity existing = getById(id);
+        boolean enabled = Boolean.TRUE.equals(request.enabled());
+        String accessKey = request.accessKey() == null ? "" : request.accessKey().trim();
+        if (enabled && accessKey.isBlank()) {
+            accessKey = generateAiCodingAccessKey();
+        }
+
+        LambdaUpdateWrapper<ScanProjectEntity> update = Wrappers.lambdaUpdate();
+        update.eq(ScanProjectEntity::getId, id)
+                .set(ScanProjectEntity::getAiCodingAccessEnabled, enabled)
+                .set(ScanProjectEntity::getAiCodingAccessKey, enabled ? accessKey : null);
+        projectMapper.update(null, update);
+
+        existing.setAiCodingAccessEnabled(enabled);
+        existing.setAiCodingAccessKey(enabled ? accessKey : null);
+        return existing;
+    }
+
+    public boolean matchesAiCodingAccessKey(Long id, String accessKey) {
+        if (id == null || accessKey == null || accessKey.isBlank()) {
+            return false;
+        }
+        ScanProjectEntity project = projectMapper.selectById(id);
+        if (project == null || !Boolean.TRUE.equals(project.getAiCodingAccessEnabled())) {
+            return false;
+        }
+        return accessKey.trim().equals(project.getAiCodingAccessKey());
+    }
+
+    public String generateAiCodingAccessKey() {
+        return "rac_" + UUID.randomUUID().toString().replace("-", "")
+                + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String normalizeAuthType(String value) {
@@ -872,6 +913,12 @@ public class ScanProjectService {
             String authApiKeyIn,
             String authApiKeyName,
             String authApiKeyValue
+    ) {
+    }
+
+    public record AiCodingAccessUpdate(
+            Boolean enabled,
+            String accessKey
     ) {
     }
 

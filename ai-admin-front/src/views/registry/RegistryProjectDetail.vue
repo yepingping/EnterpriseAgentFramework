@@ -230,13 +230,13 @@
         </el-form-item>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="项目编码">
-              <el-input v-model="editForm.projectCode" placeholder="如 order-service" />
+            <el-form-item label="项目编码" :required="isEditingSdkProject">
+              <el-input v-model="editForm.projectCode" :placeholder="isEditingSdkProject ? '如：customer-service' : '如 order-service'" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="接入方式">
-              <el-select v-model="editForm.projectKind" style="width: 100%">
+              <el-select v-model="editForm.projectKind" style="width: 100%" :disabled="editAccessLockedToSdk">
                 <el-option v-for="opt in projectKindOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
@@ -256,7 +256,7 @@
         </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="项目域名" required>
+            <el-form-item :label="isEditingSdkProject ? 'Base URL' : '项目域名'" required>
               <el-input v-model="editForm.baseUrl" placeholder="http://localhost:8080" />
             </el-form-item>
           </el-col>
@@ -268,23 +268,39 @@
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="Context Path">
-          <el-input v-model="editForm.contextPath" placeholder="/api" />
-        </el-form-item>
-        <el-form-item label="扫描路径" :required="editForm.projectKind !== 'REGISTERED'">
-          <el-input v-model="editForm.scanPath" placeholder="服务器上的绝对路径或 OpenAPI 所在目录" />
-          <div v-if="editForm.projectKind === 'REGISTERED'" class="form-hint">SDK 注册项目可不配置扫描路径。</div>
-        </el-form-item>
-        <el-form-item label="扫描方式" required>
-          <el-select v-model="editForm.scanType" style="width: 100%">
-            <el-option label="OpenAPI" value="openapi" />
-            <el-option label="Controller" value="controller" />
-            <el-option label="自动（SDK）" value="auto" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="editForm.scanType === 'openapi'" label="规范文件">
-          <el-input v-model="editForm.specFile" placeholder="可选，相对 scanPath；留空自动发现" />
-        </el-form-item>
+        <template v-if="isEditingSdkProject">
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="App Key">
+                <el-input v-model="editCredentialForm.appKey" placeholder="留空则不更新凭据" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="App Secret">
+                <el-input v-model="editCredentialForm.appSecret" show-password placeholder="留空则不更新凭据" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+        <template v-else>
+          <el-form-item label="Context Path">
+            <el-input v-model="editForm.contextPath" placeholder="/api" />
+          </el-form-item>
+          <el-form-item label="扫描路径" :required="editForm.projectKind !== 'REGISTERED'">
+            <el-input v-model="editForm.scanPath" placeholder="服务器上的绝对路径或 OpenAPI 所在目录" />
+            <div v-if="editForm.projectKind === 'REGISTERED'" class="form-hint">SDK 接入项目可不配置扫描路径。</div>
+          </el-form-item>
+          <el-form-item label="扫描方式" required>
+            <el-select v-model="editForm.scanType" style="width: 100%">
+              <el-option label="OpenAPI" value="openapi" />
+              <el-option label="Controller" value="controller" />
+              <el-option label="自动（SDK）" value="auto" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="editForm.scanType === 'openapi'" label="规范文件">
+            <el-input v-model="editForm.specFile" placeholder="可选，相对 scanPath；留空自动发现" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
@@ -323,6 +339,7 @@ import {
   getScanProjectOperationBlockers,
   getScanProjects,
   updateScanProject,
+  updateScanProjectRegistryCredential,
 } from '@/api/scanProject'
 import {
   listRegistryProjectInstances,
@@ -370,10 +387,11 @@ const offlineInstanceCount = computed(() =>
 const editDialogVisible = ref(false)
 const editSaving = ref(false)
 const deleteLoading = ref(false)
+const editAccessLockedToSdk = ref(false)
 
 const projectKindOptions: { value: ProjectKind; label: string }[] = [
   { value: 'SCAN', label: '扫描接入' },
-  { value: 'REGISTERED', label: 'SDK 注册' },
+  { value: 'REGISTERED', label: 'SDK 接入' },
   { value: 'HYBRID', label: '混合接入' },
 ]
 
@@ -421,6 +439,12 @@ function emptyEditForm(): ScanProjectUpsertRequest {
 }
 
 const editForm = reactive<ScanProjectUpsertRequest>(emptyEditForm())
+const editCredentialForm = reactive({
+  appKey: '',
+  appSecret: '',
+})
+
+const isEditingSdkProject = computed(() => editForm.projectKind === 'REGISTERED')
 
 const isSdkBackedProject = computed(() => {
   const kind = project.value?.projectKind || 'REGISTERED'
@@ -617,7 +641,7 @@ async function purgeOfflineInstances() {
   if (!projectCode.value || offlineInstanceCount.value === 0) return
   try {
     await ElMessageBox.confirm(
-      `将删除 ${offlineInstanceCount.value} 条 OFFLINE/STALE 状态的实例心跳记录。是否继续？`,
+      `将删除 ${offlineInstanceCount.value} 条离线/心跳超时状态的实例心跳记录。是否继续？`,
       '清理离线实例',
       { type: 'warning', confirmButtonText: '清理', cancelButtonText: '取消' },
     )
@@ -668,17 +692,21 @@ async function ensureScanOperationAllowed(): Promise<boolean> {
 function openEditDialog() {
   const p = project.value
   if (!p?.id) return
+  const projectKind = p.projectKind || 'REGISTERED'
+  editAccessLockedToSdk.value = projectKind === 'REGISTERED'
   editForm.name = p.name
   editForm.projectCode = p.projectCode ?? ''
-  editForm.projectKind = p.projectKind || 'REGISTERED'
+  editForm.projectKind = projectKind
   editForm.environment = p.environment || 'dev'
   editForm.owner = p.owner ?? ''
   editForm.visibility = p.visibility || 'PRIVATE'
   editForm.baseUrl = p.baseUrl
   editForm.contextPath = p.contextPath || ''
   editForm.scanPath = p.scanPath || ''
-  editForm.scanType = p.scanType || 'openapi'
+  editForm.scanType = projectKind === 'REGISTERED' ? 'auto' : p.scanType || 'openapi'
   editForm.specFile = p.specFile ?? ''
+  editCredentialForm.appKey = p.registryAppKey || ''
+  editCredentialForm.appSecret = ''
   editDialogVisible.value = true
 }
 
@@ -686,22 +714,41 @@ async function saveEditProject() {
   const p = project.value
   if (!p?.id) return
   if (!editForm.name.trim() || !editForm.baseUrl.trim()) {
-    ElMessage.warning('请填写项目名称与项目域名')
+    ElMessage.warning(isEditingSdkProject.value ? '请填写项目名称与 Base URL' : '请填写项目名称与项目域名')
     return
   }
-  if (editForm.projectKind !== 'REGISTERED' && !editForm.scanPath.trim()) {
+  if (isEditingSdkProject.value && !editForm.projectCode?.trim()) {
+    ElMessage.warning('请填写项目编码')
+    return
+  }
+  if (!isEditingSdkProject.value && editForm.projectKind !== 'REGISTERED' && !editForm.scanPath.trim()) {
     ElMessage.warning('非纯 SDK 项目请填写扫描路径')
+    return
+  }
+  const credentialAppKey = editCredentialForm.appKey.trim()
+  const credentialAppSecret = editCredentialForm.appSecret.trim()
+  if (isEditingSdkProject.value && (credentialAppKey || credentialAppSecret) && (!credentialAppKey || !credentialAppSecret)) {
+    ElMessage.warning('更新接入凭据时请同时填写 App Key 和 App Secret')
     return
   }
   editSaving.value = true
   try {
     const payload: ScanProjectUpsertRequest = {
       ...editForm,
-      specFile: editForm.scanType === 'openapi' ? editForm.specFile || null : null,
-      contextPath: editForm.contextPath || '',
+      projectKind: editAccessLockedToSdk.value ? 'REGISTERED' : editForm.projectKind,
+      scanType: isEditingSdkProject.value ? 'auto' : editForm.scanType,
+      scanPath: isEditingSdkProject.value ? '' : editForm.scanPath,
+      specFile: !isEditingSdkProject.value && editForm.scanType === 'openapi' ? editForm.specFile || null : null,
+      contextPath: isEditingSdkProject.value ? '' : editForm.contextPath || '',
       owner: editForm.owner || '',
     }
     const { data } = await updateScanProject(p.id, payload)
+    if (isEditingSdkProject.value && credentialAppKey && credentialAppSecret) {
+      await updateScanProjectRegistryCredential(p.id, {
+        appKey: credentialAppKey,
+        appSecret: credentialAppSecret,
+      })
+    }
     ElMessage.success('项目已更新')
     editDialogVisible.value = false
     const routeCode = projectCode.value

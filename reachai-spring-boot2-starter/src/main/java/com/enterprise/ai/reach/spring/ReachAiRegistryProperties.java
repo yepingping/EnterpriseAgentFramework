@@ -161,6 +161,8 @@ public class ReachAiRegistryProperties {
         private boolean scanBeans = true;
         private boolean syncOnStartup = true;
         private boolean requireInvocationToken = true;
+        private List<String> scanPackages = new ArrayList<String>();
+        private List<String> excludePackages = new ArrayList<String>();
 
         public boolean isScanBeans() {
             return scanBeans;
@@ -184,6 +186,22 @@ public class ReachAiRegistryProperties {
 
         public void setRequireInvocationToken(boolean requireInvocationToken) {
             this.requireInvocationToken = requireInvocationToken;
+        }
+
+        public List<String> getScanPackages() {
+            return scanPackages;
+        }
+
+        public void setScanPackages(List<String> scanPackages) {
+            this.scanPackages = scanPackages == null ? new ArrayList<String>() : scanPackages;
+        }
+
+        public List<String> getExcludePackages() {
+            return excludePackages;
+        }
+
+        public void setExcludePackages(List<String> excludePackages) {
+            this.excludePackages = excludePackages == null ? new ArrayList<String>() : excludePackages;
         }
     }
 

@@ -124,7 +124,7 @@
         </el-row>
         <el-form-item label="扫描路径" :required="form.projectKind !== 'REGISTERED'">
           <el-input v-model="form.scanPath" placeholder="服务器上的绝对路径" />
-          <div v-if="form.projectKind === 'REGISTERED'" class="form-hint">REGISTERED 项目由 SDK 注册能力，可不配置扫描路径。</div>
+          <div v-if="form.projectKind === 'REGISTERED'" class="form-hint">SDK 接入项目由业务系统同步能力，可不配置扫描路径。</div>
         </el-form-item>
         <el-form-item label="扫描方式" required>
           <el-radio-group v-model="form.scanType">

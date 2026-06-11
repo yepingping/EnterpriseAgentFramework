@@ -166,6 +166,63 @@ export interface SdkAccessCheckResponse {
   checks: SdkAccessCheckItem[]
 }
 
+export interface AiOnboardingManifest {
+  schema: string
+  project: {
+    id: number
+    name: string
+    projectCode?: string | null
+    projectKind?: string | null
+    environment?: string | null
+    baseUrl?: string | null
+    contextPath?: string | null
+    registryAppKey?: string | null
+    registryCredentialConfigured: boolean
+  }
+  aiCodingAccess: {
+    enabled: boolean
+    accessKey?: string | null
+  }
+  sdk: {
+    version: string
+    dependencies: Array<{
+      groupId: string
+      artifactId: string
+      version: string
+    }>
+    config: {
+      registryUrl: string
+      appKey?: string | null
+      appSecretEnv: string
+      projectCode?: string | null
+      projectName?: string | null
+      projectBaseUrl?: string | null
+      projectContextPath?: string | null
+      environment?: string | null
+    }
+  }
+  endpoints: {
+    skillPackageUrl: string
+    manifestUrl: string
+    sdkAccessCheckUrl: string
+    reconcileToolsUrl: string
+  }
+  security: {
+    appSecretEnv: string
+    message: string
+  }
+}
+
+export interface AiCodingAccessUpdateRequest {
+  enabled: boolean
+  accessKey?: string | null
+}
+
+export interface AiCodingAccessResponse {
+  enabled: boolean
+  accessKey?: string | null
+}
+
 export interface ScanProjectScanResult {
   projectId: number
   projectName: string
@@ -230,6 +287,8 @@ export interface ProjectToolInfo extends ToolInfo {
   sdkCapabilityReviewPending?: boolean
   /** GET tools 返回的敏感扫描摘要 */
   sensitiveData?: ScanToolSensitiveData | null
+  /** summary 视图不返回完整参数树，首屏用该字段展示参数数量 */
+  parameterCount?: number
 }
 
 /** POST /api/scan-projects/:id/tools/reconcile 汇总 */

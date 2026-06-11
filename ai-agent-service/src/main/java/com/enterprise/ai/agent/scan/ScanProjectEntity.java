@@ -69,6 +69,12 @@ public class ScanProjectEntity {
     /** 上次成功完成扫描时间，作增量基线 */
     private LocalDateTime lastScannedAt;
 
+    /** AI Coding tools use this project key to fetch the onboarding manifest without platform login. */
+    private String aiCodingAccessKey;
+
+    /** True when AI Coding manifest access is enabled for this project. */
+    private Boolean aiCodingAccessEnabled;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

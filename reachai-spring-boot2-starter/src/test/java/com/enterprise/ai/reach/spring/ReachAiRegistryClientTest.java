@@ -3,6 +3,11 @@ package com.enterprise.ai.reach.spring;
 import com.enterprise.ai.reach.sdk.annotation.ReachCapability;
 import com.enterprise.ai.reach.sdk.annotation.ReachParam;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -114,10 +119,72 @@ class ReachAiRegistryClientTest {
         assertDoesNotThrow(client::registerAndSync);
     }
 
+    @Test
+    void registerAndSyncIncludesPlainSpringMvcControllerEndpoints() {
+        ReachAiRegistryProperties properties = new ReachAiRegistryProperties();
+        properties.getRegistry().setUrl("https://reachai.example.com");
+        properties.getRegistry().setAppKey("demo-key");
+        properties.getRegistry().setAppSecret("demo-secret");
+        properties.getProject().setCode("demo");
+        properties.getProject().setBaseUrl("https://biz.example.com");
+
+        RecordingTransport transport = new RecordingTransport();
+        ReachAiRegistryClient client = new ReachAiRegistryClient(
+                properties,
+                new ReachCapabilityBeanScanner(new Object[]{new PlainController()}),
+                transport);
+
+        client.registerAndSync();
+
+        RecordingTransport.Request sync = transport.requests.get(2);
+        List<?> capabilities = (List<?>) sync.body.get("capabilities");
+        assertEquals(2, capabilities.size());
+
+        Map<?, ?> getItem = findCapability(capabilities, "plain_getStatus");
+        assertEquals("plain_getStatus", getItem.get("name"));
+        assertEquals("GET", getItem.get("httpMethod"));
+        assertEquals("/plain/getStatus", getItem.get("endpointPath"));
+        assertEquals(Boolean.FALSE, getItem.get("agentVisible"));
+        Map<?, ?> getMetadata = (Map<?, ?>) getItem.get("metadata");
+        assertEquals(Boolean.FALSE, getMetadata.get("declared"));
+        assertEquals("SpringMvcController", getMetadata.get("source"));
+        assertEquals("PlainController", getMetadata.get("module"));
+
+        Map<?, ?> postItem = findCapability(capabilities, "plain_create");
+        assertEquals("plain_create", postItem.get("name"));
+        assertEquals("POST", postItem.get("httpMethod"));
+        assertEquals("/plain/create", postItem.get("endpointPath"));
+        assertEquals("java.lang.String", postItem.get("requestBodyType"));
+    }
+
     static class ContractCapability {
         @ReachCapability(name = "contract.query", title = "Query contract")
         public String query(@ReachParam(description = "Contract number", required = true) String contractNo) {
             return contractNo;
+        }
+    }
+
+    private Map<?, ?> findCapability(List<?> capabilities, String name) {
+        for (Object item : capabilities) {
+            Map<?, ?> map = (Map<?, ?>) item;
+            if (name.equals(map.get("name"))) {
+                return map;
+            }
+        }
+        throw new AssertionError("capability not found: " + name);
+    }
+
+    @RestController
+    @RequestMapping("/plain")
+    static class PlainController {
+        @GetMapping("/getStatus")
+        public String getStatus(String keyword) {
+            return "ok";
+        }
+
+        @PostMapping("/create")
+        public String create(@RequestBody String payload) {
+            return payload;
         }
     }
 

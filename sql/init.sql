@@ -2290,6 +2290,11 @@ CALL add_idx_if_absent('business_index', 'idx_biz_embedding_instance', '`embeddi
 CALL add_col_if_absent('agent_definition', 'model_instance_id',
     'VARCHAR(64) DEFAULT NULL COMMENT ''Model instance id'' AFTER `tools_json`');
 
+
+-- AI Coding onboarding access key for external coding tools.
+CALL add_col_if_absent('scan_project', 'ai_coding_access_key', 'VARCHAR(160) DEFAULT NULL COMMENT ''AI Coding access key''');
+CALL add_col_if_absent('scan_project', 'ai_coding_access_enabled', 'TINYINT NOT NULL DEFAULT 0 COMMENT ''1=AI Coding manifest access enabled''');
+
 DROP PROCEDURE IF EXISTS bind_agent_model_instance_from_legacy;
 DROP PROCEDURE IF EXISTS bind_embedding_instance_from_legacy;
 DROP PROCEDURE IF EXISTS drop_col_if_exists;

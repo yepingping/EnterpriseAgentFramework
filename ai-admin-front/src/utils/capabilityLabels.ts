@@ -15,7 +15,7 @@ const CAPABILITY_DISPLAY_NAME_LABELS: Record<string, string> = {
 
 const MODULE_SOURCE_TYPE_LABELS: Record<string, string> = {
   BUILTIN: '内置',
-  SDK: 'SDK 注册',
+  SDK: 'SDK 接入',
   PLUGIN: '插件',
 }
 
@@ -40,7 +40,7 @@ const SIDE_EFFECT_LABELS: Record<string, string> = {
 
 export const MODULE_SOURCE_SELECT_OPTIONS = [
   { value: 'BUILTIN', label: '内置' },
-  { value: 'SDK', label: 'SDK 注册' },
+  { value: 'SDK', label: 'SDK 接入' },
   { value: 'PLUGIN', label: '插件' },
 ] as const
 

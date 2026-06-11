@@ -21,6 +21,9 @@ public class ReachCapabilityDescriptor {
     private int retryLimit;
     private String className;
     private String methodName;
+    private String httpMethod;
+    private String endpointPath;
+    private String requestBodyType;
     private String returnType;
     private List<ReachCapabilityParameter> parameters = new ArrayList<ReachCapabilityParameter>();
 
@@ -126,6 +129,30 @@ public class ReachCapabilityDescriptor {
 
     public void setMethodName(String methodName) {
         this.methodName = methodName;
+    }
+
+    public String getHttpMethod() {
+        return httpMethod;
+    }
+
+    public void setHttpMethod(String httpMethod) {
+        this.httpMethod = httpMethod;
+    }
+
+    public String getEndpointPath() {
+        return endpointPath;
+    }
+
+    public void setEndpointPath(String endpointPath) {
+        this.endpointPath = endpointPath;
+    }
+
+    public String getRequestBodyType() {
+        return requestBodyType;
+    }
+
+    public void setRequestBodyType(String requestBodyType) {
+        this.requestBodyType = requestBodyType;
     }
 
     public String getReturnType() {

@@ -1,0 +1,27 @@
+reachai:
+  registry:
+    enabled: true
+    url: ${REACHAI_REGISTRY_URL:http://localhost:18603}
+    app-key: ${REACHAI_REGISTRY_APP_KEY}
+    app-secret: ${REACHAI_REGISTRY_APP_SECRET}
+    heartbeat-interval-ms: ${REACHAI_REGISTRY_HEARTBEAT_INTERVAL_MS:30000}
+  project:
+    code: ${REACHAI_PROJECT_CODE}
+    name: ${REACHAI_PROJECT_NAME}
+    base-url: ${REACHAI_PROJECT_BASE_URL:http://localhost:8080}
+    context-path: ${REACHAI_PROJECT_CONTEXT_PATH:}
+    environment: ${REACHAI_PROJECT_ENV:dev}
+  capability:
+    scan-beans: true
+    # Only scan business-owned packages. Replace these examples after inspecting
+    # the application class, controller/service packages, and module names.
+    scan-packages:
+      - com.example.business
+    # Exclude framework, platform, third-party, starter, and shared infrastructure packages.
+    exclude-packages:
+      - org.springframework
+      - springfox
+      - org.springdoc
+      - com.enterprise.ai.reach
+      - com.example.framework
+    sync-on-startup: true

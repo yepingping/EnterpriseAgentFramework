@@ -7,7 +7,10 @@
         <p>{{ project?.name || projectCode }} · {{ project?.projectCode || projectCode }}</p>
       </div>
       <div class="header-actions">
-        <el-tag v-if="project" effect="plain">{{ project.projectKind }}</el-tag>
+        <el-tag v-if="project" effect="plain">{{ formatProjectKindLabel(project.projectKind || '-') }}</el-tag>
+        <el-button :icon="Connection" :loading="aiPromptLoading" @click="openAiOnboardingPrompt">
+          使用 AI 快速接入
+        </el-button>
         <el-button :icon="Refresh" :loading="loading" @click="loadAll">刷新状态</el-button>
       </div>
     </header>
@@ -19,7 +22,7 @@
       show-icon
       :closable="false"
       title="当前项目不是 SDK 接入项目"
-      description="SDK 接入向导仅适用于 SDK 注册或混合接入项目；扫描方式项目请继续使用 API 目录和扫描项目工作台。"
+      description="SDK 接入向导仅适用于 SDK 接入或混合接入项目；扫描方式项目请继续使用 API 目录和扫描项目工作台。"
     />
 
     <main class="wizard-shell">
@@ -224,12 +227,6 @@
         </section>
 
         <footer class="wizard-footer">
-          <span class="footer-help">
-            配置遇到问题？
-            <button type="button" @click="copyText('docs/14-班组系统接入ReachAI SDK实施步骤.md')">
-              复制接入文档路径
-            </button>
-          </span>
           <span class="footer-actions">
             <el-button :disabled="activeStepIndex === 0" @click="goPrev">上一步</el-button>
             <el-button type="primary" :disabled="activeStepIndex === steps.length - 1" @click="goNext">下一步</el-button>
@@ -237,6 +234,58 @@
         </footer>
       </section>
     </main>
+
+    <el-dialog
+      v-model="aiPromptDialogVisible"
+      title="使用 AI 编程工具快速接入"
+      width="880px"
+      class="ai-onboarding-dialog"
+      destroy-on-close
+    >
+      <el-alert
+        class="ai-onboarding-alert"
+        type="info"
+        show-icon
+        :closable="false"
+        title="复制提示词到 Cursor、Claude Code 或 Codex，让 AI 在业务系统代码仓库里完成 SDK 接入。"
+        description="提示词不会包含 App Secret；AI 只会被要求使用本机环境变量或密钥管理器。"
+      />
+      <section class="ai-coding-key-panel">
+        <div class="ai-coding-key-head">
+          <div>
+            <strong>AI Coding 接入秘钥</strong>
+            <span>用于 Cursor、Claude Code、Codex 免登录读取本项目接入清单。</span>
+          </div>
+          <el-switch v-model="aiCodingAccessEnabled" active-text="启用" inactive-text="关闭" />
+        </div>
+        <div class="ai-coding-key-form">
+          <el-input
+            v-model="aiCodingAccessKey"
+            :disabled="!aiCodingAccessEnabled"
+            show-password
+            placeholder="保存时为空会自动生成；清空并关闭后 AI 工具无法连接"
+          />
+          <el-button :loading="aiCodingAccessSaving" @click="saveAiCodingAccess">保存</el-button>
+          <el-button @click="clearAiCodingAccess">清空并关闭</el-button>
+        </div>
+      </section>
+      <el-tabs v-model="aiPromptTool" class="ai-tool-tabs">
+        <el-tab-pane label="Cursor" name="cursor" />
+        <el-tab-pane label="Claude Code" name="claude" />
+        <el-tab-pane label="Codex" name="codex" />
+      </el-tabs>
+      <el-input
+        class="ai-prompt-input"
+        :model-value="aiOnboardingPrompt"
+        type="textarea"
+        :rows="20"
+        readonly
+      />
+      <template #footer>
+        <el-button @click="aiPromptDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :icon="DocumentCopy" @click="copyText(aiOnboardingPrompt)">复制提示词</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -258,11 +307,18 @@ import {
 import { ElMessage } from 'element-plus'
 import { listApiAssets } from '@/api/apiAsset'
 import { listRegistryProjectInstances } from '@/api/registry'
-import { getScanProjectDetail, getScanProjects, runSdkAccessCheck } from '@/api/scanProject'
+import {
+  getAiOnboardingManifest,
+  getScanProjectDetail,
+  getScanProjects,
+  runSdkAccessCheck,
+  updateAiCodingAccess,
+} from '@/api/scanProject'
 import { useTheme } from '@/composables/useTheme'
 import type { ApiAssetItem } from '@/types/apiAsset'
 import type { ProjectInstance } from '@/types/registry'
-import type { ScanProject, SdkAccessCheckResponse, SdkAccessCheckStatus } from '@/types/scanProject'
+import type { AiOnboardingManifest, ScanProject, SdkAccessCheckResponse, SdkAccessCheckStatus } from '@/types/scanProject'
+import { formatProjectKindLabel } from '@/utils/projectLabels'
 
 type WizardStepKey = 'overview' | 'starter' | 'gateway' | 'backend-check' | 'frontend' | 'self-check'
 
@@ -275,6 +331,13 @@ const instances = ref<ProjectInstance[]>([])
 const apiAssets = ref<ApiAssetItem[]>([])
 const loading = ref(false)
 const checking = ref(false)
+const aiPromptLoading = ref(false)
+const aiCodingAccessSaving = ref(false)
+const aiPromptDialogVisible = ref(false)
+const aiPromptTool = ref<'cursor' | 'claude' | 'codex'>('cursor')
+const aiOnboardingManifest = ref<AiOnboardingManifest | null>(null)
+const aiCodingAccessEnabled = ref(false)
+const aiCodingAccessKey = ref('')
 const activeStep = ref<WizardStepKey>('overview')
 const selectedApiAssetId = ref<number | null>(null)
 const argsText = ref('{}')
@@ -362,7 +425,7 @@ const steps = computed(() => [
 const overviewCards = computed(() => [
   {
     label: '接入方式',
-    value: project.value?.projectKind || '-',
+    value: formatProjectKindLabel(project.value?.projectKind || '-'),
     desc: isSdkBackedProject.value ? '可使用 SDK 接入向导' : '请使用扫描项目工作台',
     tone: isSdkBackedProject.value ? 'good' : 'warn',
     icon: Box,
@@ -434,6 +497,7 @@ const starterApplicationSnippet = computed(() => `reachai:
     url: \${REACHAI_REGISTRY_URL:http://localhost:18603}
     app-key: ${project.value?.registryAppKey || 'your-app-key'}
     app-secret: \${REACHAI_REGISTRY_APP_SECRET}
+    heartbeat-interval-ms: 30000
   project:
     code: ${project.value?.projectCode || projectCode.value}
     name: ${project.value?.name || 'your-service-name'}
@@ -441,7 +505,7 @@ const starterApplicationSnippet = computed(() => `reachai:
     context-path: ${project.value?.contextPath || ''}
     environment: ${project.value?.environment || 'dev'}
   capability:
-    scan-controller: true
+    scan-beans: true
     sync-on-startup: true`)
 
 const highlightedStarterDependencySnippet = computed(() => highlightXmlCode(starterDependencySnippet.value))
@@ -487,11 +551,90 @@ createEafChat({
 
 const highlightedFrontendSnippet = computed(() => highlightJsCode(frontendSnippet.value))
 
+const aiOnboardingPrompt = computed(() => {
+  const manifest = aiOnboardingManifest.value
+  const p = project.value
+  const projectId = manifest?.project.id || p?.id || ''
+  const code = manifest?.project.projectCode || p?.projectCode || projectCode.value
+  const name = manifest?.project.name || p?.name || code
+  const appKey = manifest?.project.registryAppKey || p?.registryAppKey || 'your-app-key'
+  const secretEnv = manifest?.security.appSecretEnv || 'REACHAI_REGISTRY_APP_SECRET'
+  const skillPackageUrl = manifest?.endpoints.skillPackageUrl || '/api/ai-assist/skills/reachai-onboarding/latest.zip'
+  const platformManifestUrl = manifest?.endpoints.manifestUrl || `/api/ai-assist/projects/${projectId}/onboarding-manifest`
+  const externalManifestUrl =
+    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
+      ? appendQuery(platformManifestUrl, 'aiCodingKey', aiCodingAccessKey.value.trim())
+      : platformManifestUrl
+  const platformUrl = manifest?.sdk.config.registryUrl || window.location.origin
+  const aiCodingKeyLine =
+    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
+      ? `AI Coding 接入秘钥：${aiCodingAccessKey.value.trim()}`
+      : 'AI Coding 接入秘钥：已关闭，外部 AI 工具无法免登录读取 manifest'
+  const toolName =
+    aiPromptTool.value === 'cursor'
+      ? 'Cursor'
+      : aiPromptTool.value === 'claude'
+        ? 'Claude Code'
+        : 'Codex'
+  const installHint =
+    aiPromptTool.value === 'cursor'
+      ? '如果当前工具不支持直接安装 Skill，请下载 zip 后读取其中的 SKILL.md，并把 references/、templates/、scripts/ 作为本次任务的工作资料。'
+      : aiPromptTool.value === 'claude'
+        ? '如果可以写入项目级 Skill，请把 zip 解压到当前业务仓库的 .claude/skills/reachai-onboarding/；否则读取 SKILL.md 后按其中流程执行。'
+        : '如果当前 Codex 环境支持项目 skill，请安装或引用该 zip；否则读取 SKILL.md，并把它作为本次任务的最高优先级接入规则。'
+
+  return `你现在要在当前业务系统代码仓库中接入 ReachAI AI 能力中台，请使用 ${toolName} 完成。
+
+请先下载并使用 ReachAI AI 快速接入包：
+- Skill 包地址：${skillPackageUrl}
+- 项目接入清单：${externalManifestUrl}
+- ReachAI 平台地址：${platformUrl}
+- 项目 ID：${projectId}
+- 项目编码：${code}
+- 项目名称：${name}
+- App Key：${appKey}
+- ${aiCodingKeyLine}
+- App Secret 环境变量：${secretEnv}
+
+安装/读取要求：
+${installHint}
+
+安全要求：
+- 不要让我把 App Secret 粘贴到聊天上下文。
+- 不要把 App Secret 写入 Git 仓库、Markdown、日志或最终总结。
+- 如果需要密钥，请提示我在本机设置环境变量 ${secretEnv}。
+- 不要修改与 ReachAI 接入无关的业务代码。
+
+执行步骤：
+1. 先检查当前项目的 Java 版本、Spring Boot 版本、Maven 模块结构、启动模块和配置文件位置。
+2. 读取项目接入清单 manifest，确认 SDK 版本、Maven 依赖、registry url、project code、app key、base url。
+3. 在正确的 Maven 模块中引入 reachai-capability-sdk 和 reachai-spring-boot2-starter。
+4. 识别业务代码主包名，只扫描业务包下的 Controller / Service，不要把业务系统依赖的框架包、平台包、第三方包接口同步到 ReachAI。若启动类根包过宽，请优先选择实际业务包。
+5. 在业务系统配置中增加 reachai.registry、reachai.project、reachai.capability 配置，并用 ${secretEnv} 引用密钥；同时配置 reachai.capability.scan-packages 与 reachai.capability.exclude-packages。
+6. 根据现有 Controller / Service 代码，优先选择 1-2 个低风险查询能力，补充 @ReachCapability、@ReachParam、@ReachOutput 示例。
+7. 运行项目编译或最小可行测试。
+8. 如果业务系统和 ReachAI 服务可访问，调用 manifest 中的 sdkAccessCheckUrl 做接入自检；否则说明缺少的本地前置条件。
+9. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
+
+扫描边界要求：
+- 必须先从启动类、业务 Controller / Service 包、Maven 模块名中推断业务代码主包，例如 com.company.order 或 com.xxx.biz。
+- reachai.capability.scan-packages 只填写业务代码包；不要填写 org.springframework、springfox、org.springdoc、com.baomidou、框架基座包、通用平台包或 SDK 包。
+- reachai.capability.exclude-packages 至少排除 org.springframework、springfox、org.springdoc、com.enterprise.ai.reach；如果项目有 hussar、framework、common-web、platform 等框架包，也要排除。
+- 如果无法可靠判断业务包，先在计划里列出候选包并等待我确认，不要默认扫描整个根包。
+
+请先输出你识别到的项目结构和接入计划，等我确认后再改代码。`
+})
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function appendQuery(url: string, key: string, value: string) {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
 }
 
 function highlightXmlCode(value: string) {
@@ -575,6 +718,57 @@ async function loadAll() {
   } finally {
     loading.value = false
   }
+}
+
+async function openAiOnboardingPrompt() {
+  const p = project.value
+  if (!p?.id) {
+    ElMessage.warning('请先加载 SDK 接入项目')
+    return
+  }
+  aiPromptLoading.value = true
+  try {
+    const { data } = await getAiOnboardingManifest(p.id)
+    aiOnboardingManifest.value = data
+    aiCodingAccessEnabled.value = data.aiCodingAccess.enabled
+    aiCodingAccessKey.value = data.aiCodingAccess.accessKey || ''
+    aiPromptDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载 AI 快速接入提示词失败')
+  } finally {
+    aiPromptLoading.value = false
+  }
+}
+
+async function saveAiCodingAccess() {
+  const p = project.value
+  if (!p?.id) return
+  aiCodingAccessSaving.value = true
+  try {
+    const { data } = await updateAiCodingAccess(p.id, {
+      enabled: aiCodingAccessEnabled.value,
+      accessKey: aiCodingAccessKey.value.trim() || null,
+    })
+    aiCodingAccessEnabled.value = data.enabled
+    aiCodingAccessKey.value = data.accessKey || ''
+    if (aiOnboardingManifest.value) {
+      aiOnboardingManifest.value.aiCodingAccess = {
+        enabled: data.enabled,
+        accessKey: data.accessKey || null,
+      }
+    }
+    ElMessage.success(data.enabled ? 'AI Coding 接入秘钥已保存' : 'AI Coding 接入已关闭')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '保存 AI Coding 接入秘钥失败')
+  } finally {
+    aiCodingAccessSaving.value = false
+  }
+}
+
+async function clearAiCodingAccess() {
+  aiCodingAccessEnabled.value = false
+  aiCodingAccessKey.value = ''
+  await saveAiCodingAccess()
 }
 
 async function runCheck() {
@@ -1075,22 +1269,6 @@ function statusLabel(status: SdkAccessCheckStatus) {
   background: #fff;
 }
 
-.footer-help {
-  margin-right: auto;
-  color: #667085;
-  font-size: 13px;
-
-  button {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: #3155db;
-    cursor: pointer;
-    font-weight: 700;
-    text-decoration: none;
-  }
-}
-
 .footer-actions {
   display: inline-flex;
   gap: 10px;
@@ -1477,14 +1655,6 @@ function statusLabel(status: SdkAccessCheckStatus) {
   backdrop-filter: blur(18px);
 }
 
-.footer-help {
-  color: rgba(203, 213, 225, 0.72);
-
-  button {
-    color: #93c5fd;
-  }
-}
-
 .wizard-footer,
 .step-screen {
   :deep(.el-checkbox__label) {
@@ -1837,14 +2007,6 @@ function statusLabel(status: SdkAccessCheckStatus) {
     background: rgba(248, 250, 252, 0.58);
   }
 
-  .footer-help {
-    color: #475569;
-
-    button {
-      color: #1d4ed8;
-    }
-  }
-
   .wizard-footer,
   .step-screen {
     :deep(.el-checkbox__label) {
@@ -2170,14 +2332,6 @@ function statusLabel(status: SdkAccessCheckStatus) {
   .wizard-footer {
     border-top-color: rgba(148, 163, 184, 0.18);
     background: rgba(248, 250, 252, 0.92);
-  }
-
-  .footer-help {
-    color: #475569;
-
-    button {
-      color: #1d4ed8;
-    }
   }
 
   .wizard-footer,
@@ -3429,6 +3583,60 @@ function statusLabel(status: SdkAccessCheckStatus) {
     border-color: rgb(var(--brand-primary-rgb) / 0.34) !important;
     background: linear-gradient(135deg, var(--brand-primary), var(--brand-hover)) !important;
     box-shadow: 0 12px 28px rgb(var(--brand-primary-rgb) / 0.24) !important;
+  }
+}
+
+.ai-onboarding-alert {
+  margin-bottom: 14px;
+}
+
+.ai-coding-key-panel {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgb(var(--brand-hover-rgb) / 0.18);
+  border-radius: 8px;
+  background: rgb(var(--brand-selected-rgb) / 0.18);
+}
+
+.ai-coding-key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.ai-coding-key-head strong {
+  display: block;
+  color: #11183a;
+}
+
+.ai-coding-key-head span {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ai-coding-key-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+}
+
+.ai-tool-tabs {
+  margin-bottom: 10px;
+}
+
+.ai-prompt-input :deep(.el-textarea__inner) {
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+  .ai-coding-key-form {
+    grid-template-columns: 1fr;
   }
 }
 </style>

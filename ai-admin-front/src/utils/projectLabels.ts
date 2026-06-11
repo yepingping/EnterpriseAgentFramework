@@ -3,7 +3,7 @@ import type { ScanStatus, ScanType } from '@/types/scanProject'
 
 const PROJECT_KIND_LABELS: Record<string, string> = {
   SCAN: '扫描接入',
-  REGISTERED: 'SDK 注册',
+  REGISTERED: 'SDK 接入',
   HYBRID: '混合接入',
 }
 
@@ -60,6 +60,6 @@ export const VISIBILITY_SELECT_OPTIONS: { value: ProjectVisibility; label: strin
 /** 表单：项目形态下拉 */
 export const PROJECT_KIND_SELECT_OPTIONS = [
   { value: 'SCAN' as const, label: '扫描接入' },
-  { value: 'REGISTERED' as const, label: 'SDK 注册' },
+  { value: 'REGISTERED' as const, label: 'SDK 接入' },
   { value: 'HYBRID' as const, label: '混合接入' },
 ]

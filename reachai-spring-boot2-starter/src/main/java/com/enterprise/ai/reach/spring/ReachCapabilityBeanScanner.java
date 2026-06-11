@@ -37,7 +37,11 @@ public class ReachCapabilityBeanScanner {
                 if (bean == null || isInfrastructureBean(bean)) {
                     continue;
                 }
-                descriptors.addAll(ReachCapabilityScanner.scanClasses(AopUtils.getTargetClass(bean)));
+                Class<?> userClass = AopUtils.getTargetClass(bean);
+                descriptors.addAll(ReachCapabilityScanner.scanClasses(userClass));
+                if (shouldScanSpringMvcEndpoints(userClass)) {
+                    descriptors.addAll(ReachSpringMvcEndpointScanner.scanClass(userClass));
+                }
             }
             return descriptors;
         }
@@ -48,8 +52,43 @@ public class ReachCapabilityBeanScanner {
             }
             Class<?> userClass = AopUtils.getTargetClass(bean);
             descriptors.addAll(ReachCapabilityScanner.scanClasses(userClass));
+            if (shouldScanSpringMvcEndpoints(userClass)) {
+                descriptors.addAll(ReachSpringMvcEndpointScanner.scanClass(userClass));
+            }
         }
         return descriptors;
+    }
+
+    private boolean shouldScanSpringMvcEndpoints(Class<?> userClass) {
+        if (userClass == null || properties == null) {
+            return true;
+        }
+        String className = userClass.getName();
+        ReachAiRegistryProperties.Capability capability = properties.getCapability();
+        if (matchesPackage(className, capability.getExcludePackages())) {
+            return false;
+        }
+        List<String> scanPackages = capability.getScanPackages();
+        return scanPackages == null || scanPackages.isEmpty() || matchesPackage(className, scanPackages);
+    }
+
+    private boolean matchesPackage(String className, List<String> packages) {
+        if (className == null || packages == null) {
+            return false;
+        }
+        for (String item : packages) {
+            if (item == null) {
+                continue;
+            }
+            String prefix = item.trim();
+            if (prefix.isEmpty()) {
+                continue;
+            }
+            if (className.equals(prefix) || className.startsWith(prefix + ".")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isInfrastructureBean(Object bean) {
@@ -58,6 +97,9 @@ public class ReachCapabilityBeanScanner {
                 || bean instanceof ReachCapabilityBeanScanner
                 || bean instanceof ReachAiRegistryClient
                 || bean instanceof ReachAiRegistryProperties
-                || bean instanceof ReachAiRegistryAutoConfiguration;
+                || bean instanceof ReachAiRegistryAutoConfiguration
+                || bean instanceof ReachAiRegistryHeartbeatScheduler
+                || bean instanceof ReachCapabilityEndpoint
+                || bean instanceof ReachAiInvocationExceptionHandler;
     }
 }

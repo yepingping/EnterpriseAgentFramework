@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReachAiRegistryClient {
 
@@ -27,6 +28,7 @@ public class ReachAiRegistryClient {
     private final ReachAiRegistryTransport transport;
     private final String registryBaseUrl;
     private final String instanceId;
+    private final AtomicBoolean configurationErrorLogged = new AtomicBoolean(false);
 
     public ReachAiRegistryClient(ReachAiRegistryProperties properties,
                                  ReachCapabilityBeanScanner capabilityBeanScanner) {
@@ -55,6 +57,7 @@ public class ReachAiRegistryClient {
 
     public void registerAndSync() {
         if (!isConfigured()) {
+            logConfigurationErrorIfNecessary("registerAndSync");
             return;
         }
         try {
@@ -71,6 +74,7 @@ public class ReachAiRegistryClient {
 
     public void heartbeat() {
         if (!isConfigured()) {
+            logConfigurationErrorIfNecessary("heartbeat");
             return;
         }
         post("/api/registry/projects/{projectCode}/instances/heartbeat", heartbeatBody());
@@ -98,11 +102,11 @@ public class ReachAiRegistryClient {
             item.put("name", descriptor.getName());
             item.put("title", descriptor.getTitle());
             item.put("description", descriptor.getDescription());
-            item.put("httpMethod", "POST");
+            item.put("httpMethod", defaultString(descriptor.getHttpMethod(), "POST"));
             item.put("baseUrl", defaultString(properties.getProject().getBaseUrl(), ""));
             item.put("contextPath", defaultString(properties.getProject().getContextPath(), ""));
-            item.put("endpointPath", "/reachai/capabilities/" + urlEncodePathSegment(descriptor.getName()) + "/invoke");
-            item.put("requestBodyType", "java.util.Map");
+            item.put("endpointPath", defaultString(descriptor.getEndpointPath(), "/reachai/capabilities/" + urlEncodePathSegment(descriptor.getName()) + "/invoke"));
+            item.put("requestBodyType", defaultString(descriptor.getRequestBodyType(), "java.util.Map"));
             item.put("responseType", descriptor.getReturnType());
             item.put("sideEffect", descriptor.getSideEffect() == null ? "WRITE" : descriptor.getSideEffect().name());
             item.put("enabled", Boolean.TRUE);
@@ -141,8 +145,9 @@ public class ReachAiRegistryClient {
 
     private Map<String, Object> capabilityMetadata(ReachCapabilityDescriptor descriptor) {
         Map<String, Object> metadata = new LinkedHashMap<String, Object>();
-        metadata.put("declared", Boolean.TRUE);
-        metadata.put("source", "ReachCapability");
+        boolean springMvcEndpoint = StringUtils.hasText(descriptor.getEndpointPath());
+        metadata.put("declared", !springMvcEndpoint);
+        metadata.put("source", springMvcEndpoint ? "SpringMvcController" : "ReachCapability");
         metadata.put("domain", descriptor.getDomain());
         metadata.put("module", descriptor.getModule());
         metadata.put("tags", descriptor.getTags());
@@ -230,13 +235,61 @@ public class ReachAiRegistryClient {
                 .build();
     }
 
-    private boolean isConfigured() {
-        return properties != null
-                && properties.getRegistry().isEnabled()
-                && StringUtils.hasText(properties.getRegistry().getUrl())
-                && StringUtils.hasText(properties.getRegistry().getAppKey())
-                && StringUtils.hasText(properties.getRegistry().getAppSecret())
-                && StringUtils.hasText(properties.getProject().getCode());
+    public boolean isConfigured() {
+        return configurationProblems().isEmpty();
+    }
+
+    public void logConfigurationSummary() {
+        if (properties == null) {
+            log.error("[ReachAI Registry] config missing: reachai properties are not available");
+            return;
+        }
+        log.info("[ReachAI Registry] config registryEnabled={} registryUrl={} projectCode={} projectName={} baseUrl={} contextPath={} appKeyConfigured={} appSecretConfigured={} scanBeans={} syncOnStartup={} heartbeatIntervalMs={}",
+                properties.getRegistry().isEnabled(),
+                properties.getRegistry().getUrl(),
+                properties.getProject().getCode(),
+                properties.getProject().getName(),
+                properties.getProject().getBaseUrl(),
+                properties.getProject().getContextPath(),
+                StringUtils.hasText(properties.getRegistry().getAppKey()),
+                StringUtils.hasText(properties.getRegistry().getAppSecret()),
+                properties.getCapability().isScanBeans(),
+                properties.getCapability().isSyncOnStartup(),
+                properties.getRegistry().getHeartbeatIntervalMs());
+    }
+
+    public void logConfigurationErrorIfNecessary(String action) {
+        List<String> problems = configurationProblems();
+        if (problems.isEmpty() || !configurationErrorLogged.compareAndSet(false, true)) {
+            return;
+        }
+        log.error("[ReachAI Registry] skip {} because configuration is incomplete: {}. Set reachai.registry.url/app-key/app-secret and reachai.project.code; do not log app-secret value.",
+                action, problems);
+    }
+
+    List<String> configurationProblems() {
+        List<String> problems = new ArrayList<String>();
+        if (properties == null) {
+            problems.add("reachai properties missing");
+            return problems;
+        }
+        if (!properties.getRegistry().isEnabled()) {
+            problems.add("reachai.registry.enabled=false");
+            return problems;
+        }
+        if (!StringUtils.hasText(properties.getRegistry().getUrl())) {
+            problems.add("reachai.registry.url missing");
+        }
+        if (!StringUtils.hasText(properties.getRegistry().getAppKey())) {
+            problems.add("reachai.registry.app-key missing");
+        }
+        if (!StringUtils.hasText(properties.getRegistry().getAppSecret())) {
+            problems.add("reachai.registry.app-secret missing");
+        }
+        if (!StringUtils.hasText(properties.getProject().getCode())) {
+            problems.add("reachai.project.code missing");
+        }
+        return problems;
     }
 
     private String expandProjectCode(String uriTemplate) {

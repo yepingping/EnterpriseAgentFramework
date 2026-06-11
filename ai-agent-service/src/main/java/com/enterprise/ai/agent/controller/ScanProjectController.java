@@ -229,7 +229,8 @@ public class ScanProjectController {
     }
 
     @GetMapping("/{id}/tools")
-    public ResponseEntity<List<ProjectToolDTO>> listTools(@PathVariable Long id) {
+    public ResponseEntity<List<ProjectToolDTO>> listTools(@PathVariable Long id,
+                                                          @RequestParam(value = "view", required = false) String view) {
         try {
             List<ScanProjectToolEntity> tools = scanProjectService.listTools(id);
             Map<Long, ScanModuleEntity> modulesById = scanModuleService.listByProject(id).stream()
@@ -240,9 +241,24 @@ public class ScanProjectController {
                     .collect(Collectors.toSet());
             Map<Long, ToolDefinitionEntity> globalById = toolDefinitionService.mapByIds(globalIds);
             Set<String> pending = aiRegistryService.pendingCapabilityQualifiedNames(id);
+            boolean summaryView = "summary".equalsIgnoreCase(view);
             return ResponseEntity.ok(tools.stream()
-                    .map(entity -> toToolDtoBatch(entity, modulesById, globalById, pending))
+                    .map(entity -> toToolDtoBatch(entity, modulesById, globalById, pending, summaryView))
                     .toList());
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{projectId}/scan-tools/{toolId}")
+    public ResponseEntity<ProjectToolDTO> getScanTool(@PathVariable Long projectId,
+                                                      @PathVariable Long toolId) {
+        try {
+            ScanProjectToolEntity entity = scanProjectToolService.findByProjectAndId(projectId, toolId)
+                    .orElseThrow(() -> new IllegalArgumentException("scan tool not found"));
+            Map<Long, ScanModuleEntity> modulesById = scanModuleService.listByProject(projectId).stream()
+                    .collect(Collectors.toMap(ScanModuleEntity::getId, Function.identity(), (a, b) -> a));
+            return ResponseEntity.ok(toToolDtoSingle(entity, modulesById));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.notFound().build();
         }
@@ -578,11 +594,15 @@ public class ScanProjectController {
     private ProjectToolDTO toToolDtoBatch(ScanProjectToolEntity entity,
                                          Map<Long, ScanModuleEntity> modulesById,
                                          Map<Long, ToolDefinitionEntity> globalById,
-                                         Set<String> pendingSdkQualifiedNames) {
+                                         Set<String> pendingSdkQualifiedNames,
+                                         boolean summaryView) {
         Long gid = entity.getGlobalToolDefinitionId();
         ToolDefinitionEntity g = gid == null ? null : globalById.get(gid);
         if (g == null && gid != null) {
             g = toolDefinitionService.findById(gid).orElse(null);
+        }
+        if (summaryView) {
+            return buildProjectToolSummaryDto(entity, modulesById, g, pendingSdkQualifiedNames);
         }
         return buildProjectToolDto(entity, modulesById, g, pendingSdkQualifiedNames);
     }
@@ -638,8 +658,66 @@ public class ScanProjectController {
                 link.message(),
                 link.diffFields(),
                 link.sdkCapabilityReviewPending(),
-                sensitiveData
+                sensitiveData,
+                parameters.size()
         );
+    }
+
+    private ProjectToolDTO buildProjectToolSummaryDto(ScanProjectToolEntity entity,
+                                                      Map<Long, ScanModuleEntity> modulesById,
+                                                      ToolDefinitionEntity global,
+                                                      Set<String> pendingSdkQualifiedNames) {
+        Long moduleId = entity.getModuleId();
+        String moduleDisplayName = resolveModuleDisplayName(moduleId, modulesById);
+        String globalToolName = global != null ? global.getName() : null;
+        ScanProjectToolService.LinkState link = scanProjectToolService.resolveLinkState(entity, global,
+                pendingSdkQualifiedNames == null ? Set.of() : pendingSdkQualifiedNames);
+        boolean globalToolOutOfSync = link.status() == ApiToolLinkStatus.PENDING_UPDATE;
+        boolean removedFromSource = Boolean.TRUE.equals(entity.getRemovedFromSource());
+        SensitiveDataViewDTO sensitiveData = parseSensitiveDataView(entity.getSensitiveDataJson());
+        return new ProjectToolDTO(
+                entity.getId(),
+                entity.getName(),
+                entity.getDescription(),
+                List.of(),
+                entity.getSource(),
+                entity.getSourceLocation(),
+                entity.getHttpMethod(),
+                entity.getBaseUrl(),
+                entity.getContextPath(),
+                entity.getEndpointPath(),
+                entity.getRequestBodyType(),
+                entity.getResponseType(),
+                entity.getProjectId(),
+                Boolean.TRUE.equals(entity.getEnabled()),
+                Boolean.TRUE.equals(entity.getAgentVisible()),
+                Boolean.TRUE.equals(entity.getLightweightEnabled()),
+                entity.getGlobalToolDefinitionId(),
+                globalToolName,
+                globalToolOutOfSync,
+                moduleId,
+                moduleDisplayName,
+                null,
+                removedFromSource,
+                link.status().name(),
+                link.message(),
+                link.diffFields(),
+                link.sdkCapabilityReviewPending(),
+                sensitiveData,
+                countTopLevelParameters(entity.getParametersJson())
+        );
+    }
+
+    private int countTopLevelParameters(String json) {
+        if (!StringUtils.hasText(json)) {
+            return 0;
+        }
+        try {
+            var root = objectMapper.readTree(json);
+            return root != null && root.isArray() ? root.size() : 0;
+        } catch (Exception ex) {
+            return 0;
+        }
     }
 
     private SensitiveDataViewDTO parseSensitiveDataView(String json) {
@@ -825,7 +903,8 @@ public class ScanProjectController {
             String toolLinkMessage,
             List<String> toolSyncDiffFields,
             boolean sdkCapabilityReviewPending,
-            SensitiveDataViewDTO sensitiveData
+            SensitiveDataViewDTO sensitiveData,
+            int parameterCount
     ) {
     }
 

@@ -7,7 +7,13 @@
         <span v-for="item in assetSummaryItems" :key="item">{{ item }}</span>
       </div>
       <div class="asset-actions">
-        <el-button type="primary" plain @click="openModelGeneratePanel">模型与生成</el-button>
+        <el-button type="primary" :loading="batchStarting" @click="startBatchGenerate(false)">
+          一键生成 AI 理解
+        </el-button>
+        <el-button :loading="batchStarting" @click="startBatchGenerate(true)">
+          强制重生成
+        </el-button>
+        <el-button plain @click="openModelGeneratePanel">模型设置</el-button>
         <el-button plain @click="openScanRulesPanel">扫描解析规则</el-button>
         <el-button plain @click="openOpsPanel">运维动作</el-button>
         <el-button type="primary" :loading="reconcileLoading" @click="handleReconcile">
@@ -30,9 +36,7 @@
     <el-tabs v-model="activeWorkbenchTab" class="workbench-tabs">
       <el-tab-pane label="接口目录" name="tools" />
       <el-tab-pane label="模块管理" name="modules" />
-      <el-tab-pane label="AI 语义" name="ai" />
       <el-tab-pane label="接口图谱" name="apiGraph" />
-      <el-tab-pane label="接入设置" name="settings" />
     </el-tabs>
 
     <el-collapse v-model="detailPanelActive" class="scan-detail-sections">
@@ -77,7 +81,7 @@
         title="当前为 OpenAPI/Auto-OpenAPI 方式：下方「描述来源」「仅 @RestController」「类名正则」等仅对 Controller 代码扫描有效；对 OpenAPI 可生效的项有 HTTP 方法、跳过 deprecated、新接口默认开关、增量等。"
       />
       <p v-if="project?.projectKind === 'REGISTERED'" class="scan-settings-hint">
-        先配置并保存。REGISTERED 项目接口由 SDK 同步至下方 API 目录；说明来源变更将在下次 SDK 能力同步时反映。全局 Tool 需在目录中手动「添加为 Tool」后才出现在 Tool 管理页。
+        先配置并保存。SDK 接入项目接口由业务系统同步至下方 API 目录；说明来源变更将在下次 SDK 能力同步时反映。全局 Tool 需在目录中手动「添加为 Tool」后才出现在 Tool 管理页。
       </p>
       <p v-else class="scan-settings-hint">先配置并保存，再点「重新扫描」使配置生效。增量重扫不删除已有接口，仅合入新变更文件解析出的端点并更新同名校验。</p>
       <el-form label-width="160px" class="scan-settings-form" @submit.prevent>
@@ -279,46 +283,6 @@
       />
     </el-collapse-item>
 
-    <el-collapse-item v-if="project && activeWorkbenchTab === 'ai'" class="scan-detail-top-item semantic-inline-collapse" name="projectDoc">
-        <template #title>
-          <div class="ai-card-header">
-            <span>项目级摘要</span>
-            <div @click.stop>
-              <el-button size="small" :loading="projectGenLoading" @click="regenerateProject">重新生成</el-button>
-              <el-button size="small" :disabled="!projectDoc" @click="openEditDoc(projectDoc)">编辑</el-button>
-            </div>
-          </div>
-        </template>
-        <div class="ai-toolbar ai-toolbar-card">
-          <el-button type="primary" :loading="batchStarting" @click="startBatchGenerate(false)">
-            一键生成 AI 理解
-          </el-button>
-          <el-button :loading="batchStarting" @click="startBatchGenerate(true)">强制重生成（覆盖已编辑）</el-button>
-          <el-button @click="reloadSemanticUi">刷新语义</el-button>
-          <el-button plain @click="openModelGeneratePanel">模型与生成设置</el-button>
-          <el-tag v-if="task" :type="taskStageTagType">
-            {{ taskLabel }}
-          </el-tag>
-          <span v-if="task" class="token-sum">累计 token：{{ taskTotalTokens }}</span>
-        </div>
-        <el-progress
-          v-if="taskRunning"
-          :percentage="taskPercent"
-          :text-inside="true"
-          :stroke-width="18"
-          class="task-progress"
-        />
-        <el-alert
-          v-if="taskFailed"
-          type="error"
-          :title="taskFailedTitle"
-          :closable="false"
-          show-icon
-        />
-        <div v-if="projectDoc" class="markdown-body" v-html="renderMd(projectDoc.contentMd)" />
-        <el-empty v-else description="项目级文档尚未生成" />
-    </el-collapse-item>
-
     <el-collapse-item v-if="project && activeWorkbenchTab === 'modules'" class="scan-detail-top-item semantic-inline-collapse" name="modules">
         <template #title>
           <div class="ai-card-header">
@@ -386,13 +350,13 @@
       </template>
 
       <div v-loading="loading" class="tools-table-wrap">
-        <el-empty v-if="!loading && tools.length === 0" description="暂无接口记录：离线项目请先扫描；SDK 注册项目在业务系统同步能力后将出现在此" />
+        <el-empty v-if="!loading && tools.length === 0" description="暂无接口记录：离线项目请先扫描；SDK 接入项目在业务系统同步能力后将出现在此" />
         <el-collapse
           v-else-if="tools.length > 0"
           v-model="interfaceCollapseActive"
           class="tool-groups-collapse"
         >
-          <el-collapse-item v-for="g in toolModuleGroups" :key="g.key" :name="g.key">
+          <el-collapse-item v-for="g in visibleToolModuleGroups" :key="g.key" :name="g.key">
             <template #title>
               <div class="module-collapse-title">
                 <div class="module-collapse-title__text">
@@ -415,10 +379,11 @@
               stripe
               class="nested-tools-table merged-interface-table"
               :row-class-name="scanToolRowClassName"
+              @expand-change="handleToolExpandChange"
             >
               <el-table-column type="expand" width="44">
                 <template #default="{ row }">
-                  <div class="expand-content expand-merged">
+                  <div class="expand-content expand-merged" v-loading="toolDetailLoading[row.scanToolId] ?? false">
                     <h4>参数定义</h4>
                     <el-table
                       :data="parameterRows(row.parameters)"
@@ -486,7 +451,7 @@
               <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
               <el-table-column label="参数数" width="78" align="center">
                 <template #default="{ row }">
-                  {{ (row.parameters || []).length }}
+                  {{ toolParameterCount(row) }}
                 </template>
               </el-table-column>
               <el-table-column label="AI 描述" min-width="200">
@@ -636,6 +601,10 @@
             </el-table>
           </el-collapse-item>
         </el-collapse>
+        <div v-if="hiddenModuleGroupCount > 0" class="tool-groups-load-more">
+          <span>还有 {{ hiddenModuleGroupCount }} 个模块未显示</span>
+          <el-button size="small" @click="showMoreToolModuleGroups">加载更多模块</el-button>
+        </div>
       </div>
     </el-collapse-item>
 
@@ -665,35 +634,6 @@
     </el-collapse-item>
     </el-collapse>
 
-    <section v-if="project && activeWorkbenchTab === 'settings'" class="settings-overview-card">
-      <div class="settings-overview-head">
-        <div>
-          <h3>接入设置</h3>
-          <p>项目基础信息保留在注册中心详情页；这里仅展示 API 治理需要的接入上下文和操作入口。</p>
-        </div>
-        <div class="settings-overview-actions">
-          <el-button v-if="project.projectCode" @click="router.push(`/registry/projects/${project.projectCode}`)">
-            查看项目详情
-          </el-button>
-          <el-button @click="openModelGeneratePanel">模型与生成</el-button>
-          <el-button @click="openScanRulesPanel">扫描解析规则</el-button>
-          <el-button @click="openOpsPanel">运维动作</el-button>
-        </div>
-      </div>
-      <div class="settings-summary-grid">
-        <div><b>项目编码</b><span>{{ project.projectCode || '-' }}</span></div>
-        <div><b>接入方式</b><span>{{ formatProjectKindLabel(project.projectKind || 'SCAN') }}</span></div>
-        <div><b>扫描方式</b><span>{{ formatScanTypeLabel(project.scanType) }}</span></div>
-        <div><b>项目域名</b><span>{{ project.baseUrl || '-' }}</span></div>
-        <div><b>Context Path</b><span>{{ project.contextPath || '-' }}</span></div>
-        <div><b>扫描路径</b><span>{{ project.scanPath || '-' }}</span></div>
-        <div><b>负责人</b><span>{{ project.owner || '-' }}</span></div>
-        <div><b>可见性</b><span>{{ formatVisibilityLabel(project.visibility || 'PRIVATE') }}</span></div>
-        <div><b>接口数</b><span>{{ project.toolCount }}</span></div>
-        <div><b>错误信息</b><span>{{ project.errorMessage || '-' }}</span></div>
-      </div>
-    </section>
-
     <el-drawer v-if="false" v-model="scanSettingsDrawerVisible" size="640px" title="扫描与接口说明设置" destroy-on-close>
       <el-alert
         v-if="project?.projectKind === 'REGISTERED' || project?.projectKind === 'HYBRID'"
@@ -713,7 +653,7 @@
         title="当前为 OpenAPI/Auto-OpenAPI 方式：描述来源、类名正则等仅对 Controller 代码扫描有效。"
       />
       <p v-if="project?.projectKind === 'REGISTERED'" class="scan-settings-hint">
-        先配置并保存。REGISTERED 项目接口由 SDK 同步至 API 目录；说明来源变更将在下次 SDK 能力同步时反映。
+        先配置并保存。SDK 接入项目接口由业务系统同步至 API 目录；说明来源变更将在下次 SDK 能力同步时反映。
       </p>
       <p v-else class="scan-settings-hint">先配置并保存，再点「重新扫描」使配置生效。增量重扫不删除已有接口，仅合入新变更文件解析出的端点并更新同名校验。</p>
       <el-form label-width="160px" class="scan-settings-form drawer-form" @submit.prevent>
@@ -820,7 +760,7 @@
     </el-drawer>
 
     <el-drawer v-if="false" v-model="authDrawerVisible" size="520px" title="调用凭据" destroy-on-close>
-      <p class="auth-hint">用于「测试」扫描到的 HTTP 接口，以及已注册为全局 Tool 且仍关联本项目的动态调用。SDK 注册项目本身的上报鉴权不在这里配置。</p>
+      <p class="auth-hint">用于「测试」扫描到的 HTTP 接口，以及已注册为全局 Tool 且仍关联本项目的动态调用。SDK 接入项目本身的上报鉴权不在这里配置。</p>
       <el-form label-width="140px" class="auth-form drawer-form" @submit.prevent>
         <el-form-item label="鉴权方式">
           <el-select v-model="authForm.authType" style="width: 260px" placeholder="请选择">
@@ -1104,7 +1044,7 @@
       <div class="drawer-action-row">
         <el-tooltip
           effect="dark"
-          content="将使用最近一次保存的扫描项配置；SDK 注册项目由业务系统同步能力，不执行离线重新扫描。"
+          content="将使用最近一次保存的扫描项配置；SDK 接入项目由业务系统同步能力，不执行离线重新扫描。"
           placement="bottom"
         >
           <el-button
@@ -1498,6 +1438,7 @@ import type { ToolParameter, ToolTestResult, ToolUpsertRequest } from '@/types/t
 import type { ScanModule, SemanticDoc, SemanticTask } from '@/types/semanticDoc'
 import {
   getScanProjectDetail,
+  getScanProjectTool,
   getScanProjectOperationBlockers,
   getScanProjectTools,
   getSensitiveDataScanStatus,
@@ -1522,15 +1463,12 @@ import {
 import {
   formatProjectKindLabel,
   formatScanStatusLabel,
-  formatScanTypeLabel,
-  formatVisibilityLabel,
 } from '@/utils/projectLabels'
 import { exportScanProjectToolsExcel, scanSensitiveTypeLabel } from '@/utils/scanProjectToolExport'
 import { startToolRetrievalRebuild } from '@/api/toolRetrieval'
 import {
   editSemanticDoc,
   generateModuleDoc,
-  generateProjectDoc,
   generateScanToolDoc,
   getProjectBatchStatus,
   listProjectSemanticDocs,
@@ -1555,7 +1493,7 @@ const rebuildEmbeddingLoading = ref(false)
 const reconcileLoading = ref(false)
 const diffDialogVisible = ref(false)
 const diffDialogRow = ref<ProjectToolInfo | null>(null)
-const activeWorkbenchTab = ref<'tools' | 'modules' | 'ai' | 'apiGraph' | 'settings'>('tools')
+const activeWorkbenchTab = ref<'tools' | 'modules' | 'apiGraph'>('tools')
 const scanSettingsDrawerVisible = ref(false)
 const authDrawerVisible = ref(false)
 const aiSettingsDrawerVisible = ref(false)
@@ -1563,7 +1501,7 @@ const modelGenerateDrawerVisible = ref(false)
 const scanRulesDrawerVisible = ref(false)
 const opsDrawerVisible = ref(false)
 /** 扫描详情各区块折叠；空数组=全部折叠 */
-const detailPanelActive = ref<string[]>(['tools', 'modules', 'projectDoc', 'apiGraph'])
+const detailPanelActive = ref<string[]>(['tools', 'modules', 'apiGraph'])
 /** 接口图谱懒加载：首次展开折叠卡时再 mount G6 实例（图较重，不展开则不创建画布） */
 const apiGraphMounted = ref(false)
 watch(detailPanelActive, (panels) => {
@@ -1634,13 +1572,6 @@ const lastScannedDisplay = computed(() => {
 })
 
 const projectAccessLabel = computed(() => formatProjectKindLabel(project.value?.projectKind || 'SCAN'))
-const projectAccessTagType = computed(() => {
-  const kind = project.value?.projectKind || 'SCAN'
-  if (kind === 'REGISTERED') return 'success'
-  if (kind === 'HYBRID') return 'warning'
-  return 'info'
-})
-
 function syncScanSettingsFormFromProject() {
   const p = project.value
   if (!p) return
@@ -1912,7 +1843,7 @@ async function refreshAll() {
   try {
     const [projectResponse, toolResponse, moduleResponse] = await Promise.all([
       getScanProjectDetail(projectId.value),
-      getScanProjectTools(projectId.value),
+      getScanProjectTools(projectId.value, 'summary'),
       listScanModules(projectId.value),
     ])
     project.value = projectResponse.data
@@ -1920,6 +1851,9 @@ async function refreshAll() {
     syncScanSettingsFormFromProject()
     tools.value = Array.isArray(toolResponse.data) ? toolResponse.data : []
     modules.value = Array.isArray(moduleResponse.data) ? moduleResponse.data : []
+    visibleModuleGroupLimit.value = toolModuleGroupPageSize
+    Object.keys(toolDetailLoaded).forEach((key) => delete toolDetailLoaded[Number(key)])
+    Object.keys(toolDetailLoading).forEach((key) => delete toolDetailLoading[Number(key)])
     try {
       const { data } = await listProjectSemanticDocs(projectId.value)
       applySemanticDocsFromList(Array.isArray(data) ? data : [])
@@ -1939,6 +1873,51 @@ async function refreshAll() {
 
 function scanToolRowClassName({ row }: { row: ProjectToolInfo }) {
   return row.removedFromSource ? 'row-api-tombstone' : ''
+}
+
+function mergeScanToolDetail(detail: ProjectToolInfo): ProjectToolInfo {
+  const index = tools.value.findIndex((item) => item.scanToolId === detail.scanToolId)
+  if (index >= 0) {
+    Object.assign(tools.value[index], detail)
+    toolDetailLoaded[detail.scanToolId] = true
+    return tools.value[index]
+  } else {
+    tools.value.push(detail)
+    toolDetailLoaded[detail.scanToolId] = true
+    return detail
+  }
+}
+
+async function ensureToolDetail(tool: ProjectToolInfo): Promise<ProjectToolInfo> {
+  if (toolDetailLoaded[tool.scanToolId]) {
+    return tool
+  }
+  const pending = toolDetailPromises.get(tool.scanToolId)
+  if (pending) {
+    return pending
+  }
+  toolDetailLoading[tool.scanToolId] = true
+  const request = (async () => {
+    const { data } = await getScanProjectTool(projectId.value, tool.scanToolId)
+    return mergeScanToolDetail(data)
+  })()
+  toolDetailPromises.set(tool.scanToolId, request)
+  try {
+    return await request
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载接口详情失败')
+    return tool
+  } finally {
+    toolDetailLoading[tool.scanToolId] = false
+    toolDetailPromises.delete(tool.scanToolId)
+  }
+}
+
+async function handleToolExpandChange(row: ProjectToolInfo, expandedRows: ProjectToolInfo[]) {
+  if (!expandedRows.some((item) => item.scanToolId === row.scanToolId)) {
+    return
+  }
+  await ensureToolDetail(row)
 }
 
 function toolLinkLabel(row: ProjectToolInfo) {
@@ -2025,7 +2004,7 @@ async function ensureScanOperationAllowed(): Promise<boolean> {
 
 async function handleRescan() {
   if (project.value?.projectKind === 'REGISTERED') {
-    ElMessage.warning('REGISTERED 项目由 SDK 同步能力，不需要扫描')
+    ElMessage.warning('SDK 接入项目由业务系统同步能力，不需要扫描')
     return
   }
   rescanLoading.value = true
@@ -2052,9 +2031,10 @@ async function handleRescan() {
   }
 }
 
-function openEditDialog(tool: ProjectToolInfo) {
-  editingScanToolId.value = tool.scanToolId
-  applyForm(toUpsertRequest(tool))
+async function openEditDialog(tool: ProjectToolInfo) {
+  const detail = await ensureToolDetail(tool)
+  editingScanToolId.value = detail.scanToolId
+  applyForm(toUpsertRequest(detail))
   formDialogVisible.value = true
 }
 
@@ -2118,11 +2098,12 @@ async function handleEnabledChange(tool: ProjectToolInfo, enabled: boolean) {
 
 async function handleFlagChange(tool: ProjectToolInfo, field: 'agentVisible' | 'lightweightEnabled', value: boolean) {
   try {
+    const detail = await ensureToolDetail(tool)
     const payload = toUpsertRequest({
-      ...tool,
+      ...detail,
       [field]: value,
     })
-    await updateScanProjectTool(projectId.value, tool.scanToolId, payload)
+    await updateScanProjectTool(projectId.value, detail.scanToolId, payload)
     ElMessage.success('配置已更新')
     await refreshAll()
   } catch (error) {
@@ -2211,11 +2192,12 @@ async function handlePromoteModuleToGlobal(g: ToolModuleGroup) {
   }
 }
 
-function openTest(tool: ProjectToolInfo) {
-  testingTool.value = tool
+async function openTest(tool: ProjectToolInfo) {
+  const detail = await ensureToolDetail(tool)
+  testingTool.value = detail
   testResult.value = null
   Object.keys(testArgs).forEach((key) => delete testArgs[key])
-  for (const parameter of tool.parameters || []) {
+  for (const parameter of detail.parameters || []) {
     testArgs[parameter.name] = ''
   }
   testDialogVisible.value = true
@@ -2276,6 +2258,11 @@ const selectedModuleIds = ref<number[]>([])
 
 /** 扫描接口与 AI 语义合并列表：按模块折叠，与原先两个 TAB 共用同一组 key */
 const interfaceCollapseActive = ref<string[]>([])
+const toolModuleGroupPageSize = 60
+const visibleModuleGroupLimit = ref(toolModuleGroupPageSize)
+const toolDetailLoading = reactive<Record<number, boolean>>({})
+const toolDetailLoaded = reactive<Record<number, boolean>>({})
+const toolDetailPromises = new Map<number, Promise<ProjectToolInfo>>()
 
 const semanticCompletionPercent = computed(() => {
   const total = tools.value.length + modules.value.length + (project.value ? 1 : 0)
@@ -2369,6 +2356,17 @@ const toolModuleGroups = computed<ToolModuleGroup[]>(() => {
   })
 })
 
+const visibleToolModuleGroups = computed(() => toolModuleGroups.value.slice(0, visibleModuleGroupLimit.value))
+const hiddenModuleGroupCount = computed(() => Math.max(0, toolModuleGroups.value.length - visibleToolModuleGroups.value.length))
+
+function showMoreToolModuleGroups() {
+  visibleModuleGroupLimit.value += toolModuleGroupPageSize
+}
+
+function toolParameterCount(row: ProjectToolInfo): number {
+  return row.parameterCount ?? (row.parameters || []).length
+}
+
 const batchStarting = ref(false)
 const sensitiveScanStarting = ref(false)
 const exportScanToolsExcelLoading = ref(false)
@@ -2380,7 +2378,6 @@ const sensitiveTaskPolling = computed(
 )
 
 const task = ref<SemanticTask | null>(null)
-const projectGenLoading = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const semanticModelInstances = ref<ModelInstance[]>([])
@@ -2617,7 +2614,7 @@ async function startSensitiveDataScanFlow() {
   }
 }
 
-function handleExportScanToolsExcel() {
+async function handleExportScanToolsExcel() {
   if (!tools.value.length) {
     ElMessage.warning('暂无接口可导出')
     return
@@ -2625,7 +2622,8 @@ function handleExportScanToolsExcel() {
   exportScanToolsExcelLoading.value = true
   try {
     const name = project.value?.name?.trim() || `项目${projectId.value}`
-    exportScanProjectToolsExcel(tools.value, name)
+    const { data } = await getScanProjectTools(projectId.value, 'full')
+    exportScanProjectToolsExcel(Array.isArray(data) ? data : tools.value, name)
     ElMessage.success('已导出 Excel')
   } finally {
     exportScanToolsExcelLoading.value = false
@@ -2668,19 +2666,6 @@ function stopPollingSensitiveTask() {
   if (sensitivePollTimer) {
     clearInterval(sensitivePollTimer)
     sensitivePollTimer = null
-  }
-}
-
-async function regenerateProject() {
-  projectGenLoading.value = true
-  try {
-    const { data } = await generateProjectDoc(projectId.value, true, semanticLlmParams())
-    projectDoc.value = data
-    ElMessage.success('项目级 AI 摘要已更新')
-  } catch (error) {
-    ElMessage.error((error as Error).message || '生成失败')
-  } finally {
-    projectGenLoading.value = false
   }
 }
 
@@ -2965,67 +2950,6 @@ onUnmounted(() => {
   }
 }
 
-.settings-overview-card {
-  padding: 18px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-}
-
-.settings-overview-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-
-  h3 {
-    margin: 0 0 6px;
-    font-size: 18px;
-  }
-
-  p {
-    margin: 0;
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.5;
-  }
-}
-
-.settings-overview-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.settings-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-
-  div {
-    display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 8px;
-    min-width: 0;
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: var(--el-fill-color-extra-light);
-  }
-
-  b {
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
-  }
-
-  span {
-    min-width: 0;
-    color: var(--el-text-color-primary);
-    word-break: break-all;
-  }
-}
-
 .drawer-form {
   padding-right: 8px;
 }
@@ -3091,15 +3015,13 @@ onUnmounted(() => {
   }
 
   .asset-directory-bar,
-  .catalog-quick-actions,
-  .settings-overview-head {
+  .catalog-quick-actions {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .asset-actions,
-  .quick-action-buttons,
-  .settings-overview-actions {
+  .quick-action-buttons {
     justify-content: flex-start;
   }
 
@@ -3110,8 +3032,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 760px) {
-  .kpi-strip,
-  .settings-summary-grid {
+  .kpi-strip {
     grid-template-columns: 1fr;
   }
 
@@ -3182,6 +3103,16 @@ onUnmounted(() => {
   :deep(.el-collapse-item__content) {
     padding: 0 4px 12px 0;
   }
+}
+
+.tool-groups-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .module-collapse-title {

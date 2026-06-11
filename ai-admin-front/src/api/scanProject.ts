@@ -5,6 +5,9 @@ import type {
   PromotedGlobalTool,
   ScanProject,
   ScanProjectAuthSaveRequest,
+  AiOnboardingManifest,
+  AiCodingAccessResponse,
+  AiCodingAccessUpdateRequest,
   ScanProjectBlockers,
   ScanProjectRegistryCredentialSaveRequest,
   SdkAccessCheckRequest,
@@ -64,6 +67,14 @@ export function runSdkAccessCheck(id: number, data: SdkAccessCheckRequest) {
   return agentRequest.post<SdkAccessCheckResponse>(`/api/scan-projects/${id}/sdk-access-check`, data)
 }
 
+export function getAiOnboardingManifest(id: number) {
+  return agentRequest.get<AiOnboardingManifest>(`/api/ai-assist/projects/${id}/onboarding-manifest`)
+}
+
+export function updateAiCodingAccess(id: number, data: AiCodingAccessUpdateRequest) {
+  return agentRequest.patch<AiCodingAccessResponse>(`/api/ai-assist/projects/${id}/ai-coding-access`, data)
+}
+
 export function updateScanProjectScanSettings(id: number, data: ScanSettings) {
   return agentRequest.patch<ScanProject>(`/api/scan-projects/${id}/scan-settings`, data)
 }
@@ -87,8 +98,14 @@ export function rescanScanToolFromSource(projectId: number, scanToolId: number) 
   )
 }
 
-export function getScanProjectTools(id: number) {
-  return agentRequest.get<ProjectToolInfo[]>(`/api/scan-projects/${id}/tools`)
+export function getScanProjectTools(id: number, view?: 'summary' | 'full') {
+  return agentRequest.get<ProjectToolInfo[]>(`/api/scan-projects/${id}/tools`, {
+    params: view ? { view } : {},
+  })
+}
+
+export function getScanProjectTool(projectId: number, scanToolId: number) {
+  return agentRequest.get<ProjectToolInfo>(`/api/scan-projects/${projectId}/scan-tools/${scanToolId}`)
 }
 
 /** 补齐 SDK 镜像行并汇总 API 与全局 Tool 关联状态 */

@@ -6,8 +6,13 @@ import com.enterprise.ai.reach.sdk.capability.ReachCapabilityDescriptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -16,6 +21,7 @@ class ReachAiRegistryAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(ReachAiRegistryAutoConfiguration.class))
+            .withBean(ReachAiRegistryTransport.class, NoopTransport::new)
             .withBean(ContractCapability.class)
             .withPropertyValues(
                     "reachai.registry.url=https://reachai.example.com",
@@ -43,13 +49,62 @@ class ReachAiRegistryAutoConfigurationTest {
             assertEquals("contract.query", descriptors.get(0).getName());
             assertEquals("query", descriptors.get(0).getMethodName());
             assertNotNull(context.getBean(ReachAiRegistryClient.class));
+            assertNotNull(context.getBean(TaskScheduler.class));
+            assertNotNull(context.getBean(ReachAiRegistryHeartbeatScheduler.class));
         });
+    }
+
+    @Test
+    void springMvcEndpointScanCanBeRestrictedByPackageConfiguration() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(ReachAiRegistryAutoConfiguration.class))
+                .withBean(ReachAiRegistryTransport.class, NoopTransport::new)
+                .withBean(BusinessController.class)
+                .withBean(FrameworkController.class)
+                .withPropertyValues(
+                        "reachai.registry.url=https://reachai.example.com",
+                        "reachai.registry.app-key=demo-key",
+                        "reachai.registry.app-secret=demo-secret",
+                        "reachai.project.code=demo",
+                        "reachai.capability.scan-packages[0]=com.enterprise.ai.reach.spring",
+                        "reachai.capability.exclude-packages[0]=" + FrameworkController.class.getName())
+                .run(context -> {
+                    ReachCapabilityBeanScanner scanner = context.getBean(ReachCapabilityBeanScanner.class);
+                    List<ReachCapabilityDescriptor> descriptors = scanner.scan();
+                    assertEquals(1, descriptors.size());
+                    assertEquals("business_ping", descriptors.get(0).getName());
+                });
     }
 
     static class ContractCapability {
         @ReachCapability(name = "contract.query", title = "查询合同")
         public String query(@ReachParam(description = "合同编号", required = true) String contractNo) {
             return contractNo;
+        }
+    }
+
+    @RestController
+    @RequestMapping("/business")
+    static class BusinessController {
+        @GetMapping("/ping")
+        public String ping() {
+            return "ok";
+        }
+    }
+
+    @RestController
+    @RequestMapping("/framework")
+    static class FrameworkController {
+        @GetMapping("/ping")
+        public String ping() {
+            return "ok";
+        }
+    }
+
+    static class NoopTransport implements ReachAiRegistryTransport {
+        @Override
+        public String exchange(String method, String url, Map<String, String> headers, Object body) {
+            return "{}";
         }
     }
 }

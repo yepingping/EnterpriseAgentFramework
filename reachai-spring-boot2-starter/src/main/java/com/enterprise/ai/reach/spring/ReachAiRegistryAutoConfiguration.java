@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.List;
 
@@ -33,6 +35,24 @@ public class ReachAiRegistryAutoConfiguration {
                                                        ReachCapabilityBeanScanner capabilityBeanScanner,
                                                        ReachAiRegistryTransport transport) {
         return new ReachAiRegistryClient(properties, capabilityBeanScanner, transport);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public TaskScheduler reachAiRegistryTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("reachai-registry-heartbeat-");
+        scheduler.setDaemon(true);
+        return scheduler;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ReachAiRegistryHeartbeatScheduler reachAiRegistryHeartbeatScheduler(ReachAiRegistryProperties properties,
+                                                                              ReachAiRegistryClient registryClient,
+                                                                              TaskScheduler taskScheduler) {
+        return new ReachAiRegistryHeartbeatScheduler(properties, registryClient, taskScheduler);
     }
 
     @Bean

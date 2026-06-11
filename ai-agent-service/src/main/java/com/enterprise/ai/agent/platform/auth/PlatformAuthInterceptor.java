@@ -25,7 +25,7 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String path = request.getRequestURI();
-        if (isPublic(path) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
+        if (isPublic(request) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
         Optional<PlatformPrincipal> principal = authService.authenticate(extractBearer(request));
@@ -53,14 +53,24 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
         PlatformAuthContext.clear();
     }
 
-    private boolean isPublic(String path) {
+    private boolean isPublic(HttpServletRequest request) {
+        String path = request.getRequestURI();
         if (path == null || !path.startsWith("/api/")) {
             return true;
         }
         return path.equals("/api/platform/auth/login")
                 || path.startsWith("/api/embed/")
                 || path.startsWith("/api/registry/")
-                || path.startsWith("/api/v1/agents/");
+                || path.startsWith("/api/v1/agents/")
+                || path.startsWith("/api/ai-assist/skills/")
+                || isAiCodingManifestAccess(request, path);
+    }
+
+    private boolean isAiCodingManifestAccess(HttpServletRequest request, String path) {
+        return "GET".equalsIgnoreCase(request.getMethod())
+                && path.startsWith("/api/ai-assist/projects/")
+                && path.endsWith("/onboarding-manifest")
+                && request.getParameter("aiCodingKey") != null;
     }
 
     private String extractBearer(HttpServletRequest request) {

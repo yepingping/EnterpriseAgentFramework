@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">注册中心</p>
         <h1>API 资产目录</h1>
-        <span>统一管理 SDK 注册、OpenAPI 扫描和 Controller 扫描发现的业务接口</span>
+        <span>统一管理 SDK 接入、OpenAPI 扫描和 Controller 扫描发现的业务接口</span>
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadAssets">刷新</el-button>
@@ -55,7 +55,7 @@
             @keyup.enter="reloadFirstPage"
           />
           <el-select v-model="filters.sourceType" clearable placeholder="来源">
-            <el-option label="SDK 注册" value="SDK" />
+            <el-option label="SDK 接入" value="SDK" />
             <el-option label="OpenAPI" value="OPENAPI" />
             <el-option label="Controller 扫描" value="CONTROLLER" />
             <el-option label="离线扫描" value="SCAN" />
@@ -606,7 +606,7 @@ function flatParameters(parameters: ToolParameter[] | null | undefined): Paramet
 
 function sourceLabel(value?: string | null) {
   const normalized = (value || '').toUpperCase()
-  if (normalized === 'SDK' || normalized === 'REGISTERED') return 'SDK 注册'
+  if (normalized === 'SDK' || normalized === 'REGISTERED') return 'SDK 接入'
   if (normalized === 'OPENAPI') return 'OpenAPI'
   if (normalized === 'CONTROLLER') return 'Controller'
   if (normalized === 'SCAN') return '扫描'
