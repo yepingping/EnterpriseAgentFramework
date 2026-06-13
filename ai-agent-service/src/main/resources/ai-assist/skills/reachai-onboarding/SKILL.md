@@ -33,9 +33,29 @@ Prefer minimal, reviewable changes:
 4. Add dependencies using `references/java-sdk-access.md` and `templates/pom-dependencies.xml`.
 5. Add configuration using `templates/application-reachai.yml`, replacing the package placeholders with narrow business package allow-lists and framework/package deny-lists.
 6. Select one or two low-risk query-style business methods and annotate them with `@ReachCapability` / `@ReachParam`. Use `templates/reach-capability-example.java` only as a style example.
-7. Run the smallest meaningful verification command in the business repo, normally Maven compile or a targeted test.
-8. Call the manifest's `sdkAccessCheckUrl` only after local compile/config succeeds, or explain why a live check cannot run.
-9. Report changed files, commands run, results, scan package choices, and manual secrets still required.
+7. Inspect the business gateway boundary before declaring onboarding complete:
+   - Spring Cloud Gateway, Nginx, backend-for-frontend, or front-end dev proxy configuration.
+   - Existing authentication headers and current-user extraction.
+   - Whether a server-side token broker already exists.
+8. Add or update the gateway route/token broker:
+   - Route ReachAI capability traffic to the business service and preserve `X-ReachAI-Invocation-Token`, `X-ReachAI-Trace-Id`, `X-ReachAI-Run-Id`, and the business identity headers required by the service.
+   - Expose a front-end token endpoint such as `/api/reachai/embed-token`.
+   - Implement the token endpoint server-side so it maps the current business user to `principal.externalUserId`, signs the platform call with the project `appKey/appSecret`, and calls ReachAI `POST /api/embed/token/exchange`.
+   - Keep `/api/reachai/embed-token` on the normal business login token path. It reads the current business user and exchanges that identity for a ReachAI embed token.
+   - Add the gateway authentication whitelist or dedicated security chain for `/api/reachai/embed/**`. This path carries ReachAI embed tokens, so business OAuth/JWT filters must not validate it as a business login token; forward `Authorization: Bearer <embedToken>` unchanged to ReachAI.
+   - If Spring Cloud Gateway proxies `/api/reachai/embed/**`, dedupe duplicate CORS response headers when both the gateway and ReachAI write them. A typical route filter is `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST`.
+   - Use `manifest.embed.defaultAgentKeySlug` or `manifest.embed.defaultAgentId` as the default front-end `agentId`; do not ask the user to invent an Agent id when the manifest provides one.
+   - Never move `appSecret` into browser code.
+9. Add or update the business front-end integration:
+   - Add the ReachAI chat/embed entry in a real business page or shared shell, not only in documentation.
+   - Configure `apiBase`, `projectCode`, `agentId`, and a `tokenProvider` that calls the business gateway token broker. Prefer the manifest's stable Agent `keySlug` for `agentId`.
+   - Pass `pageInstanceId`, `route`, and `origin` into the token request so ReachAI can isolate sessions and page actions.
+   - Do not reuse the business login token for ReachAI chat session or message calls. Use the broker-returned short-lived embed token for `/api/reachai/embed/**`, `/api/embed/chat/sessions`, and message APIs.
+   - Cache embed tokens only until before their `expiresIn` boundary. If a session or message request returns `embed token is expired`, clear the cached embed token, call the broker again, and retry once.
+10. Run the smallest meaningful verification commands for the touched backend, gateway, and front-end modules.
+11. Call the manifest's `sdkAccessCheckUrl` only after local compile/config succeeds, including `gatewayBaseUrl` and `embedTokenPath`, or explain why a live check cannot run.
+12. If the prompt or manifest provides an access session URL under `/api/ai-assist/projects/{projectId}/access-sessions/...`, report progress after each major step. Use step keys such as `project-manifest`, `backend-sdk`, `reachai-config`, `capability-scan`, `gateway-route`, `embed-token-broker`, `gateway-whitelist`, `frontend-embed`, `connectivity-check`, and `handoff-summary`.
+13. Report changed files, commands run, results, scan package choices, gateway route/token broker status, front-end integration status, and manual secrets still required.
 
 ## References
 
@@ -50,6 +70,9 @@ Prefer minimal, reviewable changes:
 End with:
 - Files changed.
 - Dependency/configuration summary.
+- Gateway route and embed token broker summary.
+- Front-end embed/chat integration summary.
 - Capability annotations added.
 - Verification commands and results.
 - Whether `REACHAI_REGISTRY_APP_SECRET` still needs to be configured outside the repository.
+- Whether access session progress was reported to `/api/ai-assist/.../access-sessions/...`.

@@ -631,6 +631,9 @@ function goDetail(project: ScanProject) {
   gap: 16px;
   min-height: 100%;
   padding: 24px 28px 32px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--brand-page-bg);
   background-size: 28px 28px, 28px 28px, auto, auto, auto, auto;
 }
@@ -640,9 +643,9 @@ function goDetail(project: ScanProject) {
   justify-content: space-between;
   gap: 24px;
   align-items: center;
-  max-width: 1180px;
   width: 100%;
-  margin: 0 auto;
+  min-width: 0;
+  margin: 0;
 
   h1 {
     margin: 0 0 8px;
@@ -725,9 +728,9 @@ function goDetail(project: ScanProject) {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  max-width: 1180px;
   width: 100%;
-  margin: 0 auto;
+  min-width: 0;
+  margin: 0;
 }
 
 .metric-card {
@@ -814,9 +817,9 @@ function goDetail(project: ScanProject) {
 }
 
 .project-card {
-  max-width: 1180px;
   width: 100%;
-  margin: 0 auto;
+  min-width: 0;
+  margin: 0;
   border: 1px solid #eaecf5;
   border-radius: 12px;
   box-shadow: 0 14px 34px rgba(17, 24, 39, 0.045);
@@ -827,16 +830,22 @@ function goDetail(project: ScanProject) {
 }
 
 .toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(150px, 1fr)) auto auto;
+  align-items: center;
+  gap: 10px;
   padding: 14px 22px 16px;
   border-bottom: 1px solid #eef1f7;
   background: #fff;
 
   .search-input {
-    width: 260px;
+    width: 100%;
+    min-width: 0;
   }
 
   .el-select {
-    width: 142px;
+    width: 100%;
+    min-width: 0;
   }
 
   :deep(.el-input__wrapper),
@@ -1504,16 +1513,14 @@ function goDetail(project: ScanProject) {
   }
 
   .toolbar {
+    grid-template-columns: minmax(240px, 1fr) repeat(2, minmax(150px, 1fr));
+
     .search-input {
-      width: 100%;
-      min-width: 240px;
-      flex: 1 1 260px;
+      min-width: 0;
     }
 
     .el-select {
-      width: calc(50% - 8px);
-      min-width: 150px;
-      flex: 1 1 150px;
+      min-width: 0;
     }
   }
 }
@@ -1524,6 +1531,10 @@ function goDetail(project: ScanProject) {
   }
 
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
     grid-template-columns: 1fr;
   }
 

@@ -180,7 +180,7 @@ ai:
 # ==================== 日志 ====================
 logging:
   level:
-    com.enterprise.ai.agent: DEBUG
+    com.enterprise.ai.agent: INFO
     io.agentscope: DEBUG
 
 mybatis-plus:

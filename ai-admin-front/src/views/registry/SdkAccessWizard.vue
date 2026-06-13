@@ -58,6 +58,30 @@
           </span>
           <el-icon v-if="activeStep === step.key" class="step-caret"><ArrowRight /></el-icon>
         </button>
+        <div v-if="accessSession" class="ai-session-card">
+          <div class="ai-session-head">
+            <span>AI 接入会话</span>
+            <el-tag size="small" effect="plain" :type="accessSessionTagType">
+              {{ accessStatusLabel(accessSession.status) }}
+            </el-tag>
+          </div>
+          <div class="ai-session-progress">
+            <strong>{{ accessSession.completedSteps }}/{{ accessSession.totalSteps }}</strong>
+            <span>{{ accessSession.sessionId }}</span>
+          </div>
+          <div class="ai-session-steps">
+            <div
+              v-for="item in accessSession.steps"
+              :key="item.stepKey"
+              class="ai-session-step"
+              :class="item.status.toLowerCase()"
+            >
+              <i />
+              <span>{{ item.title }}</span>
+              <em>{{ accessStatusLabel(item.status) }}</em>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="stage-shell">
@@ -309,15 +333,24 @@ import { listApiAssets } from '@/api/apiAsset'
 import { listRegistryProjectInstances } from '@/api/registry'
 import {
   getAiOnboardingManifest,
+  getLatestAiAccessSession,
   getScanProjectDetail,
   getScanProjects,
-  runSdkAccessCheck,
+  runAiAccessSessionChecks,
+  startAiAccessSession,
   updateAiCodingAccess,
 } from '@/api/scanProject'
 import { useTheme } from '@/composables/useTheme'
 import type { ApiAssetItem } from '@/types/apiAsset'
 import type { ProjectInstance } from '@/types/registry'
-import type { AiOnboardingManifest, ScanProject, SdkAccessCheckResponse, SdkAccessCheckStatus } from '@/types/scanProject'
+import type {
+  AiAccessSession,
+  AiAccessStepStatus,
+  AiOnboardingManifest,
+  ScanProject,
+  SdkAccessCheckResponse,
+  SdkAccessCheckStatus,
+} from '@/types/scanProject'
 import { formatProjectKindLabel } from '@/utils/projectLabels'
 
 type WizardStepKey = 'overview' | 'starter' | 'gateway' | 'backend-check' | 'frontend' | 'self-check'
@@ -336,6 +369,7 @@ const aiCodingAccessSaving = ref(false)
 const aiPromptDialogVisible = ref(false)
 const aiPromptTool = ref<'cursor' | 'claude' | 'codex'>('cursor')
 const aiOnboardingManifest = ref<AiOnboardingManifest | null>(null)
+const accessSession = ref<AiAccessSession | null>(null)
 const aiCodingAccessEnabled = ref(false)
 const aiCodingAccessKey = ref('')
 const activeStep = ref<WizardStepKey>('overview')
@@ -370,6 +404,14 @@ const completedStepCount = computed(() => steps.value.filter((item) => item.done
 const completedPercent = computed(() =>
   steps.value.length ? Math.round((completedStepCount.value / steps.value.length) * 100) : 0,
 )
+
+const accessSessionTagType = computed(() => {
+  const status = accessSession.value?.status
+  if (status === 'PASS') return 'success'
+  if (status === 'WARN' || status === 'RUNNING') return 'warning'
+  if (status === 'FAIL') return 'danger'
+  return 'info'
+})
 
 const steps = computed(() => [
   {
@@ -527,16 +569,26 @@ const gatewaySnippet = computed(() => `spring:
 # X-ReachAI-Trace-Id / X-ReachAI-Run-Id
 # 业务用户身份头或当前登录态`)
 
+const defaultEmbedAgentId = computed(() =>
+  aiOnboardingManifest.value?.embed?.defaultAgentKeySlug
+  || aiOnboardingManifest.value?.embed?.defaultAgentId
+  || 'manifest-embed-agent-not-configured',
+)
+
 const frontendSnippet = computed(() => `import { createEafChat } from '@reachai/frontend-sdk'
+
+const pageInstanceId = sessionStorage.getItem('reachaiPageInstanceId') || crypto.randomUUID()
+sessionStorage.setItem('reachaiPageInstanceId', pageInstanceId)
 
 createEafChat({
   mount: '#reachai-chat',
   apiBase: '${gatewayBaseUrl.value || 'http://localhost:8080'}',
-  agentId: 'your-agent-id',
+  agentId: '${defaultEmbedAgentId.value}',
   tokenProvider: async () => {
     const query = new URLSearchParams({
       projectCode: '${project.value?.projectCode || projectCode.value}',
-      agentId: 'your-agent-id',
+      agentId: '${defaultEmbedAgentId.value}',
+      pageInstanceId,
       route: window.location.pathname,
       origin: window.location.origin
     })
@@ -561,6 +613,14 @@ const aiOnboardingPrompt = computed(() => {
   const secretEnv = manifest?.security.appSecretEnv || 'REACHAI_REGISTRY_APP_SECRET'
   const skillPackageUrl = manifest?.endpoints.skillPackageUrl || '/api/ai-assist/skills/reachai-onboarding/latest.zip'
   const platformManifestUrl = manifest?.endpoints.manifestUrl || `/api/ai-assist/projects/${projectId}/onboarding-manifest`
+  const embedAgentId = manifest?.embed?.defaultAgentKeySlug || manifest?.embed?.defaultAgentId || ''
+  const embedAgentLine = embedAgentId
+    ? `默认嵌入 Agent：${embedAgentId}`
+    : '默认嵌入 Agent：平台尚未给该项目配置可嵌入 Agent；请先在 ReachAI 项目下创建/启用 Agent，再继续业务前端接入。'
+  const allowedAgents = manifest?.embed?.allowedAgents || []
+  const allowedAgentLine = allowedAgents.length
+    ? `可嵌入 Agent 清单：${allowedAgents.map((item) => item.keySlug || item.id).join(', ')}`
+    : '可嵌入 Agent 清单：空'
   const externalManifestUrl =
     aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
       ? appendQuery(platformManifestUrl, 'aiCodingKey', aiCodingAccessKey.value.trim())
@@ -576,6 +636,22 @@ const aiOnboardingPrompt = computed(() => {
       : aiPromptTool.value === 'claude'
         ? 'Claude Code'
         : 'Codex'
+  const session = accessSession.value
+  const sessionId = session?.sessionId || ''
+  const reportUrlPattern = sessionId
+    ? `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/${sessionId}/steps/{stepKey}/report`
+    : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/{sessionId}/steps/{stepKey}/report`
+  const reportUrlPatternWithKey =
+    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
+      ? appendQuery(reportUrlPattern, 'aiCodingKey', aiCodingAccessKey.value.trim())
+      : reportUrlPattern
+  const latestSessionUrl =
+    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
+      ? appendQuery(`${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/latest`, 'aiCodingKey', aiCodingAccessKey.value.trim())
+      : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/latest`
+  const sessionCheckUrl = sessionId
+    ? `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/${sessionId}/checks/run`
+    : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/{sessionId}/checks/run`
   const installHint =
     aiPromptTool.value === 'cursor'
       ? '如果当前工具不支持直接安装 Skill，请下载 zip 后读取其中的 SKILL.md，并把 references/、templates/、scripts/ 作为本次任务的工作资料。'
@@ -595,6 +671,13 @@ const aiOnboardingPrompt = computed(() => {
 - App Key：${appKey}
 - ${aiCodingKeyLine}
 - App Secret 环境变量：${secretEnv}
+- AI 接入会话 ID：${sessionId || '请先用 latest session 接口获取'}
+- AI 接入会话查询：${latestSessionUrl}
+- 步骤进度回传 URL：${reportUrlPatternWithKey}
+- 平台会话化自检 URL：${sessionCheckUrl}
+- Embed Token Broker：${manifest?.embed?.tokenPath || embedTokenPath.value || '/api/reachai/embed-token'}
+- ${embedAgentLine}
+- ${allowedAgentLine}
 
 安装/读取要求：
 ${installHint}
@@ -612,9 +695,37 @@ ${installHint}
 4. 识别业务代码主包名，只扫描业务包下的 Controller / Service，不要把业务系统依赖的框架包、平台包、第三方包接口同步到 ReachAI。若启动类根包过宽，请优先选择实际业务包。
 5. 在业务系统配置中增加 reachai.registry、reachai.project、reachai.capability 配置，并用 ${secretEnv} 引用密钥；同时配置 reachai.capability.scan-packages 与 reachai.capability.exclude-packages。
 6. 根据现有 Controller / Service 代码，优先选择 1-2 个低风险查询能力，补充 @ReachCapability、@ReachParam、@ReachOutput 示例。
-7. 运行项目编译或最小可行测试。
-8. 如果业务系统和 ReachAI 服务可访问，调用 manifest 中的 sdkAccessCheckUrl 做接入自检；否则说明缺少的本地前置条件。
-9. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
+7. 检查业务系统是否有统一网关模块、Spring Cloud Gateway 配置、Nginx 配置或前端 dev proxy。若有网关，必须补上 ReachAI 相关路由；若没有网关，必须在计划里说明缺口，不要把 secret 下沉到浏览器。
+8. 在业务网关或服务端 token broker 中实现前端获取 embed token 的接口，默认路径可用 ${embedTokenPath.value || '/api/reachai/embed-token'}。该接口必须从业务登录态解析当前用户，映射 principal.externalUserId，使用项目 appKey/appSecret 服务端签名调用 ReachAI 的 POST /api/embed/token/exchange，并按短期 token 策略缓存；appSecret 仍只能来自 ${secretEnv} 或密钥管理器。
+9. 在业务前端接入 ReachAI Chat Embed：增加配置、组件或页面入口，agentId 使用 ${embedAgentId || 'manifest.embed.defaultAgentKeySlug / defaultAgentId'}，让前端通过业务网关 token broker 获取 embed token，再用 token 调用 ReachAI /api/embed/chat/sessions 与消息接口。前端不得保存 appSecret，不得使用 pageRegistry.appSecret 自动上报密钥。
+10. 明确区分两类 Authorization：请求 ${embedTokenPath.value || '/api/reachai/embed-token'} 时使用业务系统登录 token；请求 /api/reachai/embed/**、/api/embed/chat/sessions 或消息接口时只能使用 ReachAI 返回的短期 embed token。不要把业务登录 token 当作 embed token 传给 ReachAI Chat API。
+11. 修改业务网关白名单 / 安全链：${embedTokenPath.value || '/api/reachai/embed-token'} 继续使用业务登录 token；但 /api/reachai/embed/** 是 ReachAI embed token 代理流量，必须绕过业务 OAuth/JWT 认证并原样透传 Authorization: Bearer <embedToken> 给 ReachAI。
+12. 如果业务系统用 Spring Cloud Gateway 代理 /api/reachai/embed/** 到 ReachAI /api/embed/**，检查是否会同时由网关和 ReachAI 返回 CORS 头；若会重复，请在该路由增加类似 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST 的响应头去重配置，避免浏览器把真实 401/500 遮蔽成 status 0 Unknown Error。
+13. 业务前端缓存 embed token 时必须按 expiresIn 提前失效；如果创建 session 或发送消息返回 embed token is expired，应清空缓存、重新调用 token broker 获取新 embed token 并重试一次。
+14. 保证网关转发时透传 X-ReachAI-Invocation-Token、X-ReachAI-Trace-Id、X-ReachAI-Run-Id，以及业务身份所需的 Authorization / 用户上下文头；业务接口不能只凭普通 X-ReachAI-* 上下文头放行。
+15. 分别运行业务后端、网关和业务前端的最小可行编译/构建/测试。
+16. 如果业务系统、网关和 ReachAI 服务可访问，调用 manifest 中的 sdkAccessCheckUrl 做接入自检，body 中带 gatewayBaseUrl=${gatewayBaseUrl.value || 'http://localhost:8080'} 与 embedTokenPath=${embedTokenPath.value || '/api/reachai/embed-token'}；否则说明缺少的本地前置条件。
+17. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
+
+进度回传要求：
+- 每完成或卡住一个关键步骤，请 POST 到“步骤进度回传 URL”，把 {stepKey} 替换为下列 key 之一：project-manifest、backend-sdk、reachai-config、capability-scan、gateway-route、embed-token-broker、gateway-whitelist、frontend-embed、connectivity-check、handoff-summary。
+- 请求体格式：{"status":"PASS|WARN|FAIL|RUNNING","message":"一句话说明","files":["相对路径"],"evidence":{"command":"执行过的命令","exitCode":0},"reportedBy":"${toolName}"}。
+- 如果你不能访问平台接口，请在最终总结里说明无法回传；如果可以访问，不要只在聊天里报告进度。
+- 做最终自检时优先调用“平台会话化自检 URL”，它会把检查结果同步写入当前会话。
+
+业务网关要求：
+- 网关需要暴露前端可调用的 embed token broker，例如 GET ${manifest?.embed?.tokenPath || embedTokenPath.value || '/api/reachai/embed-token'}?projectCode=${code}&agentId=${embedAgentId || '<manifest.embed.defaultAgentKeySlug>'}&pageInstanceId=...&route=...&origin=...。
+- token broker 服务端再调用 ReachAI POST /api/embed/token/exchange，请求体至少包含 projectCode、agentId、pageInstanceId、route、origin、principal.externalUserId。
+- 网关需要把 /api/reachai/embed/** 配成匿名代理或独立安全链，不能用业务 OAuth/JWT 校验 ReachAI embed token；如果有全局认证过滤器，也要跳过该路径。
+- Spring Cloud Gateway 代理 /api/reachai/embed/** 时，若网关和 ReachAI 都会写 CORS 响应头，请在该路由配置 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST，避免重复 CORS 头导致浏览器显示 status 0 Unknown Error。
+- 如果项目已有 Spring Cloud Gateway 路由，请补充到对应 application.yml / bootstrap.yml / 配置中心文件；如果是 Nginx 或前端代理，请补充到实际使用的网关配置。
+
+业务前端要求：
+- 在真实业务页面接入对话入口，不要只写 README 示例。
+- tokenProvider 只能请求业务网关 token broker，不能在浏览器拼 appSecret、registry 签名或项目级密钥。
+- tokenProvider 请求业务网关 token broker 时使用业务登录 token；创建 ReachAI session 和发送消息时使用 token broker 返回的短期 embed token，两者不能混用。
+- 前端缓存 embed token 必须按 expiresIn 提前失效；遇到 embed token is expired 时清缓存、重新获取并重试一次。
+- pageInstanceId、route、origin 要由前端运行时生成并传给 token broker，便于 ReachAI 做会话隔离、审计和页面动作回传。
 
 扫描边界要求：
 - 必须先从启动类、业务 Controller / Service 包、Maven 模块名中推断业务代码主包，例如 com.company.order 或 com.xxx.biz。
@@ -710,6 +821,7 @@ async function loadAll() {
     project.value = detail
     instances.value = instanceRows
     apiAssets.value = assetPage.items || []
+    await loadAccessSession(detail.id)
     if (!selectedApiAssetId.value) {
       selectedApiAssetId.value = callableApiAssets.value[0]?.apiId || apiAssets.value[0]?.apiId || null
     }
@@ -728,16 +840,33 @@ async function openAiOnboardingPrompt() {
   }
   aiPromptLoading.value = true
   try {
+    await ensureAccessSession(p.id)
     const { data } = await getAiOnboardingManifest(p.id)
     aiOnboardingManifest.value = data
-    aiCodingAccessEnabled.value = data.aiCodingAccess.enabled
-    aiCodingAccessKey.value = data.aiCodingAccess.accessKey || ''
+    aiCodingAccessEnabled.value = data.aiCodingAccess?.enabled ?? false
+    aiCodingAccessKey.value = data.aiCodingAccess?.accessKey || ''
     aiPromptDialogVisible.value = true
   } catch (error) {
     ElMessage.error((error as Error).message || '加载 AI 快速接入提示词失败')
   } finally {
     aiPromptLoading.value = false
   }
+}
+
+async function loadAccessSession(projectId: number) {
+  try {
+    const { data } = await getLatestAiAccessSession(projectId)
+    accessSession.value = data
+  } catch {
+    accessSession.value = null
+  }
+}
+
+async function ensureAccessSession(projectId: number) {
+  if (accessSession.value?.projectId === projectId) return accessSession.value
+  const { data } = await startAiAccessSession(projectId, aiPromptTool.value)
+  accessSession.value = data
+  return data
 }
 
 async function saveAiCodingAccess() {
@@ -785,14 +914,17 @@ async function runCheck() {
   }
   checking.value = true
   try {
-    const { data } = await runSdkAccessCheck(p.id, {
+    const payload = {
       apiAssetId: selectedApiAssetId.value,
       args,
       gatewayBaseUrl: gatewayBaseUrl.value,
       embedTokenPath: embedTokenPath.value,
-    })
-    checkResult.value = data
-    ElMessage[data.overallStatus === 'PASS' ? 'success' : 'warning']('SDK 接入自检已完成')
+    }
+    const session = await ensureAccessSession(p.id)
+    const { data } = await runAiAccessSessionChecks(p.id, session.sessionId, payload)
+    checkResult.value = data.checkResult
+    if (data.session) accessSession.value = data.session
+    ElMessage[data.checkResult.overallStatus === 'PASS' ? 'success' : 'warning']('SDK 接入自检已完成')
   } catch (error) {
     ElMessage.error((error as Error).message || 'SDK 接入自检失败')
   } finally {
@@ -833,6 +965,15 @@ function statusLabel(status: SdkAccessCheckStatus) {
   if (status === 'PASS') return '通过'
   if (status === 'WARN') return '需确认'
   return '失败'
+}
+
+function accessStatusLabel(status: AiAccessStepStatus | 'OPEN') {
+  if (status === 'PASS') return '完成'
+  if (status === 'WARN') return '需确认'
+  if (status === 'FAIL') return '失败'
+  if (status === 'RUNNING') return '进行中'
+  if (status === 'SKIPPED') return '跳过'
+  return '待处理'
 }
 </script>
 
@@ -3588,6 +3729,98 @@ function statusLabel(status: SdkAccessCheckStatus) {
 
 .ai-onboarding-alert {
   margin-bottom: 14px;
+}
+
+.ai-session-card {
+  margin: 14px 10px 0;
+  padding: 14px;
+  border: 1px solid rgb(var(--brand-hover-rgb) / 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.ai-session-head,
+.ai-session-progress,
+.ai-session-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-session-head span {
+  color: #11183a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ai-session-progress {
+  margin: 10px 0 12px;
+}
+
+.ai-session-progress strong {
+  color: var(--brand-active);
+  font-size: 18px;
+}
+
+.ai-session-progress span {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-steps {
+  display: grid;
+  gap: 7px;
+}
+
+.ai-session-step {
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.76);
+  color: #334155;
+  font-size: 12px;
+}
+
+.ai-session-step i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.ai-session-step span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-step em {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-style: normal;
+}
+
+.ai-session-step.pass i {
+  background: #22c55e;
+}
+
+.ai-session-step.warn i,
+.ai-session-step.running i {
+  background: #f59e0b;
+}
+
+.ai-session-step.fail i {
+  background: #ef4444;
 }
 
 .ai-coding-key-panel {

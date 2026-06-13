@@ -35,6 +35,7 @@ class EmbedTokenServiceTest {
                 .appId("bzsdk")
                 .projectCode("bzsdk")
                 .agentId("team-agent")
+                .pageKey("teamArchive.list")
                 .pageInstanceId("page-001")
                 .route("/team-management")
                 .origin("http://localhost:5173")
@@ -59,6 +60,7 @@ class EmbedTokenServiceTest {
         assertEquals("team-agent", claims.getAgentId());
         assertEquals("ADMIN001", claims.getExternalUserId());
         assertEquals("emp-0001", claims.getGlobalUserId());
+        assertEquals("teamArchive.list", claims.getPageKey());
         assertEquals("page-001", claims.getPageInstanceId());
         assertEquals("http://localhost:5173", claims.getOrigin());
         assertNotNull(claims.getJti());
@@ -129,6 +131,7 @@ class EmbedTokenServiceTest {
                 .appId("bzsdk")
                 .projectCode("bzsdk")
                 .agentId("team-agent")
+                .pageKey("teamArchive.list")
                 .pageInstanceId("page-001")
                 .route("/team-management")
                 .origin("http://localhost:5173")

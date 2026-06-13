@@ -5,9 +5,6 @@
         <el-button link :icon="ArrowLeft" @click="goBack">返回项目详情</el-button>
         <h1>创建页面助手</h1>
       </div>
-      <div class="header-actions">
-        <el-button :icon="Refresh" :loading="loading" @click="loadAll">刷新目录</el-button>
-      </div>
     </header>
 
     <main class="wizard-shell">
@@ -40,46 +37,48 @@
           <div class="panel-head">
             <div>
               <span class="step-kicker">步骤 1</span>
-              <h2>接入总览</h2>
             </div>
-            <el-popover v-model:visible="sdkHelperVisible" placement="left-start" :width="640" trigger="click" popper-class="sdk-template-popover">
-              <template #reference>
-                <el-button class="access-template-button" :icon="DocumentCopy">接入模板</el-button>
-              </template>
-              <div class="template-box template-modal inline-template">
-                <div class="template-modal-head">
-                  <div class="template-title-block">
-                    <span class="template-icon">
-                      <el-icon><DocumentCopy /></el-icon>
-                    </span>
-                    <div>
-                      <h3>接入模板</h3>
-                      <p>用于展示最小页面动作声明示例，帮助业务系统完成 SDK 接入</p>
-                      <div class="template-badges">
-                        <span>推荐模板</span>
-                        <span>最小示例</span>
+            <div class="panel-actions">
+              <el-button type="primary" :icon="DocumentCopy" @click="openAiPromptDialog">AI 快速接入</el-button>
+              <el-popover v-model:visible="sdkHelperVisible" placement="left-start" :width="640" trigger="click" popper-class="sdk-template-popover">
+                <template #reference>
+                  <el-button class="access-template-button" :icon="DocumentCopy">手动接入</el-button>
+                </template>
+                <div class="template-box template-modal inline-template">
+                  <div class="template-modal-head">
+                    <div class="template-title-block">
+                      <span class="template-icon">
+                        <el-icon><DocumentCopy /></el-icon>
+                      </span>
+                      <div>
+                        <h3>手动接入</h3>
+                        <p>用于展示最小页面动作声明示例，帮助业务系统完成 SDK 接入</p>
+                        <div class="template-badges">
+                          <span>推荐模板</span>
+                          <span>最小示例</span>
+                        </div>
                       </div>
                     </div>
+                    <div class="template-actions">
+                      <el-button class="copy-template-button" :icon="DocumentCopy" @click="copySdkTemplate">
+                        {{ sdkTemplateCopied ? '已复制' : '复制代码' }}
+                      </el-button>
+                      <button class="template-close-button" type="button" aria-label="关闭手动接入" @click="sdkHelperVisible = false">
+                        <el-icon><Close /></el-icon>
+                      </button>
+                    </div>
                   </div>
-                  <div class="template-actions">
-                    <el-button class="copy-template-button" :icon="DocumentCopy" @click="copySdkTemplate">
-                      {{ sdkTemplateCopied ? '已复制' : '复制代码' }}
-                    </el-button>
-                    <button class="template-close-button" type="button" aria-label="关闭接入模板" @click="sdkHelperVisible = false">
-                      <el-icon><Close /></el-icon>
-                    </button>
+                  <div class="template-code-shell">
+                    <div class="template-code-toolbar">
+                      <span>JavaScript</span>
+                      <span>SDK 示例</span>
+                      <span>已适配页面动作目录</span>
+                    </div>
+                    <pre><code v-html="highlightedSdkTemplate" /></pre>
                   </div>
                 </div>
-                <div class="template-code-shell">
-                  <div class="template-code-toolbar">
-                    <span>JavaScript</span>
-                    <span>SDK 示例</span>
-                    <span>已适配页面动作目录</span>
-                  </div>
-                  <pre><code v-html="highlightedSdkTemplate" /></pre>
-                </div>
-              </div>
-            </el-popover>
+              </el-popover>
+            </div>
           </div>
 
           <div class="health-grid">
@@ -90,6 +89,49 @@
             </div>
           </div>
 
+          <section class="page-access-board">
+            <div class="page-access-board-head">
+              <div>
+                <h3>页面接入进度</h3>
+                <small>{{ pageAssistantAccessCount ? `${pageAssistantAccessCount} 个页面接入任务` : '复制提示词后，Cursor 回传进度会出现在这里' }}</small>
+              </div>
+              <el-button size="small" :loading="pageAssistantSessionsLoading" @click="loadPageAssistantSessions()">刷新进度</el-button>
+            </div>
+            <div v-if="pageAssistantAccessCount" class="page-access-progress">
+              <div class="page-access-status-row" aria-label="页面接入状态统计">
+                <span v-for="group in pageAssistantAccessGroups" :key="group.key" class="page-access-status-pill">
+                  <strong>{{ group.title }}</strong>
+                  <small>{{ group.items.length }}</small>
+                </span>
+              </div>
+              <div class="page-access-card-list">
+                <article v-for="session in pageAssistantSessions" :key="session.sessionId" class="page-access-card">
+                  <div class="page-access-card-head">
+                    <span>
+                      <strong>{{ pageAccessTitle(session) }}</strong>
+                      <small>{{ session.targetRoute || '等待目标路由' }}</small>
+                    </span>
+                    <el-tag size="small" :type="pageAccessStateTagType(session.completionState)" effect="plain">
+                      {{ pageAccessStateLabel(session.completionState) }}
+                    </el-tag>
+                  </div>
+                  <div class="page-access-card-meta">
+                    <span>{{ session.toolName || 'AI Coding' }}</span>
+                    <span>{{ session.completedSteps }}/{{ session.totalSteps }} 步</span>
+                    <span>{{ session.actionCount }} 动作</span>
+                  </div>
+                  <p>{{ session.lastMessage || session.sessionId }}</p>
+                  <div class="page-access-card-actions">
+                    <el-button size="small" text @click="selectedPageAssistantAccess = session">详情</el-button>
+                    <el-button size="small" text :loading="pageAssistantCheckRunning" @click="runPageAssistantCardCheck(session)">自检</el-button>
+                    <el-button size="small" text :disabled="!session.targetPageKey" @click="usePageAssistantAccess(session)">创建助手</el-button>
+                  </div>
+                </article>
+              </div>
+            </div>
+            <el-empty v-else description="暂无页面接入任务" :image-size="64" />
+          </section>
+
           <div class="step-footer-note">
             <el-alert
               v-if="!pageRegistry.length"
@@ -97,7 +139,7 @@
               show-icon
               :closable="false"
               title="当前项目还没有页面上报"
-              description="可以查看接入模板完成 SDK 声明，或先手工声明一个页面动作草案。"
+              description="可以查看手动接入完成 SDK 声明，或先手工声明一个页面动作草案。"
             />
             <el-alert
               v-else
@@ -135,7 +177,7 @@
               <el-tag size="small" effect="plain">{{ actionCount(page.pageKey) }} 动作</el-tag>
             </button>
           </div>
-          <el-empty v-else description="暂无页面上报，可先查看接入模板或手工声明动作" :image-size="88" />
+          <el-empty v-else description="暂无页面上报，可先查看手动接入或手工声明动作" :image-size="88" />
 
           <div class="step-footer-note">
             <el-alert
@@ -416,6 +458,154 @@
         <el-button type="primary" :loading="manualSubmitting" @click="submitManualAction">保存动作草案</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="pageAssistantAccessDetailVisible"
+      title="页面接入详情"
+      width="780px"
+      destroy-on-close
+    >
+      <div v-if="selectedPageAssistantAccess" class="page-access-detail">
+        <div class="page-access-detail-head">
+          <span>
+            <strong>{{ pageAccessTitle(selectedPageAssistantAccess) }}</strong>
+            <small>{{ selectedPageAssistantAccess.targetRoute || '等待 Cursor 绑定目标路由' }}</small>
+          </span>
+          <el-tag :type="pageAccessStateTagType(selectedPageAssistantAccess.completionState)" effect="plain">
+            {{ pageAccessStateLabel(selectedPageAssistantAccess.completionState) }}
+          </el-tag>
+        </div>
+        <div class="page-access-detail-meta">
+          <span>Session：{{ selectedPageAssistantAccess.sessionId }}</span>
+          <span>工具：{{ selectedPageAssistantAccess.toolName || '-' }}</span>
+          <span>动作：{{ selectedPageAssistantAccess.actionCount }}</span>
+          <span>最近回传：{{ selectedPageAssistantAccess.lastReportedAt || '-' }}</span>
+        </div>
+        <div class="page-access-step-detail-list">
+          <section v-for="step in selectedPageAssistantAccess.steps" :key="step.stepKey" class="page-access-step-detail">
+            <div>
+              <el-tag size="small" :type="stepStatusTagType(step.status)" effect="plain">{{ step.status }}</el-tag>
+              <strong>{{ step.title }}</strong>
+              <small>{{ step.stepKey }}</small>
+            </div>
+            <p>{{ step.message || '暂无回传说明' }}</p>
+            <pre v-if="Object.keys(step.evidence || {}).length">{{ formatEvidence(step.evidence) }}</pre>
+          </section>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="selectedPageAssistantAccess = null">关闭</el-button>
+        <el-button
+          v-if="selectedPageAssistantAccess"
+          type="primary"
+          :disabled="!selectedPageAssistantAccess.targetPageKey"
+          @click="usePageAssistantAccess(selectedPageAssistantAccess)"
+        >
+          基于此页面创建助手
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="aiPromptDialogVisible" title="页面助手 AI 快速接入" width="860px" destroy-on-close>
+      <div class="ai-prompt-dialog">
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          title="复制给 Cursor / Codex / Claude Code"
+          description="该提示词只面向当前业务前端页面动作接入；项目级 SDK、网关和 embed token 接入仍走项目 AI 快速接入。"
+        />
+        <section class="ai-access-session-panel">
+          <div class="ai-access-session-head">
+            <div>
+              <span>页面助手进度会话</span>
+              <strong>{{ pageAssistantSession?.sessionId || '准备中' }}</strong>
+            </div>
+            <div class="ai-access-session-actions">
+              <el-button size="small" :loading="pageAssistantManifestLoading" @click="refreshPageAssistantSession">刷新进度</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                :loading="pageAssistantCheckRunning"
+                :disabled="!pageAssistantSession"
+                @click="runPageAssistantSelfCheck"
+              >
+                运行自检
+              </el-button>
+            </div>
+          </div>
+          <div class="ai-access-meta-grid">
+            <span>
+              <small>App Key</small>
+              <strong>{{ pageAssistantManifest?.project.registryAppKey || project?.registryAppKey || '未配置' }}</strong>
+            </span>
+            <span>
+              <small>AI Coding</small>
+              <strong>{{ aiCodingAccessState }}</strong>
+            </span>
+            <span>
+              <small>目标页面</small>
+              <strong>{{ selectedPage?.name || selectedPageKey || '待确认' }}</strong>
+            </span>
+            <span>
+              <small>接入进度</small>
+              <strong>{{ pageAssistantProgressText }}</strong>
+            </span>
+          </div>
+          <div v-if="pageAssistantSessionSteps.length" class="ai-access-step-list">
+            <div v-for="step in pageAssistantSessionSteps" :key="step.stepKey" class="ai-access-step">
+              <el-tag size="small" :type="stepStatusTagType(step.status)" effect="plain">{{ step.status }}</el-tag>
+              <span>{{ step.title }}</span>
+              <small>{{ step.message || step.stepKey }}</small>
+            </div>
+          </div>
+          <el-alert
+            v-else
+            type="warning"
+            show-icon
+            :closable="false"
+            title="尚未获取到页面助手进度"
+            description="可以先复制提示词；Cursor 完成接入后可按提示词中的 page-assistant session URL 回传进度。"
+          />
+        </section>
+        <section class="ai-helper-command-list">
+          <div class="ai-helper-command">
+            <span>
+              <strong>Angular scaffold</strong>
+              <small>在业务前端仓库生成官方 Page Action bridge 模板</small>
+            </span>
+            <code>{{ pageAssistantScaffoldCommand }}</code>
+            <el-button size="small" :icon="DocumentCopy" @click="copyText(pageAssistantScaffoldCommand, '已复制 scaffold 命令')">复制</el-button>
+          </div>
+          <div class="ai-helper-command">
+            <span>
+              <strong>本地 verify</strong>
+              <small>使用本机 PowerShell 验证静态证据；需要时加 -ReportToPlatform 回传</small>
+            </span>
+            <code>{{ pageAssistantVerifyCommand }}</code>
+            <el-button size="small" :icon="DocumentCopy" @click="copyText(pageAssistantVerifyCommand, '已复制 verify 命令')">复制</el-button>
+          </div>
+        </section>
+        <div class="ai-prompt-toolbar">
+          <el-radio-group v-model="aiPromptTool" size="small">
+            <el-radio-button label="Cursor" />
+            <el-radio-button label="Codex" />
+            <el-radio-button label="Claude Code" />
+          </el-radio-group>
+          <el-button type="primary" :icon="DocumentCopy" @click="copyPageAssistantPrompt">
+            {{ aiPromptCopied ? '已复制' : '复制提示词' }}
+          </el-button>
+        </div>
+        <el-input
+          class="ai-prompt-editor"
+          :model-value="pageAssistantOnboardingPrompt"
+          type="textarea"
+          :rows="24"
+          resize="none"
+          readonly
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -423,7 +613,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Close, Connection, DocumentCopy, Finished, MagicStick, Operation, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
+import { ArrowLeft, Close, Connection, DocumentCopy, Finished, MagicStick, Operation, Plus, Search, Warning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { generateWorkflowDraft } from '@/api/agent'
 import { listApiAssets } from '@/api/apiAsset'
@@ -436,11 +626,18 @@ import {
   type PageRegistryView,
 } from '@/api/embedOps'
 import { getModelInstances } from '@/api/model'
-import { getScanProjects } from '@/api/scanProject'
+import {
+  getPageAssistantAccessSessions,
+  getLatestPageAssistantAccessSession,
+  getPageAssistantOnboardingManifest,
+  getScanProjects,
+  runPageAssistantAccessSessionChecks,
+} from '@/api/scanProject'
 import type { WorkflowDraftGenerationResult, WorkflowDraftResource } from '@/types/agent'
 import type { ApiAssetItem } from '@/types/apiAsset'
 import type { ModelInstance } from '@/types/model'
-import type { ScanProject } from '@/types/scanProject'
+import type { AiAccessSession, PageAssistantOnboardingManifest, PageAssistantSessionRequest, PageAssistantSessionSummary, ScanProject } from '@/types/scanProject'
+import { buildPageAssistantOnboardingPrompt } from './pageAssistantOnboardingPrompt'
 
 const STUDIO_DRAFT_KEY = 'reachai:page-assistant-draft'
 type WizardStepKey = 'connect' | 'page' | 'action' | 'draft' | 'studio'
@@ -459,7 +656,7 @@ const apiAssets = ref<ApiAssetItem[]>([])
 const selectedApiAssets = ref<ApiAssetItem[]>([])
 const modelOptions = ref<ModelInstance[]>([])
 const modelInstanceId = ref('')
-const focusedStep = ref<WizardStepKey | ''>('')
+const focusedStep = ref<WizardStepKey | ''>('connect')
 const statusStripRef = ref<HTMLElement | null>(null)
 const pagePanelRef = ref<HTMLElement | null>(null)
 const sdkHelperVisible = ref(false)
@@ -472,12 +669,23 @@ const generating = ref(false)
 const draftPreview = ref<WorkflowDraftGenerationResult | null>(null)
 const manualDialogVisible = ref(false)
 const manualSubmitting = ref(false)
+const aiPromptDialogVisible = ref(false)
+const aiPromptCopied = ref(false)
+const aiPromptTool = ref<'Cursor' | 'Codex' | 'Claude Code'>('Cursor')
+const pageAssistantManifest = ref<PageAssistantOnboardingManifest | null>(null)
+const pageAssistantSession = ref<AiAccessSession | null>(null)
+const pageAssistantSessions = ref<PageAssistantSessionSummary[]>([])
+const selectedPageAssistantAccess = ref<PageAssistantSessionSummary | null>(null)
+const pageAssistantManifestLoading = ref(false)
+const pageAssistantCheckRunning = ref(false)
+const pageAssistantSessionsLoading = ref(false)
 const stepTransitionName = ref('')
 const stepAttentionName = ref('')
 let lastWheelAt = 0
 let cardAnimationTimer: ReturnType<typeof setTimeout> | undefined
 let cardAttentionTimer: ReturnType<typeof setTimeout> | undefined
 let sdkCopyTimer: ReturnType<typeof setTimeout> | undefined
+let aiPromptCopyTimer: ReturnType<typeof setTimeout> | undefined
 const manualForm = reactive({
   pageKey: '',
   pageName: '',
@@ -517,7 +725,7 @@ const draftNodeCount = computed(() => draftPreview.value?.graphSpec?.nodes?.leng
 const draftEdgeCount = computed(() => draftPreview.value?.graphSpec?.edges?.length || 0)
 const draftIssueCount = computed(() => draftPreview.value?.validationErrors?.length || 0)
 const steps = computed(() => [
-  { index: 1, key: 'connect' as const, title: '接入总览', desc: '确认页面与动作目录', done: pageRegistry.value.length > 0 || pageActions.value.length > 0 },
+  { index: 1, key: 'connect' as const, title: '接入准备', desc: 'AI 或手动接入页面动作', done: pageRegistry.value.length > 0 || pageActions.value.length > 0 },
   { index: 2, key: 'page' as const, title: '选择页面', desc: selectedPage.value?.name || selectedPageKey.value || '定位业务页面', done: Boolean(selectedPageKey.value) },
   { index: 3, key: 'action' as const, title: '选择动作', desc: '声明可执行能力', done: selectedActions.value.length > 0 },
   { index: 4, key: 'draft' as const, title: '生成草稿', desc: '构建 GraphSpec', done: Boolean(draftPreview.value) },
@@ -529,12 +737,101 @@ const stats = computed(() => [
   { key: 'active', icon: 'A', label: 'ACTIVE', value: String(activeActionCount.value) },
   { key: 'api', icon: 'API', label: 'API 资产', value: String(apiAssets.value.length) },
 ])
+const pageAssistantAccessGroups = computed(() => {
+  const groups = [
+    { key: 'WAITING_TARGET', title: '待确认', desc: '等待 Cursor 绑定目标页面', items: [] as PageAssistantSessionSummary[] },
+    { key: 'IN_PROGRESS', title: '接入中', desc: 'AI 正在回传步骤进度', items: [] as PageAssistantSessionSummary[] },
+    { key: 'COMPLETED', title: '已完成', desc: '可直接带入创建助手', items: [] as PageAssistantSessionSummary[] },
+    { key: 'BLOCKED', title: '失败/阻塞', desc: '需要人工处理异常', items: [] as PageAssistantSessionSummary[] },
+  ]
+  const byKey = new Map(groups.map((group) => [group.key, group]))
+  for (const session of pageAssistantSessions.value) {
+    const state = session.completionState || 'IN_PROGRESS'
+    const group = byKey.get(state) || byKey.get('IN_PROGRESS')
+    group?.items.push(session)
+  }
+  return groups
+})
+const pageAssistantAccessCount = computed(() => pageAssistantSessions.value.length)
 const sdkTemplate = computed(() => {
   const pageKey = selectedPageKey.value || manualForm.pageKey || 'teamArchive.list'
   const actionKey = selectedActions.value[0]?.actionKey || manualForm.actionKey || 'qmssmp.teamArchive.search'
   return `pageBridge.registerAction({\n  pageKey: '${pageKey}',\n  actionKey: '${actionKey}',\n  title: '查询班组档案',\n  inputSchema: {\n    type: 'object',\n    properties: {\n      teamName: { type: 'string', description: '班组名称' }\n    }\n  },\n  sampleArgs: { teamName: '一班' },\n  handler: async (args) => {\n    // 调用当前页面已有查询函数，并返回执行结果\n    return await queryTeams(args)\n  }\n})`
 })
 const highlightedSdkTemplate = computed(() => highlightSdkCode(sdkTemplate.value))
+const pageAssistantPromptActions = computed(() => selectedActions.value.length ? selectedActions.value : filteredActions.value)
+const pageAssistantActionKeys = computed(() => {
+  const keys = pageAssistantPromptActions.value
+    .map((action) => action.actionKey)
+    .filter((key): key is string => Boolean(key))
+  return Array.from(new Set(keys))
+})
+const pageAssistantSessionSteps = computed(() => pageAssistantSession.value?.steps || [])
+const pageAssistantAccessDetailVisible = computed({
+  get: () => Boolean(selectedPageAssistantAccess.value),
+  set: (visible: boolean) => {
+    if (!visible) selectedPageAssistantAccess.value = null
+  },
+})
+const pageAssistantProgressText = computed(() => {
+  const session = pageAssistantSession.value
+  if (!session) return '未开始'
+  if (!session.totalSteps) return session.status || 'OPEN'
+  return `${session.completedSteps}/${session.totalSteps} · ${session.status}`
+})
+const aiCodingAccessState = computed(() => {
+  const access = pageAssistantManifest.value?.aiCodingAccess
+  if (!access?.enabled) return '未启用'
+  return access.accessKey ? '已启用' : '已启用，未生成秘钥'
+})
+const pageAssistantManifestUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.manifestUrl) || '')
+const pageAssistantRegisterPageUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.registerPageUrl) || '')
+const pageAssistantScaffoldCommand = computed(() => {
+  const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
+  return `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "${manifestUrl}" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
+})
+const pageAssistantVerifyCommand = computed(() => {
+  const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
+  const routePattern = selectedPage.value?.routePattern || '<目标路由>'
+  const pageKey = selectedPage.value?.pageKey || selectedPageKey.value || '<pageKey>'
+  return `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "${manifestUrl}" -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
+})
+const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardingPrompt({
+  toolName: aiPromptTool.value,
+  platformUrl: window.location.origin,
+  project: {
+    id: project.value?.id,
+    projectCode: project.value?.projectCode || projectCode.value,
+    name: project.value?.name || projectCode.value,
+    appKey: pageAssistantManifest.value?.project.registryAppKey || project.value?.registryAppKey,
+  },
+  page: selectedPage.value
+    ? {
+      pageKey: selectedPage.value.pageKey,
+      name: selectedPage.value.name,
+      routePattern: selectedPage.value.routePattern,
+    }
+    : {
+      pageKey: selectedPageKey.value,
+      name: selectedPageKey.value,
+      routePattern: '',
+    },
+  actions: pageAssistantPromptActions.value,
+  progress: {
+    aiCodingAccessKey: pageAssistantManifest.value?.aiCodingAccess.accessKey,
+    appSecretEnv: pageAssistantManifest.value?.security.appSecretEnv,
+    sessionId: pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId,
+    manifestUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.manifestUrl),
+    latestSessionUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.latestSessionUrl),
+    stepReportUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.stepReportUrl),
+    targetBindUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.targetBindUrl),
+    catalogSyncUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.catalogSyncUrl),
+    checksRunUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.checksRunUrl),
+    registerPageUrl: pageAssistantRegisterPageUrlWithKey.value,
+    scaffoldCommand: pageAssistantScaffoldCommand.value,
+    verifyCommand: pageAssistantVerifyCommand.value,
+  },
+}))
 
 function escapeHtml(value: string) {
   return value
@@ -561,6 +858,18 @@ function highlightSdkCode(value: string) {
 watch([selectedPage, assistantGoal], () => {
   agentName.value = agentName.value || `${selectedPage.value?.name || project.value?.name || projectCode.value}页面助手`
   requirement.value = defaultRequirement()
+})
+
+watch(aiPromptDialogVisible, (visible) => {
+  if (visible) {
+    void loadPageAssistantManifest()
+  }
+})
+
+watch([selectedPageKey, pageAssistantActionKeys, aiPromptTool], () => {
+  if (aiPromptDialogVisible.value) {
+    void loadPageAssistantManifest({ silent: true })
+  }
 })
 
 function actionCount(pageKey: string) {
@@ -649,7 +958,9 @@ function focusStepCard(key: WizardStepKey, options: { attention?: boolean } = {}
   }
   const target = key === 'connect' ? statusStripRef.value : pagePanelRef.value
   nextTick(() => {
-    target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    const scrollParent = target?.closest?.('.main-content') as HTMLElement | null
+    if (!target || !scrollParent || target.offsetHeight > scrollParent.clientHeight) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   })
 }
 
@@ -719,6 +1030,9 @@ async function loadAll() {
       selectedPageKey.value = ''
       selectedActions.value = []
       draftPreview.value = null
+    }
+    if (project.value?.id) {
+      await loadPageAssistantSessions({ silent: true })
     }
     agentName.value = agentName.value || `${project.value?.name || projectCode.value}页面助手`
     requirement.value = requirement.value || defaultRequirement()
@@ -850,6 +1164,198 @@ function modelOptionLabel(model: ModelInstance) {
   return `${model.name || model.id} · ${model.provider || '未知厂商'} · ${modelName}`
 }
 
+function pageAssistantSessionRequest(): PageAssistantSessionRequest {
+  return {
+    toolName: aiPromptTool.value,
+    pageKey: selectedPage.value?.pageKey || selectedPageKey.value || undefined,
+    routePattern: selectedPage.value?.routePattern || undefined,
+    actionKeys: pageAssistantActionKeys.value,
+  }
+}
+
+function withAiCodingKey(url?: string | null) {
+  const value = url?.trim()
+  const key = pageAssistantManifest.value?.aiCodingAccess.enabled
+    ? pageAssistantManifest.value?.aiCodingAccess.accessKey?.trim()
+    : ''
+  if (!value || !key || value.includes('aiCodingKey=')) return value || undefined
+  const separator = value.includes('?') ? '&' : '?'
+  return `${value}${separator}aiCodingKey=${encodeURIComponent(key)}`
+}
+
+function stepStatusTagType(status: string) {
+  if (status === 'PASS') return 'success'
+  if (status === 'WARN' || status === 'SKIPPED') return 'warning'
+  if (status === 'FAIL') return 'danger'
+  if (status === 'RUNNING') return 'primary'
+  return 'info'
+}
+
+function pageAccessStateLabel(state?: string | null) {
+  const value = String(state || '').toUpperCase()
+  if (value === 'WAITING_TARGET') return '待确认'
+  if (value === 'COMPLETED') return '已完成'
+  if (value === 'BLOCKED') return '阻塞'
+  return '接入中'
+}
+
+function pageAccessStateTagType(state?: string | null) {
+  const value = String(state || '').toUpperCase()
+  if (value === 'COMPLETED') return 'success'
+  if (value === 'BLOCKED') return 'danger'
+  if (value === 'WAITING_TARGET') return 'warning'
+  return 'primary'
+}
+
+function pageAccessTitle(session: PageAssistantSessionSummary) {
+  const page = pageRegistry.value.find((item) => item.pageKey === session.targetPageKey)
+  return page?.name || session.targetPageKey || '待确认业务页面'
+}
+
+function pageActionKeysForSession(session: PageAssistantSessionSummary) {
+  return pageActions.value
+    .filter((action) => action.pageKey === session.targetPageKey)
+    .map((action) => action.actionKey)
+    .filter((key): key is string => Boolean(key))
+}
+
+function formatEvidence(evidence: Record<string, unknown>) {
+  return JSON.stringify(evidence || {}, null, 2)
+}
+
+function openAiPromptDialog() {
+  if (aiPromptDialogVisible.value) {
+    void loadPageAssistantManifest()
+    return
+  }
+  aiPromptDialogVisible.value = true
+}
+
+async function loadPageAssistantSessions(options: { silent?: boolean } = {}) {
+  if (!project.value?.id) {
+    if (!options.silent) ElMessage.warning('项目详情尚未加载完成，请稍后再试')
+    return
+  }
+  pageAssistantSessionsLoading.value = true
+  try {
+    const { data } = await getPageAssistantAccessSessions(project.value.id)
+    pageAssistantSessions.value = data || []
+    if (selectedPageAssistantAccess.value) {
+      selectedPageAssistantAccess.value = pageAssistantSessions.value.find((item) =>
+        item.sessionId === selectedPageAssistantAccess.value?.sessionId) || selectedPageAssistantAccess.value
+    }
+  } catch (error) {
+    if (!options.silent) {
+      ElMessage.warning((error as Error).message || '加载页面接入进度失败')
+    }
+  } finally {
+    pageAssistantSessionsLoading.value = false
+  }
+}
+
+async function loadPageAssistantManifest(options: { silent?: boolean } = {}) {
+  if (!project.value?.id) {
+    if (!options.silent) ElMessage.warning('项目详情尚未加载完成，请稍后再试')
+    return
+  }
+  pageAssistantManifestLoading.value = true
+  try {
+    const { data } = await getPageAssistantOnboardingManifest(project.value.id, pageAssistantSessionRequest())
+    pageAssistantManifest.value = data
+    pageAssistantSession.value = data.session
+    await loadPageAssistantSessions({ silent: true })
+  } catch (error) {
+    if (!options.silent) {
+      ElMessage.warning((error as Error).message || '获取页面助手 AI 接入会话失败')
+    }
+  } finally {
+    pageAssistantManifestLoading.value = false
+  }
+}
+
+async function refreshPageAssistantSession() {
+  if (!project.value?.id) {
+    ElMessage.warning('项目详情尚未加载完成，请稍后再试')
+    return
+  }
+  pageAssistantManifestLoading.value = true
+  try {
+    const { data } = await getLatestPageAssistantAccessSession(project.value.id, selectedPage.value?.pageKey || selectedPageKey.value)
+    pageAssistantSession.value = data
+    await loadPageAssistantSessions({ silent: true })
+  } catch {
+    await loadPageAssistantManifest({ silent: true })
+  } finally {
+    pageAssistantManifestLoading.value = false
+  }
+}
+
+async function runPageAssistantSelfCheck() {
+  const session = pageAssistantSession.value
+  if (!project.value?.id || !session?.sessionId) {
+    ElMessage.warning('请先创建页面助手 AI 接入会话')
+    return
+  }
+  pageAssistantCheckRunning.value = true
+  try {
+    const { data } = await runPageAssistantAccessSessionChecks(project.value.id, session.sessionId, {
+      pageKey: selectedPage.value?.pageKey || selectedPageKey.value || undefined,
+      routePattern: selectedPage.value?.routePattern || undefined,
+      actionKeys: pageAssistantActionKeys.value,
+    })
+    pageAssistantSession.value = data.session
+    await loadPageAssistantSessions({ silent: true })
+    ElMessage.success(`页面助手自检完成：${data.checkResult.overallStatus}`)
+  } catch (error) {
+    ElMessage.error((error as Error).message || '页面助手自检失败')
+  } finally {
+    pageAssistantCheckRunning.value = false
+  }
+}
+
+async function runPageAssistantCardCheck(session: PageAssistantSessionSummary) {
+  if (!project.value?.id) {
+    ElMessage.warning('项目详情尚未加载完成，请稍后再试')
+    return
+  }
+  pageAssistantCheckRunning.value = true
+  try {
+    const { data } = await runPageAssistantAccessSessionChecks(project.value.id, session.sessionId, {
+      pageKey: session.targetPageKey || undefined,
+      routePattern: session.targetRoute || undefined,
+      actionKeys: pageActionKeysForSession(session),
+    })
+    pageAssistantSession.value = data.session
+    await loadPageAssistantSessions({ silent: true })
+    ElMessage.success(`页面助手自检完成：${data.checkResult.overallStatus}`)
+  } catch (error) {
+    ElMessage.error((error as Error).message || '页面助手自检失败')
+  } finally {
+    pageAssistantCheckRunning.value = false
+  }
+}
+
+function usePageAssistantAccess(session: PageAssistantSessionSummary) {
+  const pageKey = session.targetPageKey || ''
+  if (!pageKey) {
+    ElMessage.warning('该接入任务还没有绑定 pageKey')
+    return
+  }
+  const page = pageRegistry.value.find((item) => item.pageKey === pageKey)
+  selectedPageKey.value = pageKey
+  selectedPageIdentity.value = page ? pageIdentity(page) : ''
+  selectedActions.value = pageActions.value.filter((action) => action.pageKey === pageKey && action.status === 'ACTIVE')
+  if (!selectedActions.value.length) {
+    selectedActions.value = pageActions.value.filter((action) => action.pageKey === pageKey)
+  }
+  agentName.value = agentName.value || `${page?.name || pageKey}页面助手`
+  requirement.value = defaultRequirement()
+  selectedPageAssistantAccess.value = null
+  draftPreview.value = null
+  selectStep(selectedActions.value.length ? 'draft' : 'action')
+  ElMessage.success('已带入页面和动作，可继续创建页面助手')
+}
+
 async function generateDraft() {
   if (!selectedActions.value.length) {
     ElMessage.warning('请至少选择一个页面动作')
@@ -932,6 +1438,35 @@ async function copySdkTemplate() {
   }
 }
 
+async function copyPageAssistantPrompt() {
+  try {
+    if (!pageAssistantSession.value && project.value?.id) {
+      await loadPageAssistantManifest({ silent: true })
+    }
+    await navigator.clipboard.writeText(pageAssistantOnboardingPrompt.value)
+    aiPromptCopied.value = true
+    if (aiPromptCopyTimer) {
+      clearTimeout(aiPromptCopyTimer)
+    }
+    aiPromptCopyTimer = setTimeout(() => {
+      aiPromptCopied.value = false
+      aiPromptCopyTimer = undefined
+    }, 1600)
+    ElMessage.success('页面助手接入提示词已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择提示词')
+  }
+}
+
+async function copyText(value: string, successMessage: string) {
+  try {
+    await navigator.clipboard.writeText(value)
+    ElMessage.success(successMessage)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择内容')
+  }
+}
+
 function goBack() {
   router.push({ name: 'RegistryProjectDetail', params: { projectCode: projectCode.value } })
 }
@@ -996,26 +1531,8 @@ onMounted(loadAll)
   }
 }
 
-.header-actions,
 .draft-actions {
   align-items: center;
-}
-
-.header-actions {
-  padding-top: 12px;
-
-  :deep(.el-button) {
-    height: 44px;
-    padding: 0 24px;
-    border-radius: 8px;
-    font-weight: 700;
-  }
-
-  :deep(.el-button--primary) {
-    border: 0;
-    background: linear-gradient(135deg, #356dff, #6d4cff);
-    box-shadow: 0 14px 28px rgba(91, 92, 255, 0.28);
-  }
 }
 
 .step-progress,
@@ -1290,6 +1807,20 @@ onMounted(loadAll)
 
   :deep(.el-button) {
     border-radius: 8px;
+  }
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  :deep(.el-button) {
+    height: 36px;
+    border-radius: 8px;
+    font-weight: 800;
   }
 }
 
@@ -2630,6 +3161,367 @@ onMounted(loadAll)
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.ai-prompt-dialog {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-prompt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-helper-command-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-helper-command {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.5fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(167, 190, 230, 0.42);
+  border-radius: 8px;
+  background: rgba(248, 251, 255, 0.72);
+}
+
+.ai-helper-command span {
+  display: grid;
+  gap: 2px;
+}
+
+.ai-helper-command small {
+  color: #718096;
+}
+
+.ai-helper-command code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #334155;
+  font-size: 12px;
+}
+
+.ai-access-session-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(167, 190, 230, 0.42);
+  border-radius: 8px;
+  background: rgba(248, 251, 255, 0.74);
+}
+
+.ai-access-session-head,
+.ai-access-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-access-session-head span,
+.ai-access-meta-grid small,
+.ai-access-step small {
+  color: #63718f;
+  font-size: 12px;
+}
+
+.ai-access-session-head strong {
+  display: block;
+  margin-top: 2px;
+  color: #14233b;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.ai-access-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-access-meta-grid span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(167, 190, 230, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.ai-access-meta-grid strong {
+  overflow: hidden;
+  color: #20314f;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-access-step-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-access-step {
+  display: grid;
+  grid-template-columns: auto minmax(86px, 0.7fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(167, 190, 230, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.ai-access-step span,
+.ai-access-step small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-access-step span {
+  color: #20314f;
+  font-weight: 700;
+}
+
+.page-access-board {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(167, 190, 230, 0.42);
+  border-radius: 8px;
+  background: rgba(248, 251, 255, 0.68);
+}
+
+.page-access-board-head,
+.page-access-card-head,
+.page-access-card-actions,
+.page-access-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.page-access-board-head h3 {
+  margin: 0;
+  color: #14233b;
+  font-size: 15px;
+}
+
+.page-access-board-head small,
+.page-access-card small,
+.page-access-status-pill small,
+.page-access-empty,
+.page-access-detail small,
+.page-access-detail-meta,
+.page-access-step-detail small {
+  color: #63718f;
+  font-size: 12px;
+}
+
+.page-access-progress {
+  display: grid;
+  gap: 10px;
+}
+
+.page-access-status-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.page-access-status-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(167, 190, 230, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #20314f;
+  font-size: 13px;
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: rgba(238, 242, 255, 0.78);
+    color: var(--brand-active);
+    font-weight: 800;
+  }
+}
+
+.page-access-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.page-access-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(180px, 0.8fr) minmax(150px, 0.9fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(167, 190, 230, 0.34);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.page-access-card-head span,
+.page-access-detail-head span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.page-access-card strong,
+.page-access-detail strong {
+  overflow: hidden;
+  color: #20314f;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-access-card-meta,
+.page-access-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.page-access-card-meta span,
+.page-access-detail-meta span {
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(238, 242, 255, 0.7);
+}
+
+.page-access-card p {
+  margin: 0;
+  overflow: hidden;
+  color: #4f5f81;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-access-card-actions {
+  flex-shrink: 0;
+
+  :deep(.el-button) {
+    padding: 0 4px;
+  }
+}
+
+@media (max-width: 1420px) {
+  .page-access-status-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-access-card {
+    grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.7fr);
+  }
+
+  .page-access-card p,
+  .page-access-card-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.page-access-empty {
+  min-height: 76px;
+  padding: 12px;
+  border: 1px dashed rgba(167, 190, 230, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.page-access-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.page-access-step-detail-list {
+  display: grid;
+  gap: 10px;
+  max-height: 460px;
+  overflow: auto;
+}
+
+.page-access-step-detail {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(167, 190, 230, 0.34);
+  border-radius: 8px;
+  background: rgba(248, 251, 255, 0.78);
+}
+
+.page-access-step-detail > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-access-step-detail p {
+  margin: 0;
+  color: #4f5f81;
+  font-size: 13px;
+}
+
+.page-access-step-detail pre {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  border-radius: 8px;
+  background: #111827;
+  padding: 10px;
+  color: #d9e6ff;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.ai-prompt-editor {
+  :deep(.el-textarea__inner) {
+    min-height: 520px !important;
+    border-radius: 12px;
+    background: rgba(248, 251, 255, 0.92);
+    color: #20314f;
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.62;
+    box-shadow:
+      0 0 0 1px rgba(167, 190, 230, 0.4) inset,
+      inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  }
+}
+
 @media (max-width: 1180px) {
   .step-progress {
     width: auto;
@@ -2658,6 +3550,10 @@ onMounted(loadAll)
   .page-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .ai-prompt-toolbar {
+    flex-wrap: wrap;
   }
 
   .step-progress,
@@ -2759,6 +3655,10 @@ onMounted(loadAll)
 .page-assistant {
   min-height: calc(100vh - 72px);
   padding: 8px 22px 12px;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: visible;
   background:
     linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.13) 1px, transparent 1px),
@@ -2799,9 +3699,9 @@ onMounted(loadAll)
 
 .page-header {
   align-items: center;
-  min-height: 112px;
-  margin-bottom: 12px;
-  padding: 13px 26px;
+  min-height: 88px;
+  margin-bottom: 10px;
+  padding: 11px 24px;
   overflow: hidden;
   border: 1px solid rgb(var(--brand-selected-rgb) / 0.66) !important;
   border-radius: 8px;
@@ -2830,9 +3730,9 @@ onMounted(loadAll)
 }
 
 .page-header h1 {
-  margin: 8px 0 6px;
+  margin: 4px 0 0;
   color: #11183a !important;
-  font-size: 29px;
+  font-size: 27px;
   font-weight: 850;
   line-height: 1.12;
   text-shadow: none !important;
@@ -2852,21 +3752,12 @@ onMounted(loadAll)
   font-weight: 700;
 }
 
-.header-actions :deep(.el-button) {
-  height: 38px;
-  min-width: 132px;
-  border-color: rgba(148, 163, 184, 0.28) !important;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.68) !important;
-  color: #27364f !important;
-  font-weight: 750;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 14px 32px rgb(var(--brand-primary-rgb) / 0.1) !important;
-  backdrop-filter: blur(16px);
-}
-
 .wizard-shell {
   grid-template-columns: minmax(300px, 315px) minmax(0, 1fr);
   gap: 12px;
+  flex: 1;
+  min-height: calc(100vh - 208px);
+  align-items: stretch;
 }
 
 .step-progress,
@@ -2883,7 +3774,7 @@ onMounted(loadAll)
 
 .step-progress {
   width: auto;
-  min-height: 456px;
+  min-height: calc(100vh - 208px);
   padding: 10px 8px 12px;
   border-radius: 8px;
 }
@@ -2974,28 +3865,30 @@ onMounted(loadAll)
 }
 
 .stage-shell {
-  min-height: 456px;
-  overflow: hidden;
+  min-height: calc(100vh - 208px);
+  overflow: visible;
   border-radius: 8px;
-  padding: 40px 18px 50px;
+  padding: 34px 18px 28px;
 }
 
 .stack-card {
+  height: calc(100% - 58px);
   border-color: rgb(var(--brand-selected-rgb) / 0.46);
   background: rgba(255, 255, 255, 0.28);
   box-shadow: 0 18px 38px rgb(var(--brand-primary-rgb) / 0.08);
 }
 
 .focus-panel {
-  height: 390px;
-  min-height: 390px;
-  padding: 22px 26px 12px;
+  height: auto;
+  min-height: calc(100vh - 270px);
+  overflow: visible;
+  padding: 22px 26px 20px;
   border-radius: 8px;
   background: transparent !important;
 }
 
 .step-screen {
-  min-height: 350px;
+  min-height: calc(100vh - 318px);
 }
 
 .panel-head {
@@ -3032,13 +3925,22 @@ onMounted(loadAll)
 
 .health-grid {
   gap: 12px;
+  margin-bottom: 14px;
 }
 
 .health-card {
   position: relative;
-  min-height: 150px;
+  display: grid;
+  grid-template-areas:
+    "icon label"
+    "icon value";
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-height: 76px;
   overflow: hidden;
-  padding: 15px 18px;
+  padding: 12px 16px;
   border-color: rgb(var(--brand-hover-rgb) / 0.26) !important;
   border-radius: 8px;
   background:
@@ -3050,9 +3952,9 @@ onMounted(loadAll)
   content: '';
   position: absolute;
   right: -12px;
-  bottom: -44px;
-  width: 96px;
-  height: 96px;
+  bottom: -50px;
+  width: 82px;
+  height: 82px;
   border-radius: 18px;
   background:
     linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.18), rgb(var(--brand-hover-rgb) / 0.1)),
@@ -3060,13 +3962,16 @@ onMounted(loadAll)
     linear-gradient(90deg, rgb(var(--brand-hover-rgb) / 0.14) 1px, transparent 1px);
   background-size: auto, 18px 18px, 18px 18px;
   transform: rotate(-25deg);
-  opacity: 0.72;
+  opacity: 0.46;
 }
 
 .health-card .stat-icon {
-  width: 38px;
-  height: 38px;
-  margin-bottom: 12px;
+  position: relative;
+  z-index: 1;
+  grid-area: icon;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 0;
   border: 1px solid rgb(var(--brand-hover-rgb) / 0.24);
   border-radius: 8px;
   background: rgba(238, 242, 255, 0.72);
@@ -3090,14 +3995,23 @@ onMounted(loadAll)
 .health-card .stat-label,
 .health-card small,
 .health-label {
+  position: relative;
+  z-index: 1;
+  grid-area: label;
   color: #4f5f81 !important;
   font-size: 12px !important;
+  line-height: 1.2;
 }
 
 .health-card strong {
-  margin: 6px 0 7px;
+  position: relative;
+  z-index: 1;
+  grid-area: value;
+  margin: 0;
   color: #071a35 !important;
-  font-size: 23px;
+  font-size: 24px;
+  line-height: 1;
+  text-align: left;
   text-shadow: none;
 }
 
@@ -3144,6 +4058,7 @@ onMounted(loadAll)
 
 .goal-card.selected .goal-card-icon,
 .draft-generate-row :deep(.el-button--primary),
+.panel-actions :deep(.el-button--primary),
 .studio-ready-actions .primary,
 .studio-ready-empty button,
 .copy-template-button.el-button,
@@ -3154,6 +4069,16 @@ onMounted(loadAll)
     radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.34), transparent 42%) !important;
   color: #ffffff !important;
   box-shadow: 0 12px 28px rgb(var(--brand-primary-rgb) / 0.24) !important;
+}
+
+.panel-actions .access-template-button.el-button {
+  border: 1px solid rgb(var(--brand-selected-rgb) / 0.58) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.76), rgb(var(--brand-selected-rgb) / 0.38)) !important;
+  color: #27364f !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 10px 22px rgb(var(--brand-primary-rgb) / 0.1) !important;
 }
 
 .action-check {
@@ -3208,11 +4133,11 @@ onMounted(loadAll)
 
 @media (min-width: 1600px) {
   .page-header {
-    min-height: 112px;
+    min-height: 88px;
   }
 
   .health-card {
-    min-height: 150px;
+    min-height: 76px;
   }
 }
 </style>

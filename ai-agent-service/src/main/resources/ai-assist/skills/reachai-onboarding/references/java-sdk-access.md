@@ -84,3 +84,101 @@ Use stable capability names such as `contract.query` or `team.search`.
 Always provide explicit `@ReachParam(name = "...")` for simple parameters, especially in JDK8 projects where compiler parameter names may not be retained.
 
 For request DTOs, annotate important fields with `@ReachParam` so generated parameter metadata is useful for agents.
+
+## Gateway Route And Token Broker
+
+SDK onboarding is not complete if the business gateway is untouched and the business front end has no safe token path.
+
+Before changing gateway or front-end code, read the manifest's `embed` section:
+- Prefer `embed.defaultAgentKeySlug` as the front-end `agentId`.
+- Use `embed.defaultAgentId` only when no key slug is available.
+- Treat `embed.allowedAgents` as the platform-approved list. Do not invent a new `agentId` in the business repo.
+- If no default Agent is present, stop and ask the ReachAI platform owner to create, enable, or whitelist an embeddable Agent for this project.
+
+Inspect the repository for the real gateway boundary:
+- Spring Cloud Gateway `application.yml` / `bootstrap.yml` routes.
+- Nginx or ingress configuration.
+- Backend-for-frontend routes.
+- Vite, Angular, or Webpack dev proxy used by the business UI.
+
+Add the smallest route changes required for the current architecture:
+- ReachAI invocation traffic must reach the business service endpoint that exposes SDK capabilities.
+- Preserve `X-ReachAI-Invocation-Token`, `X-ReachAI-Trace-Id`, `X-ReachAI-Run-Id`, and the business authentication headers required by the service.
+- Do not trust ordinary context headers such as `X-ReachAI-*` as the only authorization signal for business APIs.
+- If no gateway module exists in the current repository, report this as a required external change instead of inventing a browser-side workaround.
+
+Add the gateway authentication whitelist required by embed chat:
+- Keep the token broker path, for example `/api/reachai/embed-token`, behind the business login token because it maps the current user to `principal.externalUserId`.
+- Route `/api/reachai/embed/**` to ReachAI `/api/embed/**` as an anonymous proxy or with a dedicated security chain. Browser calls to this path use `Authorization: Bearer <embedToken>`, and business OAuth/JWT filters must not parse or reject that token.
+- If the gateway has a global authentication filter, add an explicit skip for `/api/reachai/embed/**` while preserving the `Authorization`, `Origin`, and `Content-Type` headers.
+- In Spring Cloud Gateway this usually means both a route rewrite and a gateway authentication whitelist/security matcher. If both the gateway and ReachAI add CORS response headers, add route-level dedupe such as `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST` so the browser does not hide the real 401/500 response as `status 0 Unknown Error`.
+- In Nginx or a BFF, apply the same auth bypass and CORS de-duplication rule at the real authentication/proxy boundary.
+
+Expose a server-side embed token broker for the business UI, for example:
+
+```http
+GET /api/reachai/embed-token?projectCode=demo-service&agentId=<manifest.embed.defaultAgentKeySlug>&pageInstanceId=page-001&route=/teams&origin=http://localhost:5173
+```
+
+The broker must:
+- Read the current business login state.
+- Map the current user to ReachAI `principal`, with `principal.externalUserId` required.
+- Use the project `appKey/appSecret` server-side to sign a call to ReachAI `POST /api/embed/token/exchange`.
+- Cache only short-lived embed tokens when appropriate.
+- Return only the issued embed token and expiry metadata to the browser.
+
+Never place `appSecret`, registry signatures, or project-level private keys in browser code.
+Never use the business login token as the chat session token. The business login token is only for calling the broker; `/api/reachai/embed/**`, `/api/embed/chat/sessions`, and message APIs must receive the broker-returned ReachAI embed token.
+
+## Front-End Embed Integration
+
+Add the ReachAI chat/embed entry in the real business front end when that front end is in scope. Do not stop at backend annotations if a UI module is present.
+
+Use a token provider that calls the business gateway token broker:
+
+```ts
+const tokenProvider = async () => {
+  const query = new URLSearchParams({
+    projectCode: 'demo-service',
+    agentId: manifest.embed.defaultAgentKeySlug || manifest.embed.defaultAgentId,
+    pageInstanceId,
+    route: window.location.pathname,
+    origin: window.location.origin,
+  })
+  const response = await fetch('/api/reachai/embed-token?' + query)
+  const payload = await response.json()
+  return payload.data?.token || payload.token
+}
+```
+
+The front end should pass `pageInstanceId`, `route`, and `origin` so ReachAI can bind chat sessions, audit events, and page actions to the exact page instance.
+
+When caching embed tokens in the front end:
+- Compute the cache expiry from `expiresIn` and expire slightly early.
+- Do not impose a minimum cache time that can outlive a short token TTL.
+- If creating a session or sending a message returns `embed token is expired`, clear the cached token, call the broker again, and retry once.
+- Surface the real platform error body when a retry still fails; do not collapse every failure into a generic `Unknown Error`.
+
+## Access Session Progress Reporting
+
+When the ReachAI prompt provides `/api/ai-assist/projects/{projectId}/access-sessions/...`, report progress back to the platform instead of only summarizing in chat.
+
+Recommended reporting points:
+- `project-manifest`: manifest fetched and parsed.
+- `backend-sdk`: Maven dependencies added to the correct modules.
+- `reachai-config`: `reachai.registry`, `reachai.project`, and `reachai.capability` configured with narrow package scans.
+- `capability-scan`: sample capabilities annotated or MVC scanning configured.
+- `gateway-route`: capability invocation route configured.
+- `embed-token-broker`: server-side token broker implemented.
+- `gateway-whitelist`: `/api/reachai/embed/**` bypasses business OAuth/JWT filters and forwards the embed token.
+- `frontend-embed`: real business front-end page or shell uses the broker-backed token provider.
+- `connectivity-check`: compile/build and ReachAI self-check attempted.
+- `handoff-summary`: final changed-file list, verification results, and remaining manual secrets/config.
+
+Example:
+
+```bash
+curl -X POST "$REPORT_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"PASS","message":"Gateway whitelist added.","files":["gateway/src/main/java/SecurityConfiguration.java"],"evidence":{"command":"mvn -DskipTests compile","exitCode":0},"reportedBy":"Cursor"}'
+```

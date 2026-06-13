@@ -1749,6 +1749,7 @@ CREATE TABLE IF NOT EXISTS `eaf_embed_session` (
     `agent_id`            VARCHAR(128) NOT NULL,
     `external_user_id`    VARCHAR(128) NOT NULL,
     `global_user_id`      VARCHAR(128) DEFAULT NULL,
+    `page_key`            VARCHAR(160) DEFAULT NULL,
     `page_instance_id`    VARCHAR(128) NOT NULL,
     `route`               VARCHAR(512) DEFAULT NULL,
     `origin`              VARCHAR(512) NOT NULL,
@@ -1761,10 +1762,13 @@ CREATE TABLE IF NOT EXISTS `eaf_embed_session` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_embed_session` (`session_id`),
     KEY `idx_embed_session_identity` (`tenant_id`, `app_id`, `external_user_id`, `created_at`),
+    KEY `idx_embed_session_page_key` (`project_code`, `agent_id`, `page_key`, `status`, `created_at`),
     KEY `idx_embed_session_page` (`page_instance_id`, `status`, `expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='嵌入式对话会话与页面实例绑定';
 
+CALL add_col_if_absent('eaf_embed_session', 'page_key', 'VARCHAR(160) DEFAULT NULL COMMENT ''业务前端页面稳定标识'' AFTER `global_user_id`');
 CALL add_col_if_absent('eaf_embed_session', 'sdk_version', 'VARCHAR(64) DEFAULT NULL COMMENT ''Chat Embed SDK version'' AFTER `origin`');
+CALL add_idx_if_absent('eaf_embed_session', 'idx_embed_session_page_key', '`project_code`, `agent_id`, `page_key`, `status`, `created_at`');
 
 CREATE TABLE IF NOT EXISTS `eaf_embed_token_revocation` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT,
@@ -1873,6 +1877,49 @@ CREATE TABLE IF NOT EXISTS `eaf_embed_renderer` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_embed_renderer` (`app_id`, `renderer_key`, `version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='嵌入式对话自定义结构化渲染器注册';
+
+CREATE TABLE IF NOT EXISTS `eaf_ai_access_session` (
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT,
+    `session_id`      VARCHAR(96)  NOT NULL,
+    `project_id`      BIGINT       NOT NULL,
+    `project_code`    VARCHAR(128) DEFAULT NULL,
+    `tool_name`       VARCHAR(64)  DEFAULT NULL,
+    `scenario`        VARCHAR(32)  NOT NULL DEFAULT 'SDK_ACCESS',
+    `target_page_key` VARCHAR(160) DEFAULT NULL,
+    `target_route`    VARCHAR(512) DEFAULT NULL,
+    `metadata_json`   TEXT         DEFAULT NULL,
+    `status`          VARCHAR(24)  NOT NULL DEFAULT 'OPEN',
+    `total_steps`     INT          NOT NULL DEFAULT 0,
+    `completed_steps` INT          NOT NULL DEFAULT 0,
+    `failed_steps`    INT          NOT NULL DEFAULT 0,
+    `last_message`    VARCHAR(512) DEFAULT NULL,
+    `created_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ai_access_session` (`session_id`),
+    KEY `idx_ai_access_session_project` (`project_id`, `updated_at`),
+    KEY `idx_ai_access_session_target` (`project_id`, `scenario`, `target_page_key`, `updated_at`),
+    KEY `idx_ai_access_session_status` (`project_code`, `status`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI快速接入会话';
+
+CREATE TABLE IF NOT EXISTS `eaf_ai_access_step` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `session_id`    VARCHAR(96)  NOT NULL,
+    `project_id`    BIGINT       NOT NULL,
+    `step_key`      VARCHAR(96)  NOT NULL,
+    `title`         VARCHAR(128) NOT NULL,
+    `status`        VARCHAR(24)  NOT NULL DEFAULT 'TODO',
+    `message`       TEXT         DEFAULT NULL,
+    `files_json`    TEXT         DEFAULT NULL,
+    `evidence_json` TEXT         DEFAULT NULL,
+    `reported_by`   VARCHAR(96)  DEFAULT NULL,
+    `started_at`    DATETIME     DEFAULT NULL,
+    `completed_at`  DATETIME     DEFAULT NULL,
+    `updated_at`    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ai_access_step` (`session_id`, `step_key`),
+    KEY `idx_ai_access_step_project` (`project_id`, `status`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI快速接入步骤进度';
 
 CREATE TABLE IF NOT EXISTS `platform_user` (
     `id`               BIGINT       NOT NULL AUTO_INCREMENT,

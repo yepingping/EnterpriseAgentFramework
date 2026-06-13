@@ -63,7 +63,9 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
                 || path.startsWith("/api/registry/")
                 || path.startsWith("/api/v1/agents/")
                 || path.startsWith("/api/ai-assist/skills/")
-                || isAiCodingManifestAccess(request, path);
+                || isAiCodingManifestAccess(request, path)
+                || isAiCodingAccessSessionAccess(request, path)
+                || isAiCodingPageAssistantAccess(request, path);
     }
 
     private boolean isAiCodingManifestAccess(HttpServletRequest request, String path) {
@@ -71,6 +73,32 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
                 && path.startsWith("/api/ai-assist/projects/")
                 && path.endsWith("/onboarding-manifest")
                 && request.getParameter("aiCodingKey") != null;
+    }
+
+    private boolean isAiCodingAccessSessionAccess(HttpServletRequest request, String path) {
+        if (request.getParameter("aiCodingKey") == null
+                || !path.startsWith("/api/ai-assist/projects/")
+                || !path.contains("/access-sessions/")) {
+            return false;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/access-sessions/latest"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"));
+    }
+
+    private boolean isAiCodingPageAssistantAccess(HttpServletRequest request, String path) {
+        if (request.getParameter("aiCodingKey") == null
+                || !path.startsWith("/api/ai-assist/projects/")
+                || !path.contains("/page-assistant/")) {
+            return false;
+        }
+        return ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/onboarding-manifest"))
+                || ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/sessions"))
+                || ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/sessions/latest"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/pages/register"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"))
+                || ("PUT".equalsIgnoreCase(request.getMethod()) && path.endsWith("/target"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/catalog/sync"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/checks/run"));
     }
 
     private String extractBearer(HttpServletRequest request) {

@@ -66,6 +66,7 @@ class EmbedChatControllerAuditTest {
         EmbedChatController.EmbedTokenExchangeRequest request = new EmbedChatController.EmbedTokenExchangeRequest(
                 "demo",
                 "agent-1",
+                "orders.list",
                 "page-1",
                 "/orders",
                 "https://denied.example",
@@ -223,6 +224,88 @@ class EmbedChatControllerAuditTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("jwt", response.getBody().getData().token());
+    }
+
+    @Test
+    void tokenExchangeAllowsLocalDevelopmentOriginWhenPolicyIsEmpty() {
+        RegistrySecurityService registrySecurityService = mock(RegistrySecurityService.class);
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        AgentDefinitionService agentDefinitionService = mock(AgentDefinitionService.class);
+        EmbedChatController controller = new EmbedChatController(
+                registrySecurityService,
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                mock(EmbedSessionService.class),
+                agentDefinitionService,
+                mock(AgentRouter.class),
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class));
+
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setProjectCode("demo");
+        when(registrySecurityService.verifyRequired(eq("demo"), any())).thenReturn(credential);
+        when(agentDefinitionService.findById("agent-1")).thenReturn(Optional.of(AgentDefinition.builder()
+                .id("agent-1")
+                .projectCode("demo")
+                .build()));
+        when(tokenService.issue(any())).thenReturn(new EmbedTokenIssueResult("jwt", 600, Instant.now().plusSeconds(600)));
+
+        EmbedChatController.EmbedTokenExchangeRequest request = new EmbedChatController.EmbedTokenExchangeRequest(
+                "demo",
+                "agent-1",
+                "orders.list",
+                "page-1",
+                "/orders",
+                "http://localhost:9200",
+                BusinessPrincipal.builder()
+                        .externalUserId("u-1")
+                        .globalUserId("g-1")
+                        .build());
+
+        ResponseEntity<ApiResult<EmbedChatController.EmbedTokenExchangeResponse>> response =
+                controller.exchangeToken(request, new MockHttpServletRequest("POST", "/api/embed/token/exchange"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("jwt", response.getBody().getData().token());
+    }
+
+    @Test
+    void tokenExchangeRejectsNonLocalOriginWhenPolicyIsEmpty() {
+        RegistrySecurityService registrySecurityService = mock(RegistrySecurityService.class);
+        EmbedChatController controller = new EmbedChatController(
+                registrySecurityService,
+                mock(EmbedTokenService.class),
+                mock(BusinessUserDirectoryService.class),
+                mock(EmbedSessionService.class),
+                mock(AgentDefinitionService.class),
+                mock(AgentRouter.class),
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class));
+
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setProjectCode("demo");
+        when(registrySecurityService.verifyRequired(eq("demo"), any())).thenReturn(credential);
+
+        EmbedChatController.EmbedTokenExchangeRequest request = new EmbedChatController.EmbedTokenExchangeRequest(
+                "demo",
+                "agent-1",
+                "orders.list",
+                "page-1",
+                "/orders",
+                "https://app.example.com",
+                BusinessPrincipal.builder()
+                        .externalUserId("u-1")
+                        .globalUserId("g-1")
+                        .build());
+
+        ResponseEntity<ApiResult<EmbedChatController.EmbedTokenExchangeResponse>> response =
+                controller.exchangeToken(request, new MockHttpServletRequest("POST", "/api/embed/token/exchange"));
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
     }
 
     @Test

@@ -509,6 +509,19 @@ const workbenchGroups = computed(() => [
           }]
         : []),
       {
+        title: '创建页面助手',
+        desc: '从后端接口资产 + 前端页面动作生成 Agent Studio 草稿。',
+        icon: Star,
+        tone: 'violet',
+        disabled: !project.value?.id,
+        action: goPageAssistantWizard,
+      },
+    ],
+  },
+  {
+    title: '项目资源',
+    items: [
+      {
         title: '后端接口管理',
         desc: '管理扫描接口、模块列表和接口图谱，处理 Tool 关联与语义文档。',
         icon: Grid,
@@ -524,11 +537,6 @@ const workbenchGroups = computed(() => [
         disabled: !project.value,
         action: goPageActionGovernance,
       },
-    ],
-  },
-  {
-    title: '资产与评审',
-    items: [
       {
         title: '工具管理',
         desc: '查看项目下可被 Agent Runtime 调用的 Tool 清单。',
@@ -549,14 +557,6 @@ const workbenchGroups = computed(() => [
         tone: 'green',
         disabled: !project.value?.id,
         action: goCapabilitySync,
-      },
-      {
-        title: '创建页面助手',
-        desc: '从后端接口资产 + 前端页面动作生成 Agent Studio 草稿。',
-        icon: Star,
-        tone: 'violet',
-        disabled: !project.value?.id,
-        action: goPageAssistantWizard,
       },
       {
         title: 'Agent管理',

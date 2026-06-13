@@ -152,7 +152,7 @@
     <el-drawer
       v-model="credentialDrawerVisible"
       title="嵌入授权策略"
-      size="760px"
+      size="920px"
       destroy-on-close
     >
       <div class="drawer-section-title">
@@ -165,8 +165,14 @@
         row-key="id"
         size="small"
       >
-        <el-table-column prop="appKey" label="接入密钥" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="allowedOriginsJson" label="允许来源" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="appKey" label="接入密钥" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button link type="primary" @click="editCredentialPolicy(row)">{{ row.appKey }}</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="allowedOriginsJson" label="允许来源" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatOriginPolicy(row.allowedOriginsJson) }}</template>
+        </el-table-column>
         <el-table-column prop="allowedAgentIdsJson" label="允许智能体" min-width="180" show-overflow-tooltip />
         <el-table-column prop="tokenTtlSeconds" label="令牌 TTL" width="90" />
         <el-table-column prop="status" label="状态" width="100">
@@ -174,7 +180,7 @@
             <CommonStatusTag :status="row.status" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="96" fixed="right" align="center">
           <template #default="{ row }">
             <el-button link type="primary" @click="editCredentialPolicy(row)">编辑</el-button>
           </template>
@@ -193,7 +199,7 @@
           <el-input :model-value="editingCredentialKey" disabled />
         </el-form-item>
         <el-form-item label="允许来源">
-          <el-input v-model="credentialOriginsText" type="textarea" :rows="2" placeholder="https://app.example.com, https://*.corp.example.com" />
+          <el-input v-model="credentialOriginsText" type="textarea" :rows="2" placeholder="留空时仅允许 localhost / 127.0.0.1 / ::1；生产环境请填写 https://app.example.com" />
         </el-form-item>
         <el-form-item label="允许智能体">
           <el-input v-model="credentialAgentsText" placeholder="agent-a,agent-b" />
@@ -569,6 +575,11 @@ function parseJsonArray(value?: string): string[] {
 
 function formatJsonArray(value?: string): string {
   return parseJsonArray(value).join(', ')
+}
+
+function formatOriginPolicy(value?: string): string {
+  const origins = parseJsonArray(value)
+  return origins.length ? origins.join(', ') : '开发默认：localhost / 127.0.0.1 / ::1'
 }
 
 onMounted(load)

@@ -1,6 +1,7 @@
 package com.enterprise.ai.agent.controller;
 
 import com.enterprise.ai.agent.agent.AgentDefinition;
+import com.enterprise.ai.agent.agent.AgentDefinitionGraphBootstrapper;
 import com.enterprise.ai.agent.agent.AgentDefinitionService;
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
 import com.enterprise.ai.agent.runtime.AgentRuntimeCapability;
@@ -47,6 +48,7 @@ public class AgentManageController {
 
     @PostMapping("/runtime-validation")
     public ResponseEntity<AgentRuntimeValidationResult> validateRuntime(@RequestBody AgentDefinition definition) {
+        AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(definition);
         return ResponseEntity.ok(validateDefinitionRuntime(definition));
     }
 
@@ -59,6 +61,7 @@ public class AgentManageController {
 
     @PostMapping
     public ResponseEntity<AgentDefinition> create(@RequestBody AgentDefinition definition) {
+        AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(definition);
         requireValidRuntime(definition);
         AgentDefinition created = definitionService.create(definition);
         return ResponseEntity.ok(created);
@@ -71,7 +74,9 @@ public class AgentManageController {
             AgentDefinition current = definitionService.findById(id)
                     .orElseThrow(() -> new IllegalArgumentException("Agent 定义不存在: " + id));
             AgentDefinition merged = mergeForValidation(current, definition);
+            AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(merged);
             requireValidRuntime(merged);
+            AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(definition);
             AgentDefinition updated = definitionService.update(id, definition);
             return ResponseEntity.ok(updated);
         } catch (IllegalArgumentException e) {

@@ -39,7 +39,7 @@ public class ReachAiRegistryProperties {
         private String url;
         private String appKey;
         private String appSecret;
-        private long heartbeatIntervalMs = 30000L;
+        private long heartbeatIntervalMs = 180000L;
 
         public boolean isEnabled() {
             return enabled;

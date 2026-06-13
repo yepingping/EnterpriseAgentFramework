@@ -6,8 +6,19 @@ import type {
   ScanProject,
   ScanProjectAuthSaveRequest,
   AiOnboardingManifest,
+  AiAccessCheckRunResponse,
+  AiAccessSession,
   AiCodingAccessResponse,
   AiCodingAccessUpdateRequest,
+  PageAssistantCheckRequest,
+  PageAssistantCheckRunResponse,
+  PageAssistantCatalogSyncRequest,
+  PageAssistantOnboardingManifest,
+  PageAssistantPageRegisterRequest,
+  PageAssistantPageRegisterResponse,
+  PageAssistantSessionRequest,
+  PageAssistantSessionSummary,
+  PageAssistantTargetRequest,
   ScanProjectBlockers,
   ScanProjectRegistryCredentialSaveRequest,
   SdkAccessCheckRequest,
@@ -67,8 +78,123 @@ export function runSdkAccessCheck(id: number, data: SdkAccessCheckRequest) {
   return agentRequest.post<SdkAccessCheckResponse>(`/api/scan-projects/${id}/sdk-access-check`, data)
 }
 
+export function startAiAccessSession(id: number, toolName?: string) {
+  return agentRequest.post<AiAccessSession>(`/api/ai-assist/projects/${id}/access-sessions`, null, {
+    params: toolName ? { toolName } : {},
+  })
+}
+
+export function getLatestAiAccessSession(id: number) {
+  return agentRequest.get<AiAccessSession>(`/api/ai-assist/projects/${id}/access-sessions/latest`)
+}
+
+export function runAiAccessSessionChecks(id: number, sessionId: string, data: SdkAccessCheckRequest) {
+  return agentRequest.post<AiAccessCheckRunResponse>(
+    `/api/ai-assist/projects/${id}/access-sessions/${sessionId}/checks/run`,
+    data,
+  )
+}
+
 export function getAiOnboardingManifest(id: number) {
   return agentRequest.get<AiOnboardingManifest>(`/api/ai-assist/projects/${id}/onboarding-manifest`)
+}
+
+export function getPageAssistantOnboardingManifest(
+  id: number,
+  data?: PageAssistantSessionRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.get<PageAssistantOnboardingManifest>(
+    `/api/ai-assist/projects/${id}/page-assistant/onboarding-manifest`,
+    {
+      params: {
+        toolName: data?.toolName,
+        pageKey: data?.pageKey,
+        routePattern: data?.routePattern,
+        actionKeys: data?.actionKeys,
+        aiCodingKey: aiCodingKey || undefined,
+      },
+    },
+  )
+}
+
+export function startPageAssistantAccessSession(id: number, data: PageAssistantSessionRequest) {
+  return agentRequest.post<AiAccessSession>(`/api/ai-assist/projects/${id}/page-assistant/sessions`, data)
+}
+
+export function getLatestPageAssistantAccessSession(id: number, pageKey?: string | null, aiCodingKey?: string | null) {
+  return agentRequest.get<AiAccessSession>(`/api/ai-assist/projects/${id}/page-assistant/sessions/latest`, {
+    params: {
+      pageKey: pageKey || undefined,
+      aiCodingKey: aiCodingKey || undefined,
+    },
+  })
+}
+
+export function getPageAssistantAccessSessions(id: number, pageKey?: string | null, aiCodingKey?: string | null) {
+  return agentRequest.get<PageAssistantSessionSummary[]>(`/api/ai-assist/projects/${id}/page-assistant/sessions`, {
+    params: {
+      pageKey: pageKey || undefined,
+      aiCodingKey: aiCodingKey || undefined,
+    },
+  })
+}
+
+export function bindPageAssistantAccessSessionTarget(
+  id: number,
+  sessionId: string,
+  data: PageAssistantTargetRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.put<AiAccessSession>(
+    `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/target`,
+    data,
+    { params: aiCodingKey ? { aiCodingKey } : {} },
+  )
+}
+
+export function syncPageAssistantAccessCatalog(
+  id: number,
+  sessionId: string,
+  data: PageAssistantCatalogSyncRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.post<{
+    projectCode: string
+    appId: string
+    pageKey: string
+    actionCount: number
+    session: AiAccessSession
+  }>(
+    `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/catalog/sync`,
+    data,
+    { params: aiCodingKey ? { aiCodingKey } : {} },
+  )
+}
+
+export function runPageAssistantAccessSessionChecks(
+  id: number,
+  sessionId: string,
+  data: PageAssistantCheckRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.post<PageAssistantCheckRunResponse>(
+    `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/checks/run`,
+    data,
+    { params: aiCodingKey ? { aiCodingKey } : {} },
+  )
+}
+
+export function registerPageAssistantPage(
+  id: number,
+  data: PageAssistantPageRegisterRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.post<PageAssistantPageRegisterResponse>(
+    `/api/ai-assist/projects/${id}/page-assistant/pages/register`,
+    data,
+    { params: aiCodingKey ? { aiCodingKey } : {} },
+  )
 }
 
 export function updateAiCodingAccess(id: number, data: AiCodingAccessUpdateRequest) {

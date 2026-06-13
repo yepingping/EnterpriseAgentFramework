@@ -82,6 +82,7 @@ public class EmbedTokenService {
         claims.put("userName", principal.getUserName());
         claims.put("deptId", principal.getDeptId());
         claims.put("deptName", principal.getDeptName());
+        claims.put("pageKey", command.getPageKey());
         claims.put("pageInstanceId", command.getPageInstanceId());
         claims.put("route", command.getRoute());
         claims.put("origin", command.getOrigin());
@@ -147,6 +148,7 @@ public class EmbedTokenService {
         result.setUserName(asString(claims.get("userName")));
         result.setDeptId(asString(claims.get("deptId")));
         result.setDeptName(asString(claims.get("deptName")));
+        result.setPageKey(asString(claims.get("pageKey")));
         result.setPageInstanceId(asString(claims.get("pageInstanceId")));
         result.setRoute(asString(claims.get("route")));
         result.setOrigin(asString(claims.get("origin")));

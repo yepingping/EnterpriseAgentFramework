@@ -6,7 +6,10 @@ import com.enterprise.ai.reach.sdk.capability.ReachCapabilityDescriptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ConcurrentTaskScheduler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -76,6 +79,26 @@ class ReachAiRegistryAutoConfigurationTest {
                 });
     }
 
+    @Test
+    void heartbeatUsesReachAiSchedulerWhenAnotherTaskSchedulerExists() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        ReachAiRegistryAutoConfiguration.class,
+                        ConsulLikeTaskSchedulerConfiguration.class))
+                .withBean(ReachAiRegistryTransport.class, NoopTransport::new)
+                .withBean(ContractCapability.class)
+                .withPropertyValues(
+                        "reachai.registry.url=https://reachai.example.com",
+                        "reachai.registry.app-key=demo-key",
+                        "reachai.registry.app-secret=demo-secret",
+                        "reachai.project.code=demo")
+                .run(context -> {
+                    assertNotNull(context.getBean("reachAiRegistryTaskScheduler", TaskScheduler.class));
+                    assertNotNull(context.getBean("catalogWatchTaskScheduler", TaskScheduler.class));
+                    assertNotNull(context.getBean(ReachAiRegistryHeartbeatScheduler.class));
+                });
+    }
+
     static class ContractCapability {
         @ReachCapability(name = "contract.query", title = "查询合同")
         public String query(@ReachParam(description = "合同编号", required = true) String contractNo) {
@@ -105,6 +128,14 @@ class ReachAiRegistryAutoConfigurationTest {
         @Override
         public String exchange(String method, String url, Map<String, String> headers, Object body) {
             return "{}";
+        }
+    }
+
+    @Configuration
+    static class ConsulLikeTaskSchedulerConfiguration {
+        @Bean
+        TaskScheduler catalogWatchTaskScheduler() {
+            return new ConcurrentTaskScheduler();
         }
     }
 }

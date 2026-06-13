@@ -19,9 +19,14 @@ public class EmbedSessionService {
     private final EmbedSessionMapper mapper;
     private final ObjectMapper objectMapper;
 
-    public EmbedSessionEntity create(EmbedTokenClaims claims, String pageInstanceId, String route, List<String> bridgeActions, String sdkVersion) {
+    public EmbedSessionEntity create(EmbedTokenClaims claims, String pageKey, String pageInstanceId, String route, List<String> bridgeActions, String sdkVersion) {
         if (claims == null) {
             throw new EmbedTokenException("embed token claims are required");
+        }
+        if (StringUtils.hasText(pageKey)
+                && StringUtils.hasText(claims.getPageKey())
+                && !pageKey.equals(claims.getPageKey())) {
+            throw new EmbedTokenException("pageKey does not match embed token");
         }
         if (!StringUtils.hasText(pageInstanceId) || !pageInstanceId.equals(claims.getPageInstanceId())) {
             throw new EmbedTokenException("pageInstanceId does not match embed token");
@@ -39,6 +44,7 @@ public class EmbedSessionService {
         entity.setAgentId(claims.getAgentId());
         entity.setExternalUserId(claims.getExternalUserId());
         entity.setGlobalUserId(claims.getGlobalUserId());
+        entity.setPageKey(StringUtils.hasText(pageKey) ? pageKey : claims.getPageKey());
         entity.setPageInstanceId(pageInstanceId);
         entity.setRoute(StringUtils.hasText(route) ? route : claims.getRoute());
         entity.setOrigin(claims.getOrigin());

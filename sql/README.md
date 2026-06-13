@@ -37,6 +37,8 @@ mysql -uroot -p < sql/init.sql
 - 旧 SDK / Starter 退役后的字段注释对齐需执行 `sql/upgrade-20260529-retire-legacy-sdk-comments.sql`。
 - 前端 SDK 页面 / 页面动作目录接入已有环境需执行 `sql/upgrade-20260601-page-action-catalog.sql`，创建 `eaf_page_registry` 与 `eaf_page_action_registry`。
 - 页面动作目录出现同一 `page_key` 重复页面时，执行 `sql/upgrade-20260602-page-registry-origin-dedupe.sql`，保留每组最近上报页面并将缺失 `origin` 归一为空字符串。
+- AI 快速接入工作台步骤进度和 AI/CLI 回传需执行 `sql/upgrade-20260612-ai-access-session.sql`，创建 `eaf_ai_access_session` 与 `eaf_ai_access_step`，并补充 SDK 接入 / 页面助手接入场景、目标页面和回传元数据字段。
+- 项目全局 AI 入口按当前页面自动加载能力需执行 `sql/upgrade-20260613-global-entry-page-key.sql`，为 `eaf_embed_session` 补充 `page_key` 并增加项目入口 Agent / 页面能力审计索引。
 - 不再执行 `ai-agent-service/sql`、`ai-model-service/sql`、`ai-skills-service/sql` 下的历史补丁；这些目录已清理。
 - 后续 schema 变更必须同时维护根 `sql/init.sql` 和一份新的 `sql/upgrade-YYYYMMDD-short-name.sql`，或正式引入 Flyway / Liquibase 后把本文件作为 baseline。
 - 项目默认不为旧数据做复杂兼容迁移；如果升级脚本会清理、重建、重命名或丢弃历史字段 / 数据，必须在 SQL 注释和变更说明中明确写出。

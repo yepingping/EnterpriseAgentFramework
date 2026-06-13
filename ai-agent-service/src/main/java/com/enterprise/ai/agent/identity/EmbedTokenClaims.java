@@ -30,6 +30,8 @@ public class EmbedTokenClaims {
 
     private String deptName;
 
+    private String pageKey;
+
     private String pageInstanceId;
 
     private String route;

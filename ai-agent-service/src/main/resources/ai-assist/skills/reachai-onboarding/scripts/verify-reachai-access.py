@@ -33,6 +33,13 @@ def main():
     parser.add_argument("--args-json", default="{}")
     parser.add_argument("--gateway-base-url")
     parser.add_argument("--embed-token-path")
+    parser.add_argument("--report-url", help="Access session step report URL. Replace {stepKey} automatically when present.")
+    parser.add_argument("--step-key", help="Access session step key to report.")
+    parser.add_argument("--status", default="PASS", help="Step status: TODO, RUNNING, PASS, WARN, FAIL, or SKIPPED.")
+    parser.add_argument("--message", default="ReachAI onboarding helper reported this step.")
+    parser.add_argument("--file", action="append", default=[], help="Changed file path to include in progress evidence.")
+    parser.add_argument("--evidence-json", default="{}", help="Additional evidence JSON for the step report.")
+    parser.add_argument("--reported-by", default="reachai-onboarding-helper")
     args = parser.parse_args()
 
     try:
@@ -52,6 +59,20 @@ def main():
             result = post_json(manifest["endpoints"]["sdkAccessCheckUrl"], payload)
             print("sdkAccessCheck.overallStatus=" + str(result.get("overallStatus")))
             print(json.dumps(result, ensure_ascii=False, indent=2))
+
+        if args.report_url and args.step_key:
+            evidence = json.loads(args.evidence_json)
+            report_url = args.report_url.replace("{stepKey}", args.step_key)
+            payload = {
+                "status": args.status,
+                "message": args.message,
+                "files": args.file,
+                "evidence": evidence,
+                "reportedBy": args.reported_by,
+            }
+            result = post_json(report_url, payload)
+            print("accessSession.sessionId=" + str(result.get("sessionId")))
+            print("accessSession.status=" + str(result.get("status")))
     except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
         print("ReachAI verification failed: " + str(exc), file=sys.stderr)
         return 1

@@ -13,6 +13,20 @@
         </el-tag>
       </div>
       <div class="header-actions">
+        <el-tooltip
+          :content="isNew ? '保存后可复制 Agent 标识' : '复制 keySlug 和 ID，便于粘贴给业务系统 Cursor'"
+          placement="bottom"
+        >
+          <span>
+            <el-button
+              :icon="DocumentCopy"
+              :disabled="!canCopyAgentIdentity"
+              @click="copyAgentIdentity"
+            >
+              复制标识
+            </el-button>
+          </span>
+        </el-tooltip>
         <el-button v-if="isWorkflowRuntime && !isNew" :icon="Share" @click="openStudio">打开画布</el-button>
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </div>
@@ -280,7 +294,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ArrowLeft, Cpu, Connection, DataLine, EditPen, Share } from '@element-plus/icons-vue'
+import { ArrowLeft, Cpu, Connection, DataLine, DocumentCopy, EditPen, Share } from '@element-plus/icons-vue'
 import { INTENT_TYPES, TRIGGER_MODES } from '@/types/agent'
 import type { AgentForm, AgentGraphSpec, AgentMode, AgentRuntimeCapability, AgentRuntimeType } from '@/types/agent'
 import { createAgent, getAgent, getAgentRuntimes, updateAgent, validateAgentRuntime } from '@/api/agent'
@@ -388,6 +402,11 @@ const selectedRuntime = computed(() =>
 const isWorkflowRuntime = computed(() => modeForRuntime(form.runtimeType) === 'WORKFLOW')
 const isAgentScopeRuntime = computed(() => form.runtimeType === 'AGENTSCOPE')
 const currentModeLabel = computed(() => modeLabel(form.agentMode || modeForRuntime(form.runtimeType)))
+const canCopyAgentIdentity = computed(() => !isNew && Boolean(agentId))
+const agentIdentityCopy = computed(() => [
+  `agentId: ${agentId}`,
+  `keySlug: ${form.keySlug || '(未配置)'}`,
+].join('\n'))
 const runtimeEntryCopy = computed(() =>
   isWorkflowRuntime.value
     ? '流程型智能体以 GraphSpec 为执行契约，默认模型只作为节点兜底。'
@@ -574,15 +593,29 @@ async function handleProjectChange(projectId: number | null | undefined) {
 }
 
 function defaultWorkflowGraphSpec(): AgentGraphSpec {
+  const nodeId = 'starter_answer'
   return {
     code: form.keySlug || form.name || 'agent_graph',
     name: form.name || 'Agent Graph',
     mode: 'WORKFLOW',
     runtimeHint: 'LANGGRAPH4J',
-    nodes: [],
-    edges: [],
-    entry: '',
-    finish: [],
+    nodes: [
+      {
+        id: nodeId,
+        type: 'ANSWER',
+        name: '默认回复',
+        description: '新建流程智能体的初始占位节点，可在 Agent Studio 中替换为真实流程。',
+        config: {
+          template: '请在 Agent Studio 中配置流程节点。',
+        },
+      },
+    ],
+    edges: [
+      { from: 'START', to: nodeId, condition: 'always' },
+      { from: nodeId, to: 'END', condition: 'always' },
+    ],
+    entry: nodeId,
+    finish: [nodeId],
   }
 }
 
@@ -707,6 +740,12 @@ async function handleSave() {
 function openStudio() {
   if (isNew) return
   router.push(studioRoute(agentId))
+}
+
+async function copyAgentIdentity() {
+  if (!canCopyAgentIdentity.value) return
+  await navigator.clipboard.writeText(agentIdentityCopy.value)
+  ElMessage.success('已复制 Agent keySlug 和 ID')
 }
 
 function queryString(value: unknown) {

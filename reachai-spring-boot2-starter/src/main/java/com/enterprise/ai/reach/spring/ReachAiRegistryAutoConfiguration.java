@@ -1,5 +1,6 @@
 package com.enterprise.ai.reach.spring;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -38,7 +39,7 @@ public class ReachAiRegistryAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(name = "reachAiRegistryTaskScheduler")
     public TaskScheduler reachAiRegistryTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
@@ -51,7 +52,7 @@ public class ReachAiRegistryAutoConfiguration {
     @ConditionalOnMissingBean
     public ReachAiRegistryHeartbeatScheduler reachAiRegistryHeartbeatScheduler(ReachAiRegistryProperties properties,
                                                                               ReachAiRegistryClient registryClient,
-                                                                              TaskScheduler taskScheduler) {
+                                                                              @Qualifier("reachAiRegistryTaskScheduler") TaskScheduler taskScheduler) {
         return new ReachAiRegistryHeartbeatScheduler(properties, registryClient, taskScheduler);
     }
 

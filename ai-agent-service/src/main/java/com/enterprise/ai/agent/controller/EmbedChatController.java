@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
@@ -96,6 +97,7 @@ public class EmbedChatController {
                     .appId(appId)
                     .projectCode(request.projectCode())
                     .agentId(request.agentId())
+                    .pageKey(request.pageKey())
                     .pageInstanceId(request.pageInstanceId())
                     .route(request.route())
                     .origin(request.origin())
@@ -108,6 +110,7 @@ public class EmbedChatController {
                     Map.of(
                             "appId", appId,
                             "agentId", request.agentId(),
+                            "pageKey", StringUtils.hasText(request.pageKey()) ? request.pageKey() : "",
                             "pageInstanceId", request.pageInstanceId()));
             return ResponseEntity.ok(ApiResult.ok(response));
         } catch (IllegalArgumentException | EmbedTokenException ex) {
@@ -193,6 +196,7 @@ public class EmbedChatController {
             EmbedTokenClaims claims = verifyBearer(authorization);
             EmbedSessionEntity session = embedSessionService.create(
                     claims,
+                    request.pageKey(),
                     request.pageInstanceId(),
                     request.route(),
                     request.bridgeActions(),
@@ -452,6 +456,7 @@ public class EmbedChatController {
             metadata.put("projectCode", request.projectCode());
             metadata.put("agentId", request.agentId());
             metadata.put("pageInstanceId", request.pageInstanceId());
+            metadata.put("pageKey", request.pageKey());
             metadata.put("origin", request.origin());
             metadata.put("route", request.route());
             if (request.principal() != null) {
@@ -470,6 +475,7 @@ public class EmbedChatController {
         metadata.put("operation", "CREATE_SESSION");
         if (request != null) {
             metadata.put("pageInstanceId", request.pageInstanceId());
+            metadata.put("pageKey", request.pageKey());
             metadata.put("route", request.route());
             metadata.put("bridgeActions", request.bridgeActions());
             metadata.put("sdkVersion", request.sdkVersion());
@@ -503,10 +509,31 @@ public class EmbedChatController {
     private void ensureOriginAllowed(RegistryCredentialEntity credential, String origin) {
         List<String> allowed = readStringList(credential.getAllowedOriginsJson());
         if (allowed.isEmpty()) {
-            throw new IllegalArgumentException("embed origin policy is empty for project: " + credential.getProjectCode());
+            if (localDevelopmentOrigin(origin)) {
+                return;
+            }
+            throw new IllegalArgumentException("embed origin policy is empty for project: " + credential.getProjectCode()
+                    + "; only localhost origins are allowed by default");
         }
         if (allowed.stream().noneMatch(pattern -> originAllowed(pattern, origin))) {
             throw new IllegalArgumentException("embed origin is not allowed: " + origin);
+        }
+    }
+
+    private boolean localDevelopmentOrigin(String origin) {
+        if (!StringUtils.hasText(origin)) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(origin.trim());
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    && ("localhost".equalsIgnoreCase(host)
+                    || "127.0.0.1".equals(host)
+                    || "::1".equals(host));
+        } catch (IllegalArgumentException ex) {
+            return false;
         }
     }
 
@@ -596,6 +623,7 @@ public class EmbedChatController {
     public record EmbedTokenExchangeRequest(
             String projectCode,
             String agentId,
+            String pageKey,
             String pageInstanceId,
             String route,
             String origin,
@@ -611,7 +639,7 @@ public class EmbedChatController {
         }
     }
 
-    public record EmbedChatSessionCreateRequest(String pageInstanceId, String route, List<String> bridgeActions, String sdkVersion) {
+    public record EmbedChatSessionCreateRequest(String pageKey, String pageInstanceId, String route, List<String> bridgeActions, String sdkVersion) {
     }
 
     public record EmbedChatSessionResponse(String sessionId, String agentId, Map<String, String> principal) {

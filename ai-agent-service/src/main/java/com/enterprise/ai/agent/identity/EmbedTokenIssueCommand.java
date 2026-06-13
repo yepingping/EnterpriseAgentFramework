@@ -19,6 +19,8 @@ public class EmbedTokenIssueCommand {
 
     private String agentId;
 
+    private String pageKey;
+
     private String pageInstanceId;
 
     private String route;

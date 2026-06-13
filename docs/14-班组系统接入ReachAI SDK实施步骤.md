@@ -131,7 +131,7 @@ reachai:
     url: ${REACHAI_REGISTRY_URL:http://localhost:18603}
     app-key: ${REACHAI_REGISTRY_APP_KEY:qmssmp-teams-construction-service}
     app-secret: ${REACHAI_REGISTRY_APP_SECRET:change-me}
-    heartbeat-interval-ms: ${REACHAI_REGISTRY_HEARTBEAT_INTERVAL_MS:30000}
+    heartbeat-interval-ms: ${REACHAI_REGISTRY_HEARTBEAT_INTERVAL_MS:180000}
   project:
     code: qmssmp-teams-construction-service
     name: 班组建设服务

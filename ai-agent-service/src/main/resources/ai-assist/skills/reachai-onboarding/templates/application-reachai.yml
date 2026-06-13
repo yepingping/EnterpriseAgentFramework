@@ -4,7 +4,7 @@ reachai:
     url: ${REACHAI_REGISTRY_URL:http://localhost:18603}
     app-key: ${REACHAI_REGISTRY_APP_KEY}
     app-secret: ${REACHAI_REGISTRY_APP_SECRET}
-    heartbeat-interval-ms: ${REACHAI_REGISTRY_HEARTBEAT_INTERVAL_MS:30000}
+    heartbeat-interval-ms: ${REACHAI_REGISTRY_HEARTBEAT_INTERVAL_MS:180000}
   project:
     code: ${REACHAI_PROJECT_CODE}
     name: ${REACHAI_PROJECT_NAME}

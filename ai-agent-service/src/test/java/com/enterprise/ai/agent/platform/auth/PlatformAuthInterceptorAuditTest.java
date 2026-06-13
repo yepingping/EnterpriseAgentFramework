@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -70,5 +71,55 @@ class PlatformAuthInterceptorAuditTest {
                 eq("DENY"),
                 eq("platform permission denied"),
                 any(Map.class));
+    }
+
+    @Test
+    void aiCodingAccessSessionReportWithKeyBypassesPlatformLogin() throws Exception {
+        PlatformAuthInterceptor interceptor = new PlatformAuthInterceptor(
+                mock(PlatformAuthService.class),
+                new PlatformAuthorizationService(),
+                mock(GuardDecisionLogService.class),
+                new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/ai-assist/projects/1/access-sessions/rai_demo/steps/gateway-whitelist/report");
+        request.setParameter("aiCodingKey", "rac_valid");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+    }
+
+    @Test
+    void aiCodingPageAssistantRegisterPageWithKeyBypassesPlatformLogin() throws Exception {
+        PlatformAuthInterceptor interceptor = new PlatformAuthInterceptor(
+                mock(PlatformAuthService.class),
+                new PlatformAuthorizationService(),
+                mock(GuardDecisionLogService.class),
+                new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/ai-assist/projects/1/page-assistant/pages/register");
+        request.setParameter("aiCodingKey", "rac_valid");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+    }
+
+    @Test
+    void pageAssistantRegisterPageWithoutAiCodingKeyRequiresPlatformLogin() throws Exception {
+        PlatformAuthInterceptor interceptor = new PlatformAuthInterceptor(
+                mock(PlatformAuthService.class),
+                new PlatformAuthorizationService(),
+                mock(GuardDecisionLogService.class),
+                new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/ai-assist/projects/1/page-assistant/pages/register");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(request, response, new Object()));
     }
 }

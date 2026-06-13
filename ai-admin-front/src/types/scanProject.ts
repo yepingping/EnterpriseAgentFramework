@@ -166,6 +166,208 @@ export interface SdkAccessCheckResponse {
   checks: SdkAccessCheckItem[]
 }
 
+export type AiAccessStepStatus = 'TODO' | 'RUNNING' | 'PASS' | 'WARN' | 'FAIL' | 'SKIPPED'
+
+export interface AiAccessStep {
+  stepKey: string
+  title: string
+  status: AiAccessStepStatus
+  message?: string | null
+  files: string[]
+  evidence: Record<string, unknown>
+  reportedBy?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AiAccessSession {
+  sessionId: string
+  projectId: number
+  projectCode?: string | null
+  toolName?: string | null
+  scenario?: 'SDK_ACCESS' | 'PAGE_ASSISTANT' | string | null
+  targetPageKey?: string | null
+  targetRoute?: string | null
+  status: AiAccessStepStatus | 'OPEN'
+  totalSteps: number
+  completedSteps: number
+  failedSteps: number
+  lastMessage?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  steps: AiAccessStep[]
+}
+
+export interface AiAccessCheckRunResponse {
+  checkResult: SdkAccessCheckResponse
+  session: AiAccessSession
+}
+
+export interface PageAssistantSessionRequest {
+  toolName?: string | null
+  pageKey?: string | null
+  routePattern?: string | null
+  actionKeys?: string[]
+}
+
+export interface PageAssistantCheckRequest {
+  pageKey?: string | null
+  routePattern?: string | null
+  actionKeys?: string[]
+}
+
+export interface PageAssistantTargetRequest {
+  pageKey?: string | null
+  routePattern?: string | null
+  actionKeys?: string[]
+}
+
+export interface PageAssistantCatalogActionRequest {
+  actionKey: string
+  title?: string | null
+  description?: string | null
+  confirmRequired?: boolean | null
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  sampleArgs?: Record<string, unknown>
+  allowedAgentIds?: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface PageAssistantCatalogSyncRequest {
+  pageKey: string
+  name?: string | null
+  routePattern?: string | null
+  origin?: string | null
+  pageInstanceId?: string | null
+  replaceActions?: boolean
+  actions: PageAssistantCatalogActionRequest[]
+  metadata?: Record<string, unknown>
+}
+
+export interface PageAssistantCheckItem {
+  key: string
+  label: string
+  status: SdkAccessCheckStatus
+  message: string
+  evidence?: string | null
+}
+
+export interface PageAssistantCheckResponse {
+  projectId: number
+  projectCode: string
+  pageKey?: string | null
+  routePattern?: string | null
+  overallStatus: SdkAccessCheckStatus
+  checks: PageAssistantCheckItem[]
+}
+
+export interface PageAssistantCheckRunResponse {
+  checkResult: PageAssistantCheckResponse
+  session: AiAccessSession
+}
+
+export interface PageAssistantFileEvidence {
+  path: string
+  role?: string | null
+  exists?: boolean | null
+  sha256?: string | null
+}
+
+export interface PageAssistantPageRegisterRequest {
+  sessionId?: string | null
+  toolName?: string | null
+  pageKey: string
+  pageName?: string | null
+  routePattern?: string | null
+  framework?: string | null
+  frameworkVersion?: string | null
+  bridgeGlobal?: string | null
+  replaceActions?: boolean | null
+  files?: PageAssistantFileEvidence[]
+  actions: PageAssistantCatalogActionRequest[]
+  verification?: Record<string, unknown>
+  handoffSummary?: string | null
+}
+
+export interface PageAssistantPageRegisterResponse {
+  session: AiAccessSession
+  checkResult: PageAssistantCheckResponse
+  registeredPage: {
+    projectCode?: string | null
+    appId?: string | null
+    pageKey: string
+    pageName?: string | null
+    routePattern?: string | null
+    framework?: string | null
+    bridgeGlobal?: string | null
+  }
+  registeredActions: string[]
+  fileEvidence: PageAssistantFileEvidence[]
+}
+
+export interface PageAssistantSessionSummary {
+  sessionId: string
+  projectId: number
+  projectCode?: string | null
+  toolName?: string | null
+  targetPageKey?: string | null
+  targetRoute?: string | null
+  status: AiAccessStepStatus | 'OPEN'
+  completionState: 'WAITING_TARGET' | 'IN_PROGRESS' | 'COMPLETED' | 'BLOCKED' | string
+  totalSteps: number
+  completedSteps: number
+  failedSteps: number
+  actionCount: number
+  lastMessage?: string | null
+  lastReportedAt?: string | null
+  steps: AiAccessStep[]
+}
+
+export interface PageAssistantOnboardingManifest {
+  schema: string
+  project: AiOnboardingManifest['project']
+  aiCodingAccess: AiOnboardingManifest['aiCodingAccess']
+  target: {
+    pageKey?: string | null
+    routePattern?: string | null
+    actionKeys: string[]
+  }
+  session: AiAccessSession
+  endpoints: {
+    manifestUrl: string
+    latestSessionUrl: string
+    stepReportUrl: string
+    targetBindUrl: string
+    catalogSyncUrl: string
+    checksRunUrl: string
+    registerPageUrl?: string | null
+  }
+  security: AiOnboardingManifest['security']
+  localExecution?: {
+    requiresLocalShell: boolean
+    reason: string
+  }
+  pageActionContract?: {
+    bridgeGlobal: string
+    protocolVersion: string
+    supportedFrameworks: string[]
+    recommendedActions: string[]
+    safety: {
+      readonlyFirst: boolean
+      highRiskActionsRequireConfirm: boolean
+    }
+  }
+  scaffold?: {
+    framework: string
+    templates: Array<{
+      name: string
+      role: string
+    }>
+  }
+}
+
 export interface AiOnboardingManifest {
   schema: string
   project: {
@@ -206,6 +408,18 @@ export interface AiOnboardingManifest {
     manifestUrl: string
     sdkAccessCheckUrl: string
     reconcileToolsUrl: string
+  }
+  embed: {
+    tokenPath: string
+    defaultAgentId?: string | null
+    defaultAgentKeySlug?: string | null
+    allowedAgents: Array<{
+      id: string
+      keySlug?: string | null
+      name: string
+      projectCode?: string | null
+      enabled: boolean
+    }>
   }
   security: {
     appSecretEnv: string

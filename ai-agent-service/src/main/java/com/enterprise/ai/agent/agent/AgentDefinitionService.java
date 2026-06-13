@@ -121,6 +121,7 @@ public class AgentDefinitionService {
 
     @Transactional
     public AgentDefinition create(AgentDefinition def) {
+        AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(def);
         def.setModelInstanceId(normalizeModelInstanceId(def));
         if (def.getId() == null || def.getId().isBlank()) {
             def.setId(UUID.randomUUID().toString().replace("-", "").substring(0, 12));
@@ -189,6 +190,7 @@ public class AgentDefinitionService {
             current.setKeySlug(update.getKeySlug());
         }
 
+        AgentDefinitionGraphBootstrapper.bootstrapLangGraphIfEmpty(current);
         current.setUpdatedAt(LocalDateTime.now());
         current.setModelInstanceId(normalizeModelInstanceId(current));
         mapper.updateById(toEntity(current));

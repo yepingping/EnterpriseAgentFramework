@@ -28,6 +28,8 @@ public class EmbedSessionEntity {
 
     private String globalUserId;
 
+    private String pageKey;
+
     private String pageInstanceId;
 
     private String route;
