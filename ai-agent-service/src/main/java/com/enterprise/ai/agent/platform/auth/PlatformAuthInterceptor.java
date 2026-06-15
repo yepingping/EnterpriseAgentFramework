@@ -64,6 +64,7 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
                 || path.startsWith("/api/v1/agents/")
                 || path.startsWith("/api/ai-assist/skills/")
                 || isAiCodingManifestAccess(request, path)
+                || isAiCodingAgentProvisionAccess(request, path)
                 || isAiCodingAccessSessionAccess(request, path)
                 || isAiCodingPageAssistantAccess(request, path);
     }
@@ -83,6 +84,13 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
         }
         return ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/access-sessions/latest"))
                 || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"));
+    }
+
+    private boolean isAiCodingAgentProvisionAccess(HttpServletRequest request, String path) {
+        return request.getParameter("aiCodingKey") != null
+                && "POST".equalsIgnoreCase(request.getMethod())
+                && path.startsWith("/api/ai-assist/projects/")
+                && path.endsWith("/agents/provision");
     }
 
     private boolean isAiCodingPageAssistantAccess(HttpServletRequest request, String path) {

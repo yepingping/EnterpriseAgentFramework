@@ -11,8 +11,11 @@ import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.SdkAccessCheckService;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
+import com.enterprise.ai.agent.workflow.AgentProvisioningService;
 import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingResult;
 import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingService;
+import com.enterprise.ai.agent.workflow.AgentWorkflowBindingEntity;
+import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ClassPathResource;
@@ -54,6 +57,7 @@ public class AiAssistController {
     private static final String PAGE_ASSISTANT_SKILL_NAME = "reachai-page-assistant-onboarding";
     private static final String PAGE_ASSISTANT_SKILL_VERSION = "0.1.0";
     private static final String PAGE_ASSISTANT_SKILL_ROOT = "ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME + "/";
+    private static final String PAGE_ASSISTANT_HELPER_SCRIPT = "scripts/reachai-page-assistant.ps1";
     private static final String SECRET_ENV_NAME = "REACHAI_REGISTRY_APP_SECRET";
 
     private static final List<String> SKILL_FILES = List.of(
@@ -81,6 +85,7 @@ public class AiAssistController {
     private final ScanProjectService scanProjectService;
     private final RegistrySecurityService registrySecurityService;
     private final AgentEntryService agentEntryService;
+    private final AgentProvisioningService agentProvisioningService;
     private final AiAccessSessionService accessSessionService;
     private final PageActionCatalogService pageActionCatalogService;
     private final PageAssistantWorkflowBindingService pageAssistantWorkflowBindingService;
@@ -143,6 +148,24 @@ public class AiAssistController {
                 .body(body);
     }
 
+    @GetMapping(value = "/skills/reachai-page-assistant-onboarding/scripts/reachai-page-assistant.ps1",
+            produces = "text/plain")
+    public ResponseEntity<byte[]> downloadPageAssistantHelperScript() throws IOException {
+        ClassPathResource resource = new ClassPathResource(PAGE_ASSISTANT_SKILL_ROOT + PAGE_ASSISTANT_HELPER_SCRIPT);
+        if (!resource.exists()) {
+            throw new IOException("Missing ReachAI page assistant helper script");
+        }
+        byte[] body = resource.getInputStream().readAllBytes();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename("reachai-page-assistant.ps1", StandardCharsets.UTF_8)
+                        .build()
+                        .toString())
+                .contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .contentLength(body.length)
+                .body(body);
+    }
+
     @GetMapping("/projects/{projectId}/onboarding-manifest")
     public ResponseEntity<?> onboardingManifest(@PathVariable Long projectId,
                                                 @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
@@ -159,6 +182,7 @@ public class AiAssistController {
                     : Optional.empty();
             String appKey = credential.map(RegistryCredentialEntity::getAppKey).orElse(null);
             EmbedManifest embed = buildEmbedManifest(project, credential);
+            AgentProvisioningManifest agentProvisioning = buildAgentProvisioningManifest(project, baseUrl, aiCodingKey);
 
             return ResponseEntity.ok(new OnboardingManifestResponse(
                     "reachai.onboarding.v1",
@@ -201,7 +225,8 @@ public class AiAssistController {
                             baseUrl + "/api/scan-projects/" + projectId + "/tools/reconcile"
                     ),
                     embed,
-                    buildAgentWorkflowManifest(project, embed, baseUrl),
+                    agentProvisioning,
+                    buildAgentWorkflowManifest(project, embed, agentProvisioning, baseUrl),
                     new SecurityGuidance(
                             SECRET_ENV_NAME,
                             "Do not paste or write the registry app secret into AI chat context. Store it in a local environment variable or secret manager."
@@ -212,7 +237,30 @@ public class AiAssistController {
         }
     }
 
-    @GetMapping("/projects/{projectId}/page-assistant/onboarding-manifest")
+    @PostMapping("/projects/{projectId}/agents/provision")
+    public ResponseEntity<?> provisionProjectAgent(@PathVariable Long projectId,
+                                                   @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
+                                                   @RequestBody(required = false) AgentProvisionRequest request) {
+        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+            return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
+        }
+        try {
+            ScanProjectEntity project = scanProjectService.getById(projectId);
+            String agentKind = request == null ? null : request.agentKind();
+            if (StringUtils.hasText(agentKind) && !AgentProvisioningService.PAGE_COPILOT_KIND.equalsIgnoreCase(agentKind.trim())) {
+                return ResponseEntity.badRequest().body(new ApiErrorResponse("unsupported agentKind: " + agentKind));
+            }
+            boolean ensureDefaultWorkflow = request == null || request.ensureDefaultWorkflow() == null || request.ensureDefaultWorkflow();
+            String requestedBy = request == null ? "ai-coding" : firstNonBlank(request.requestedBy(), "ai-coding");
+            AgentProvisioningService.AgentProvisioningResult result =
+                    agentProvisioningService.provisionPageCopilot(project, requestedBy, ensureDefaultWorkflow);
+            return ResponseEntity.ok(toAgentProvisionResponse(result));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @GetMapping(value = "/projects/{projectId}/page-assistant/onboarding-manifest", produces = "application/json;charset=UTF-8")
     public ResponseEntity<?> pageAssistantManifest(@PathVariable Long projectId,
                                                    @RequestParam(value = "pageKey", required = false) String pageKey,
                                                    @RequestParam(value = "routePattern", required = false) String routePattern,
@@ -246,6 +294,9 @@ public class AiAssistController {
                     + "/page-assistant/sessions/" + session.sessionId() + "/checks/run";
             String registerPageUrl = baseUrl + "/api/ai-assist/projects/" + projectId
                     + "/page-assistant/pages/register";
+            String skillPackageUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME + "/latest.zip";
+            String scriptDownloadUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME
+                    + "/scripts/reachai-page-assistant.ps1";
             if (StringUtils.hasText(aiCodingKey)) {
                 manifestUrl = appendQuery(manifestUrl, "aiCodingKey", aiCodingKey);
                 latestSessionUrl = appendQuery(latestSessionUrl, "aiCodingKey", aiCodingKey);
@@ -255,6 +306,10 @@ public class AiAssistController {
                 checksRunUrl = appendQuery(checksRunUrl, "aiCodingKey", aiCodingKey);
                 registerPageUrl = appendQuery(registerPageUrl, "aiCodingKey", aiCodingKey);
             }
+            String resolvedPageKey = session.targetPageKey();
+            String resolvedRoute = session.targetRoute();
+            String scaffoldCommand = buildPageAssistantScaffoldCommand(manifestUrl);
+            String verifyCommand = buildPageAssistantVerifyCommand(manifestUrl, resolvedPageKey, resolvedRoute);
             return ResponseEntity.ok(new PageAssistantManifestResponse(
                     "reachai.page-assistant-onboarding.v2",
                     new ProjectManifest(
@@ -285,7 +340,9 @@ public class AiAssistController {
                             targetBindUrl,
                             catalogSyncUrl,
                             checksRunUrl,
-                            registerPageUrl
+                            registerPageUrl,
+                            skillPackageUrl,
+                            scriptDownloadUrl
                     ),
                     new SecurityGuidance(
                             SECRET_ENV_NAME,
@@ -294,19 +351,19 @@ public class AiAssistController {
                     new LocalExecutionManifest(
                             true,
                             "localhost platform APIs usually cannot be reached from remote WebFetch. Use local PowerShell/curl from the business frontend machine."),
-                    new PageActionContractManifest(
-                            "__REACHAI_PAGE_BRIDGE__",
-                            "1.0",
-                            List.of("angular"),
-                            List.of("getPageState", "setFilters", "search", "reset", "readTable", "openRowAction"),
-                            new PageActionSafetyManifest(true, true)),
+                    buildPageActionContractManifest(),
                     new PageAssistantScaffoldManifest(
                             "angular",
                             List.of(
                                     new ScaffoldTemplateManifest("reachai-page-action.types.ts", "types"),
                                     new ScaffoldTemplateManifest("reachai-page-action.service.ts", "bridge-service"),
                                     new ScaffoldTemplateManifest("page-registry.example.ts", "page-registry")
-                            ))
+                            ),
+                            PAGE_ASSISTANT_HELPER_SCRIPT,
+                            scriptDownloadUrl,
+                            skillPackageUrl,
+                            scaffoldCommand,
+                            verifyCommand)
             ));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
@@ -492,7 +549,7 @@ public class AiAssistController {
         }
     }
 
-    @PostMapping("/projects/{projectId}/page-assistant/pages/register")
+    @PostMapping(value = "/projects/{projectId}/page-assistant/pages/register", produces = "application/json;charset=UTF-8")
     public ResponseEntity<?> registerPageAssistantPage(@PathVariable Long projectId,
                                                        @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                        @RequestBody(required = false)
@@ -510,11 +567,12 @@ public class AiAssistController {
             }
             PageActionCatalogContracts.PageCatalogRegisterRequest catalogRequest = toCatalogRegisterRequest(request);
             PageCatalogRegisterResult registerResult = pageActionCatalogService.registerFromProjectCredential(credential, catalogRequest);
+            AiAccessSessionService.PageAssistantPageRegisterRequest normalizedRequest = normalizeRegisterRequest(request);
             AiAccessSessionService.PageAssistantPageRegisterSessionResult sessionResult =
-                    accessSessionService.applyPageAssistantPageRegistration(projectId, request, registerResult);
-            List<String> actionKeys = request == null || request.actions() == null
+                    accessSessionService.applyPageAssistantPageRegistration(projectId, normalizedRequest, registerResult);
+            List<String> actionKeys = normalizedRequest.actions() == null
                     ? List.of()
-                    : request.actions().stream()
+                    : normalizedRequest.actions().stream()
                     .map(PageActionCatalogContracts.PageActionDefinitionRequest::actionKey)
                     .filter(StringUtils::hasText)
                     .map(String::trim)
@@ -523,17 +581,14 @@ public class AiAssistController {
             PageAssistantWorkflowBindingResult workflowBinding =
                     pageAssistantWorkflowBindingService.ensurePageWorkflowBinding(
                             project,
-                            request == null ? null : request.pageKey(),
-                            request == null ? null : request.routePattern(),
+                            normalizedRequest.pageKey(),
+                            normalizedRequest.routePattern(),
                             actionKeys);
             AiAccessSessionService.PageAssistantCheckRunResponse checkRun =
                     accessSessionService.runPageAssistantChecks(
                             projectId,
                             sessionResult.session().sessionId(),
-                            new AiAccessSessionService.PageAssistantCheckRequest(
-                                    request == null ? null : request.pageKey(),
-                                    request == null ? null : request.routePattern(),
-                                    actionKeys));
+                            AiAccessSessionService.buildCheckRequestFromRegister(normalizedRequest, actionKeys));
             return ResponseEntity.ok(new PageAssistantPageRegisterResponse(
                     checkRun.session(),
                     checkRun.checkResult(),
@@ -541,10 +596,10 @@ public class AiAssistController {
                             registerResult.projectCode(),
                             registerResult.appId(),
                             registerResult.pageKey(),
-                            request == null ? null : request.pageName(),
-                            request == null ? null : request.routePattern(),
-                            request == null ? null : request.framework(),
-                            request == null ? null : request.bridgeGlobal()),
+                            normalizedRequest.pageName(),
+                            normalizedRequest.routePattern(),
+                            normalizedRequest.framework(),
+                            normalizedRequest.bridgeGlobal()),
                     actionKeys,
                     sessionResult.fileEvidence(),
                     workflowBinding));
@@ -555,26 +610,132 @@ public class AiAssistController {
 
     private static PageActionCatalogContracts.PageCatalogRegisterRequest toCatalogRegisterRequest(
             AiAccessSessionService.PageAssistantPageRegisterRequest request) {
-        if (request == null) {
+        AiAccessSessionService.PageAssistantPageRegisterRequest normalized = normalizeRegisterRequest(request);
+        if (normalized == null) {
             throw new IllegalArgumentException("page assistant register request is required");
         }
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("source", "ai-coding");
-        metadata.put("framework", emptyToNull(request.framework()));
-        metadata.put("frameworkVersion", emptyToNull(request.frameworkVersion()));
-        metadata.put("bridgeGlobal", emptyToNull(request.bridgeGlobal()));
-        metadata.put("files", request.files() == null ? List.of() : request.files());
-        metadata.put("verification", request.verification() == null ? Map.of() : request.verification());
-        metadata.put("handoffSummary", emptyToNull(request.handoffSummary()));
+        metadata.put("framework", emptyToNull(normalized.framework()));
+        metadata.put("frameworkVersion", emptyToNull(normalized.frameworkVersion()));
+        metadata.put("bridgeGlobal", emptyToNull(normalized.bridgeGlobal()));
+        metadata.put("files", normalized.files() == null ? List.of() : normalized.files());
+        metadata.put("verification", normalized.verification() == null ? Map.of() : normalized.verification());
+        metadata.put("handoffSummary", emptyToNull(normalized.handoffSummary()));
         return new PageActionCatalogContracts.PageCatalogRegisterRequest(
+                normalized.pageKey(),
+                normalized.pageName(),
+                normalized.routePattern(),
+                "ai-coding",
+                null,
+                normalized.replaceActions(),
+                normalized.actions() == null ? List.of() : normalized.actions(),
+                metadata);
+    }
+
+    private static AiAccessSessionService.PageAssistantPageRegisterRequest normalizeRegisterRequest(
+            AiAccessSessionService.PageAssistantPageRegisterRequest request) {
+        if (request == null) {
+            return null;
+        }
+        return new AiAccessSessionService.PageAssistantPageRegisterRequest(
+                request.sessionId(),
+                request.toolName(),
                 request.pageKey(),
                 request.pageName(),
                 request.routePattern(),
-                "ai-coding",
-                null,
+                request.framework(),
+                request.frameworkVersion(),
+                request.bridgeGlobal(),
                 request.replaceActions(),
-                request.actions() == null ? List.of() : request.actions(),
-                metadata);
+                AiAccessSessionService.normalizeFileEvidence(request.files()),
+                request.actions(),
+                request.verification(),
+                request.handoffSummary());
+    }
+
+    private static PageActionContractManifest buildPageActionContractManifest() {
+        return new PageActionContractManifest(
+                "__REACHAI_PAGE_BRIDGE__",
+                "1.0",
+                List.of("angular"),
+                List.of("getPageState", "setFilters", "search", "reset", "readTable", "openRowAction"),
+                new PageActionSafetyManifest(true, true),
+                buildPageActionBridgeApi());
+    }
+
+    private static PageActionBridgeApiManifest buildPageActionBridgeApi() {
+        Map<String, String> methods = Map.of(
+                "register", "register(pageKey, actionKey, handler, metadata?)",
+                "unregisterPage", "unregisterPage(pageKey)",
+                "execute", "execute(pageKey, actionKey, args?, options?)",
+                "list", "list(pageKey?)");
+        Map<String, Object> executeRequest = Map.of(
+                "type", "object",
+                "required", List.of("pageKey", "actionKey"),
+                "properties", Map.of(
+                        "pageKey", Map.of("type", "string"),
+                        "actionKey", Map.of("type", "string"),
+                        "args", Map.of("type", "object"),
+                        "options", Map.of("type", "object", "properties", Map.of(
+                                "confirm", Map.of("type", "boolean"),
+                                "timeoutMs", Map.of("type", "integer")))));
+        Map<String, Object> executeResponse = Map.of(
+                "type", "object",
+                "required", List.of("status"),
+                "properties", Map.of(
+                        "status", Map.of("type", "string", "enum", List.of("SUCCESS", "WARN", "ERROR")),
+                        "message", Map.of("type", "string"),
+                        "data", Map.of("type", "object"),
+                        "error", Map.of("type", "object", "properties", Map.of(
+                                "code", Map.of("type", "string"),
+                                "message", Map.of("type", "string"))),
+                        "metadata", Map.of("type", "object")));
+        return new PageActionBridgeApiManifest(
+                "window.__REACHAI_PAGE_BRIDGE__",
+                methods,
+                new BridgeApiSchemas(
+                        Map.of("type", "object", "required", List.of("pageKey", "actionKey", "handler"),
+                                "properties", Map.of(
+                                        "pageKey", Map.of("type", "string"),
+                                        "actionKey", Map.of("type", "string"),
+                                        "handler", Map.of("type", "object"),
+                                        "metadata", Map.of("type", "object"))),
+                        executeRequest,
+                        executeResponse),
+                List.of("SUCCESS", "WARN", "ERROR"),
+                List.of("HANDLER_NOT_FOUND", "HANDLER_ERROR", "CONFIRM_REQUIRED", "PENDING_CONFIRM"),
+                List.of(
+                        new BridgeApiExampleManifest(
+                                "getPageState execute",
+                                "getPageState",
+                                Map.of("pageKey", "teamArchive.list", "actionKey", "getPageState", "args", Map.of()),
+                                Map.of("status", "SUCCESS", "data", Map.of(
+                                        "filters", Map.of("teamName", "A"),
+                                        "pagination", Map.of("page", 1, "pageSize", 10),
+                                        "rows", List.of()))),
+                        new BridgeApiExampleManifest(
+                                "high-risk pending confirm",
+                                "openRowAction",
+                                Map.of("pageKey", "teamArchive.list", "actionKey", "openRowAction",
+                                        "args", Map.of("rowId", "1001")),
+                                Map.of("status", "ERROR", "error", Map.of(
+                                        "code", "PENDING_CONFIRM",
+                                        "message", "High-risk action requires user confirmation")))),
+                new PageActionSafetyManifest(true, true));
+    }
+
+    private static String buildPageAssistantScaffoldCommand(String manifestUrl) {
+        return ".\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl \""
+                + manifestUrl + "\" -Framework angular -OutputDir \".\\src\\app\\shared\\reachai\"";
+    }
+
+    private static String buildPageAssistantVerifyCommand(String manifestUrl, String pageKey, String routePattern) {
+        String resolvedPageKey = StringUtils.hasText(pageKey) ? pageKey.trim() : "<pageKey>";
+        String resolvedRoute = StringUtils.hasText(routePattern) ? routePattern.trim() : "<目标路由>";
+        return ".\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl \""
+                + manifestUrl + "\" -FrontendUrl \"<业务前端地址>\" -Route \""
+                + resolvedRoute + "\" -PageKey \"" + resolvedPageKey + "\"";
     }
 
     @PostMapping("/projects/{projectId}/access-sessions/{sessionId}/checks/run")
@@ -589,7 +750,7 @@ public class AiAssistController {
         }
     }
 
-    @PostMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/checks/run")
+    @PostMapping(value = "/projects/{projectId}/page-assistant/sessions/{sessionId}/checks/run", produces = "application/json;charset=UTF-8")
     public ResponseEntity<?> runPageAssistantSessionChecks(@PathVariable Long projectId,
                                                            @PathVariable String sessionId,
                                                            @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
@@ -628,20 +789,46 @@ public class AiAssistController {
         );
     }
 
-    private AgentWorkflowManifest buildAgentWorkflowManifest(ScanProjectEntity project, EmbedManifest embed, String baseUrl) {
-        String fallbackProjectCode = StringUtils.hasText(project.getProjectCode())
-                ? project.getProjectCode().trim()
-                : "project-" + project.getId();
+    private AgentProvisioningManifest buildAgentProvisioningManifest(ScanProjectEntity project,
+                                                                     String baseUrl,
+                                                                     String aiCodingKey) {
+        String fallbackProjectCode = projectCodeOrFallback(project);
+        String defaultKeySlug = agentProvisioningService.pageCopilotKeySlug(fallbackProjectCode);
+        String provisionUrl = baseUrl + "/api/ai-assist/projects/" + project.getId() + "/agents/provision";
+        if (StringUtils.hasText(aiCodingKey)) {
+            provisionUrl = appendQuery(provisionUrl, "aiCodingKey", aiCodingKey);
+        }
+        return new AgentProvisioningManifest(
+                "agent-provisioning.v1",
+                AgentProvisioningService.PAGE_COPILOT_KIND,
+                defaultKeySlug,
+                provisionUrl,
+                true,
+                true,
+                true,
+                List.of(
+                        "Call provisionAgentUrl before wiring embedded chat.",
+                        "Use response.agent.keySlug as the business frontend agentId.",
+                        "Do not ask the user to manually create or choose a project Agent during SDK onboarding."
+                )
+        );
+    }
+
+    private AgentWorkflowManifest buildAgentWorkflowManifest(ScanProjectEntity project,
+                                                             EmbedManifest embed,
+                                                             AgentProvisioningManifest provisioning,
+                                                             String baseUrl) {
         String globalAgentKeySlug = firstNonBlank(
+                provisioning == null ? null : provisioning.defaultKeySlug(),
                 embed == null ? null : embed.defaultAgentKeySlug(),
-                fallbackProjectCode + "-global-ai-assistant");
+                agentProvisioningService.pageCopilotKeySlug(projectCodeOrFallback(project)));
         return new AgentWorkflowManifest(
                 "agent-workflow.decoupled.v1",
                 globalAgentKeySlug,
-                "GLOBAL_EMBED",
+                AgentProvisioningService.PAGE_COPILOT_KIND,
                 "ai_workflow",
                 "SDK_GRAPH",
-                "Bind page/action/intent workflows to the global embedded agent instead of creating one agent per workflow.",
+                "Bind page/action/intent workflows to the project page copilot Agent instead of creating one agent per workflow.",
                 new AgentWorkflowEndpoints(
                         baseUrl + "/api/agents",
                         baseUrl + "/api/workflows",
@@ -649,12 +836,56 @@ public class AiAssistController {
                         baseUrl + "/api/agents/" + globalAgentKeySlug + "/workflow-bindings/resolve-preview"
                 ),
                 List.of(
-                        "Create or reuse one project-level GLOBAL_EMBED agent entry.",
+                        "Provision or reuse one project-level PAGE_COPILOT Agent entry.",
                         "Store every executable graph as an ai_workflow draft or version.",
                         "Create ai_agent_workflow_binding rows for DEFAULT, PAGE, ACTION, ROUTE, or INTENT routing.",
                         "Do not treat LangGraph runtime configuration as the Agent identity."
                 )
         );
+    }
+
+    private AgentProvisionResponse toAgentProvisionResponse(AgentProvisioningService.AgentProvisioningResult result) {
+        AgentEntryEntity agent = result.agent();
+        WorkflowDefinitionEntity workflow = result.defaultWorkflow();
+        AgentWorkflowBindingEntity binding = result.defaultBinding();
+        return new AgentProvisionResponse(
+                "agent-provisioning.v1",
+                toProvisionedAgent(agent),
+                workflow == null ? null : new ProvisionedWorkflow(
+                        workflow.getId(),
+                        workflow.getKeySlug(),
+                        workflow.getName(),
+                        workflow.getWorkflowType(),
+                        workflow.getStatus(),
+                        workflow.getManagedBy()),
+                binding == null ? null : new ProvisionedBinding(
+                        binding.getId(),
+                        binding.getAgentId(),
+                        binding.getWorkflowId(),
+                        binding.getBindingType(),
+                        binding.getEnabled()),
+                result.createdAgent(),
+                result.createdDefaultWorkflow(),
+                result.createdDefaultBinding()
+        );
+    }
+
+    private ProvisionedAgent toProvisionedAgent(AgentEntryEntity agent) {
+        return new ProvisionedAgent(
+                agent.getId(),
+                agent.getKeySlug(),
+                agent.getName(),
+                agent.getProjectCode(),
+                agent.getAgentKind(),
+                agent.getEnabled() == null || agent.getEnabled()
+        );
+    }
+
+    private String projectCodeOrFallback(ScanProjectEntity project) {
+        if (project != null && StringUtils.hasText(project.getProjectCode())) {
+            return project.getProjectCode().trim();
+        }
+        return "project-" + (project == null ? "unknown" : project.getId());
     }
 
     private static String firstNonBlank(String... values) {
@@ -786,6 +1017,7 @@ public class AiAssistController {
             SdkManifest sdk,
             PlatformEndpoints endpoints,
             EmbedManifest embed,
+            AgentProvisioningManifest agentProvisioning,
             AgentWorkflowManifest agentWorkflow,
             SecurityGuidance security
     ) {
@@ -837,6 +1069,65 @@ public class AiAssistController {
     ) {
     }
 
+    record AgentProvisionRequest(
+            String agentKind,
+            Boolean ensureDefaultWorkflow,
+            String requestedBy
+    ) {
+    }
+
+    record AgentProvisioningManifest(
+            String model,
+            String defaultAgentKind,
+            String defaultKeySlug,
+            String provisionAgentUrl,
+            boolean idempotent,
+            boolean createsDefaultWorkflow,
+            boolean createsDefaultBinding,
+            List<String> requiredSteps
+    ) {
+    }
+
+    record AgentProvisionResponse(
+            String schema,
+            ProvisionedAgent agent,
+            ProvisionedWorkflow defaultWorkflow,
+            ProvisionedBinding defaultBinding,
+            boolean createdAgent,
+            boolean createdDefaultWorkflow,
+            boolean createdDefaultBinding
+    ) {
+    }
+
+    record ProvisionedAgent(
+            String id,
+            String keySlug,
+            String name,
+            String projectCode,
+            String agentKind,
+            boolean enabled
+    ) {
+    }
+
+    record ProvisionedWorkflow(
+            String id,
+            String keySlug,
+            String name,
+            String workflowType,
+            String status,
+            String managedBy
+    ) {
+    }
+
+    record ProvisionedBinding(
+            Long id,
+            String agentId,
+            String workflowId,
+            String bindingType,
+            Boolean enabled
+    ) {
+    }
+
     record SdkManifest(
             String version,
             List<MavenDependency> dependencies,
@@ -874,7 +1165,9 @@ public class AiAssistController {
             String targetBindUrl,
             String catalogSyncUrl,
             String checksRunUrl,
-            String registerPageUrl
+            String registerPageUrl,
+            String skillPackageUrl,
+            String scriptDownloadUrl
     ) {
     }
 
@@ -889,7 +1182,34 @@ public class AiAssistController {
             String protocolVersion,
             List<String> supportedFrameworks,
             List<String> recommendedActions,
+            PageActionSafetyManifest safety,
+            PageActionBridgeApiManifest bridgeApi
+    ) {
+    }
+
+    record PageActionBridgeApiManifest(
+            String global,
+            Map<String, String> methods,
+            BridgeApiSchemas schemas,
+            List<String> statusValues,
+            List<String> errorCodes,
+            List<BridgeApiExampleManifest> examples,
             PageActionSafetyManifest safety
+    ) {
+    }
+
+    record BridgeApiSchemas(
+            Map<String, Object> registerRequest,
+            Map<String, Object> executeRequest,
+            Map<String, Object> executeResponse
+    ) {
+    }
+
+    record BridgeApiExampleManifest(
+            String name,
+            String actionKey,
+            Map<String, Object> request,
+            Map<String, Object> response
     ) {
     }
 
@@ -901,7 +1221,12 @@ public class AiAssistController {
 
     record PageAssistantScaffoldManifest(
             String framework,
-            List<ScaffoldTemplateManifest> templates
+            List<ScaffoldTemplateManifest> templates,
+            String helperScriptPath,
+            String scriptDownloadUrl,
+            String skillPackageUrl,
+            String scaffoldCommand,
+            String verifyCommand
     ) {
     }
 
@@ -926,7 +1251,7 @@ public class AiAssistController {
             AiAccessSessionService.PageAssistantCheckResponse checkResult,
             RegisteredPageResponse registeredPage,
             List<String> registeredActions,
-            List<AiAccessSessionService.PageAssistantFileEvidence> fileEvidence,
+            List<AiAccessSessionService.PageAssistantFileEvidenceView> fileEvidence,
             PageAssistantWorkflowBindingResult workflowBinding
     ) {
     }
@@ -982,6 +1307,6 @@ public class AiAssistController {
     record SecurityGuidance(String appSecretEnv, String message) {
     }
 
-    record ApiErrorResponse(String message) {
+    public record ApiErrorResponse(String message) {
     }
 }

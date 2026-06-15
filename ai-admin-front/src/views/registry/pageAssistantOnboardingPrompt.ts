@@ -29,8 +29,12 @@ export interface PageAssistantPromptProgress {
   catalogSyncUrl?: string | null
   checksRunUrl?: string | null
   registerPageUrl?: string | null
+  skillPackageUrl?: string | null
+  scriptDownloadUrl?: string | null
+  helperScriptPath?: string | null
   scaffoldCommand?: string | null
   verifyCommand?: string | null
+  bridgeApiGlobal?: string | null
 }
 
 export interface PageAssistantOnboardingPromptContext {
@@ -49,7 +53,8 @@ const suggestedStepKeys = [
   'action-design',
   'frontend-handler',
   'page-registry',
-  'browser-verify',
+  'browser-verify-static',
+  'browser-verify-runtime',
   'handoff-summary',
 ]
 
@@ -81,8 +86,21 @@ export function buildPageAssistantOnboardingPrompt(context: PageAssistantOnboard
     }).join('\n')
     : '- 当前平台尚未选中动作，请按 MVP 动作清单在业务前端实现并回填页面动作目录。'
   const progressBlock = buildProgressBlock(progress)
+  const helperScriptPath = clean(progress.helperScriptPath) || 'scripts/reachai-page-assistant.ps1'
+  const scriptDownloadUrl = clean(progress.scriptDownloadUrl) || clean(progress.skillPackageUrl) || 'manifest.endpoints.scriptDownloadUrl 或 skillPackageUrl'
+  const scaffoldCommand = clean(progress.scaffoldCommand) || `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "<页面助手接入清单 URL>" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
+  const verifyCommand = clean(progress.verifyCommand) || `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "<页面助手接入清单 URL>" -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
+  const bridgeApiGlobal = clean(progress.bridgeApiGlobal) || 'window.__REACHAI_PAGE_BRIDGE__'
 
   return `你现在要在当前业务前端仓库中完成 ReachAI 页面助手接入，请使用 ${context.toolName || 'Cursor/Codex/Claude Code'} 执行。
+
+第一步（helper script 落盘）：
+- 如果业务仓库不存在 .\\${helperScriptPath}，先从 manifest.endpoints.scriptDownloadUrl 下载 helper script，或从 manifest.endpoints.skillPackageUrl / manifest.scaffold.skillPackageUrl 解压 skill 包后复制 scripts/reachai-page-assistant.ps1。
+- 目标落盘路径固定为 .\\${helperScriptPath}；Windows 优先使用 PowerShell 5+ 执行。
+- script 下载地址：${scriptDownloadUrl}
+- 落盘完成后再执行 scaffold / verify；不要在没有 helper script 时直接假设 .\\scripts\\reachai-page-assistant.ps1 已存在。
+- scaffold 命令：${scaffoldCommand}
+- verify 命令：${verifyCommand}
 
 任务边界：
 - 当前任务是“页面助手接入”，目标是让 ReachAI Agent 通过当前业务页面的 Page Action 操作页面。
@@ -90,6 +108,12 @@ export function buildPageAssistantOnboardingPrompt(context: PageAssistantOnboard
 - 优先让 AI 操作当前页面已有 UI、组件状态、查询服务和路由，不要为了简单查询绕过页面去新增后端 API Tool。
 - 不要重写页面，不要改无关业务逻辑，不要绕过页面权限。
 - 不要要求用户提供真实密钥，也不要把真实密钥写入代码、日志、文档或最终总结。
+
+Agent / Workflow 架构说明：
+- 业务系统里出现的统一 AI 按钮使用项目下的 PAGE_COPILOT Agent；该 Agent 通常由 SDK 快速接入阶段通过 ReachAI provisioning 自动创建或复用。
+- 本次页面助手接入不要创建 Agent，不要调用 /api/agents 管理接口，也不要恢复旧 Agent Studio。
+- 你只需要通过 page-assistant 专用接口注册当前页面和 Page Action；ReachAI 平台会创建或复用 PAGE_ASSISTANT Workflow，并通过 ai_agent_workflow_binding 按 pageKey/route 挂载到 PAGE_COPILOT Agent。
+- GraphSpec、画布、调试、发布、版本和回放都在 Workflow Studio 中闭环；Agent 页面只负责身份、入口、策略和 Workflow 路由。
 
 ReachAI 平台上下文：
 - 平台地址：${context.platformUrl || '请从当前环境确认'}
@@ -117,6 +141,9 @@ AI Coding key 可写范围：
 - 绑定目标页时，向“目标页绑定 URL”PUT：{ "pageKey": "...", "routePattern": "...", "actionKeys": [...] }。
 - 同步目录时，向“页面动作目录同步 URL”POST PageCatalogRegisterRequest，至少包含 pageKey、name、routePattern、replaceActions、actions；actions 内包含 actionKey、title、description、confirmRequired、inputSchema、outputSchema、sampleArgs、metadata。
 - 一键注册时，向“页面一键注册 URL”POST：sessionId、toolName、pageKey、pageName、routePattern、framework、frameworkVersion、bridgeGlobal、replaceActions、files、actions、verification、handoffSummary。
+- files 推荐对象数组：[{ "path": "src/app/list.component.ts", "role": "page-component" }]；也兼容字符串简写：["src/app/list.component.ts"]，后端会自动包装为 role=unknown。
+- bridgeApi 以 manifest.pageActionContract.bridgeApi 为准，不要猜测 invoke 协议；global=${bridgeApiGlobal}，methods 包含 register / unregisterPage / execute / list。
+- execute 返回 status=SUCCESS|WARN|ERROR；高风险动作可能返回 error.code=PENDING_CONFIRM 或 CONFIRM_REQUIRED。
 
 目标页面确认规则：
 - 如果平台上下文没有明确选中页面、pageKey/routePattern 为空，或业务前端仓库里出现多个可能的 route / 页面组件，必须先询问用户确认具体要改造哪一个业务页面，再修改代码。
@@ -150,10 +177,8 @@ ${actionCatalog}
 8. 若当前页面尚未接入 ReachAI chat/page bridge，只补当前页面所需的前端 handler 和目录信息；项目级网关和 token broker 缺口放到待办。
 
 官方 Angular scaffold：
-- V1 官方模板固定使用 window.__REACHAI_PAGE_BRIDGE__。
-- 如业务前端缺少 Page Action bridge，可先执行 scaffold 命令生成 Angular 模板，再把模板接入目标页面。
-- scaffold 命令：${clean(progress.scaffoldCommand) || '平台未生成；可使用 .\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "<页面助手接入清单 URL>" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"'}
-- verify 命令：${clean(progress.verifyCommand) || '平台未生成；可使用 .\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "<页面助手接入清单 URL>" -FrontendUrl "<业务前端地址>" -Route "<目标路由>" -PageKey "<pageKey>"'}
+- V1 官方模板固定使用 ${bridgeApiGlobal}。
+- 如业务前端缺少 Page Action bridge，先确保 helper script 已落盘到 .\\${helperScriptPath}，再执行 scaffold 命令生成 Angular 模板，然后把模板接入目标页面。
 
 页面动作目录建议：
 - pageKey 使用稳定业务语义，例如 teamArchive.list。
@@ -181,11 +206,15 @@ ${actionCatalog}
 
 验证要求：
 1. 运行业务前端最小构建 / 类型检查，例如 npm run build、npm run typecheck、npx vue-tsc --noEmit 或该仓库已有等价命令。
-2. 如果能启动页面，用浏览器验证页面动作能填条件、点击查询、读取结果。
-3. 至少验证 getPageState、setFilters、search、reset、readTable；如实现 openRowAction，验证确认逻辑。
-4. 如果平台或业务系统无法启动，说明缺少的环境条件，并提供静态验证证据。
-5. 如可访问“页面助手自检 URL”，在完成 page-registry/frontend-handler/browser-verify 后调用一次并记录结果。
-6. 最终输出修改文件、动作清单、验证结果、未完成项。
+2. static 检查不等于 runtime 检查：browser-verify-static 只代表 catalog/route/action key 或静态文件证据（static only），不能当作浏览器运行时已通过。
+3. runtime PASS 必须来自真实 bridge invoke（helper verify 或 checks/run 回传 runtimeVerification/browserRuntime，且 invokedActions + redactedResults 有 SUCCESS）；仅有 FrontendUrl 或 HTTP 200 只能是 WARN。
+4. 没有 FrontendUrl、登录态、StorageState/Cookie 或 dev server 时，browser-verify-runtime 只能是 SKIPPED 或 WARN，不能 PASS。
+5. 优先在本机执行：${verifyCommand}；需要 Node.js + playwright 才会尝试真实 bridge invoke。可选 -StorageStatePath 提供登录态；缺少登录时 message 会提示需要登录/StorageState/Cookie。
+6. helper verify 默认只 invoke 只读动作 getPageState/readTable；不要自动执行 openRowAction 等高风险动作。只有显式 -ProbeMutatingActions 时才探测 setFilters/search/reset。
+7. files 如只传字符串简写，平台会兼容但 validationStatus=HASH_MISSING；请优先运行 helper verify 生成本地 sha256，或在 register 时传对象数组含 exists/sha256。
+8. 如可访问“页面助手自检 URL”，在完成 page-registry/frontend-handler 后 POST checks/run，并携带 runtimeVerification=verification.browserRuntime。
+9. 平台自检只会追加 platformCheck，不会覆盖 Cursor 已回传的 evidence/reportedBy；你的 step 回传仍应保留原始 files/evidence。
+10. 最终输出修改文件、动作清单、static/runtime 验证结果、未完成项。
 
 请先输出你识别到的 route、页面组件文件、表单字段、查询/重置按钮、表格列、分页和行操作清单，再开始最小改造。`
 }
@@ -199,9 +228,13 @@ function buildProgressBlock(progress: PageAssistantPromptProgress) {
     ['页面动作目录同步 URL', progress.catalogSyncUrl],
     ['页面助手自检 URL', progress.checksRunUrl],
     ['页面一键注册 URL', progress.registerPageUrl],
+    ['Skill 包下载 URL', progress.skillPackageUrl],
+    ['Helper script 下载 URL', progress.scriptDownloadUrl],
+    ['Helper script 落盘路径', progress.helperScriptPath || 'scripts/reachai-page-assistant.ps1'],
     ['AI 接入会话 ID', progress.sessionId],
     ['Angular scaffold 命令', progress.scaffoldCommand],
     ['本地 verify 命令', progress.verifyCommand],
+    ['bridgeApi global', progress.bridgeApiGlobal],
   ]
   const available = lines.filter(([, value]) => clean(value))
   if (!available.length) {

@@ -59,6 +59,59 @@ class WorkflowReleaseValidationServiceTest {
     }
 
     @Test
+    void llmNodeRequiresModelInstanceWhenWorkflowDefaultIsMissing() {
+        WorkflowReleaseValidationService service = new WorkflowReleaseValidationService(mock(PageActionRegistryMapper.class), new ObjectMapper());
+        WorkflowDefinitionEntity workflow = workflow("""
+                {
+                  "nodes":[{"id":"answer","type":"LLM","config":{"prompt":"hello"}}],
+                  "edges":[],
+                  "entry":"answer",
+                  "finish":["answer"]
+                }
+                """);
+
+        WorkflowReleaseValidationResult result = service.validate(workflow);
+
+        assertFalse(result.valid());
+        assertTrue(hasError(result, "GRAPH_MODEL_INSTANCE_REQUIRED"));
+    }
+
+    @Test
+    void llmNodeCanUseWorkflowDefaultModelInstance() {
+        WorkflowReleaseValidationService service = new WorkflowReleaseValidationService(mock(PageActionRegistryMapper.class), new ObjectMapper());
+        WorkflowDefinitionEntity workflow = workflow("""
+                {
+                  "nodes":[{"id":"answer","type":"LLM","config":{"prompt":"hello"}}],
+                  "edges":[],
+                  "entry":"answer",
+                  "finish":["answer"]
+                }
+                """);
+        workflow.setDefaultModelInstanceId("llm-1");
+
+        WorkflowReleaseValidationResult result = service.validate(workflow);
+
+        assertTrue(result.valid());
+    }
+
+    @Test
+    void llmNodeCanUseNodeModelInstance() {
+        WorkflowReleaseValidationService service = new WorkflowReleaseValidationService(mock(PageActionRegistryMapper.class), new ObjectMapper());
+        WorkflowDefinitionEntity workflow = workflow("""
+                {
+                  "nodes":[{"id":"answer","type":"LLM","config":{"prompt":"hello","modelInstanceId":"llm-1"}}],
+                  "edges":[],
+                  "entry":"answer",
+                  "finish":["answer"]
+                }
+                """);
+
+        WorkflowReleaseValidationResult result = service.validate(workflow);
+
+        assertTrue(result.valid());
+    }
+
+    @Test
     void pageActionValidatesAgainstCatalog() {
         PageActionRegistryMapper mapper = mock(PageActionRegistryMapper.class);
         WorkflowReleaseValidationService service = new WorkflowReleaseValidationService(mapper, new ObjectMapper());

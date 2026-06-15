@@ -1,11 +1,17 @@
 package com.enterprise.ai.agent.controller;
 
 import com.enterprise.ai.agent.graph.AgentGraphNodeType;
+import com.enterprise.ai.agent.scan.ScanProjectEntity;
+import com.enterprise.ai.agent.scan.ScanProjectService;
+import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindRequest;
+import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingResult;
+import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingService;
 import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
 import com.enterprise.ai.agent.workflow.WorkflowDefinitionService;
 import com.enterprise.ai.agent.workflow.WorkflowStudioService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/workflows")
@@ -25,6 +32,8 @@ public class WorkflowDefinitionController {
 
     private final WorkflowDefinitionService service;
     private final WorkflowStudioService studioService;
+    private final PageAssistantWorkflowBindingService pageAssistantWorkflowBindingService;
+    private final ScanProjectService scanProjectService;
 
     @GetMapping
     public ResponseEntity<List<WorkflowDefinitionEntity>> list(@RequestParam(required = false) Long projectId,
@@ -77,5 +86,41 @@ public class WorkflowDefinitionController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
         return service.delete(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    @PostMapping("/{id}/page-assistant/bind")
+    public ResponseEntity<?> bindPageAssistantWorkflow(@PathVariable String id,
+                                                       @RequestBody PageAssistantWorkflowBindRequest request) {
+        try {
+            ScanProjectEntity project = resolveProject(request);
+            PageAssistantWorkflowBindingResult result = pageAssistantWorkflowBindingService.bindExistingPageWorkflow(
+                    project,
+                    id,
+                    request.getAgentId(),
+                    request.getPageKey(),
+                    request.getRoutePattern(),
+                    request.getActionKeys());
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+        }
+    }
+
+    private ScanProjectEntity resolveProject(PageAssistantWorkflowBindRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        if (request.getProjectId() != null) {
+            ScanProjectEntity project = scanProjectService.getById(request.getProjectId());
+            if (project == null) {
+                throw new IllegalArgumentException("project not found: " + request.getProjectId());
+            }
+            return project;
+        }
+        if (StringUtils.hasText(request.getProjectCode())) {
+            return scanProjectService.findByProjectCode(request.getProjectCode().trim())
+                    .orElseThrow(() -> new IllegalArgumentException("project not found: " + request.getProjectCode()));
+        }
+        throw new IllegalArgumentException("projectId or projectCode is required");
     }
 }

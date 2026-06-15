@@ -11,10 +11,14 @@ import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.SdkAccessCheckService;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
+import com.enterprise.ai.agent.workflow.AgentProvisioningService;
+import com.enterprise.ai.agent.workflow.AgentWorkflowBindingEntity;
 import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingResult;
 import com.enterprise.ai.agent.workflow.PageAssistantWorkflowBindingService;
+import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -28,6 +32,7 @@ import java.util.Optional;
 import java.util.zip.ZipInputStream;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,6 +48,7 @@ class AiAssistControllerTest {
     private final ScanProjectService scanProjectService = mock(ScanProjectService.class);
     private final RegistrySecurityService registrySecurityService = mock(RegistrySecurityService.class);
     private final AgentEntryService agentEntryService = mock(AgentEntryService.class);
+    private final AgentProvisioningService agentProvisioningService = mock(AgentProvisioningService.class);
     private final AiAccessSessionService accessSessionService = mock(AiAccessSessionService.class);
     private final PageActionCatalogService pageActionCatalogService = mock(PageActionCatalogService.class);
     private final PageAssistantWorkflowBindingService pageAssistantWorkflowBindingService = mock(PageAssistantWorkflowBindingService.class);
@@ -50,9 +56,16 @@ class AiAssistControllerTest {
             scanProjectService,
             registrySecurityService,
             agentEntryService,
+            agentProvisioningService,
             accessSessionService,
             pageActionCatalogService,
             pageAssistantWorkflowBindingService);
+
+    @BeforeEach
+    void setUpAgentProvisioningDefaults() {
+        when(agentProvisioningService.pageCopilotKeySlug(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class) + "-page-copilot");
+    }
 
     @Test
     void onboardingManifestIncludesAppKeyButNeverAppSecret() {
@@ -104,6 +117,84 @@ class AiAssistControllerTest {
         assertEquals("agent-001", embedBody.get("defaultAgentId"));
         assertEquals("demo-service-assistant", embedBody.get("defaultAgentKeySlug"));
         assertTrue(embedBody.containsKey("allowedAgents"));
+    }
+
+    @Test
+    void onboardingManifestIncludesAgentProvisioningContract() {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_valid");
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
+                .thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.onboardingManifest(1L, "rac_valid", request());
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> provisioningBody = objectMapper.convertValue(body.get("agentProvisioning"), new TypeReference<>() {
+        });
+        Map<String, Object> agentWorkflowBody = objectMapper.convertValue(body.get("agentWorkflow"), new TypeReference<>() {
+        });
+
+        assertEquals("agent-provisioning.v1", provisioningBody.get("model"));
+        assertEquals("PAGE_COPILOT", provisioningBody.get("defaultAgentKind"));
+        assertEquals("demo-service-page-copilot", provisioningBody.get("defaultKeySlug"));
+        assertTrue(provisioningBody.get("provisionAgentUrl").toString()
+                .contains("/api/ai-assist/projects/1/agents/provision?aiCodingKey=rac_valid"));
+        assertEquals("demo-service-page-copilot", agentWorkflowBody.get("globalAgentKeySlug"));
+        assertEquals("PAGE_COPILOT", agentWorkflowBody.get("globalAgentKind"));
+    }
+
+    @Test
+    void provisionProjectAgentAcceptsValidAiCodingKeyAndReturnsAgentWorkflowBinding() {
+        ScanProjectEntity project = project();
+        AgentEntryEntity agent = embedEntry("agent-1", "demo-service-page-copilot", "Demo Page Copilot", "demo-service", true);
+        agent.setAgentKind("PAGE_COPILOT");
+        WorkflowDefinitionEntity workflow = new WorkflowDefinitionEntity();
+        workflow.setId("workflow-1");
+        workflow.setKeySlug("demo-service-page-copilot-default");
+        workflow.setName("Demo Page Copilot Default");
+        workflow.setWorkflowType("PAGE_COPILOT_DEFAULT");
+        workflow.setStatus("DRAFT");
+        workflow.setManagedBy("AGENT_PROVISIONING");
+        AgentWorkflowBindingEntity binding = new AgentWorkflowBindingEntity();
+        binding.setId(9L);
+        binding.setAgentId("agent-1");
+        binding.setWorkflowId("workflow-1");
+        binding.setBindingType("DEFAULT");
+        binding.setEnabled(true);
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(agentProvisioningService.provisionPageCopilot(project, "Cursor", true))
+                .thenReturn(new AgentProvisioningService.AgentProvisioningResult(
+                        agent,
+                        workflow,
+                        binding,
+                        true,
+                        true,
+                        true));
+
+        ResponseEntity<?> response = controller.provisionProjectAgent(
+                1L,
+                "rac_valid",
+                new AiAssistController.AgentProvisionRequest("PAGE_COPILOT", true, "Cursor"));
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> agentBody = objectMapper.convertValue(body.get("agent"), new TypeReference<>() {
+        });
+        Map<String, Object> workflowBody = objectMapper.convertValue(body.get("defaultWorkflow"), new TypeReference<>() {
+        });
+        Map<String, Object> bindingBody = objectMapper.convertValue(body.get("defaultBinding"), new TypeReference<>() {
+        });
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("agent-provisioning.v1", body.get("schema"));
+        assertEquals("demo-service-page-copilot", agentBody.get("keySlug"));
+        assertEquals("PAGE_COPILOT", agentBody.get("agentKind"));
+        assertEquals("demo-service-page-copilot-default", workflowBody.get("keySlug"));
+        assertEquals("DEFAULT", bindingBody.get("bindingType"));
+        assertEquals(Boolean.TRUE, body.get("createdAgent"));
     }
 
     @Test
@@ -243,7 +334,19 @@ class AiAssistControllerTest {
         assertEquals(Boolean.TRUE, localExecutionBody.get("requiresLocalShell"));
         assertEquals("__REACHAI_PAGE_BRIDGE__", contractBody.get("bridgeGlobal"));
         assertTrue(contractBody.get("recommendedActions").toString().contains("readTable"));
+        Map<String, Object> bridgeApiBody = objectMapper.convertValue(contractBody.get("bridgeApi"), new TypeReference<>() {
+        });
+        assertEquals("window.__REACHAI_PAGE_BRIDGE__", bridgeApiBody.get("global"));
+        assertTrue(bridgeApiBody.get("methods").toString().contains("execute"));
+        assertTrue(bridgeApiBody.get("errorCodes").toString().contains("PENDING_CONFIRM"));
         assertEquals("angular", scaffoldBody.get("framework"));
+        assertEquals("scripts/reachai-page-assistant.ps1", scaffoldBody.get("helperScriptPath"));
+        assertTrue(scaffoldBody.get("scriptDownloadUrl").toString().contains("/scripts/reachai-page-assistant.ps1"));
+        assertTrue(scaffoldBody.get("skillPackageUrl").toString().contains("/latest.zip"));
+        assertTrue(scaffoldBody.get("scaffoldCommand").toString().contains("reachai-page-assistant.ps1 scaffold"));
+        assertTrue(scaffoldBody.get("verifyCommand").toString().contains("reachai-page-assistant.ps1 verify"));
+        assertTrue(endpointsBody.get("skillPackageUrl").toString().contains("/latest.zip"));
+        assertTrue(endpointsBody.get("scriptDownloadUrl").toString().contains("/scripts/reachai-page-assistant.ps1"));
         assertTrue(endpointsBody.get("registerPageUrl").toString()
                 .contains("/page-assistant/pages/register?aiCodingKey=rac_valid"));
         assertTrue(endpointsBody.containsKey("targetBindUrl"));
@@ -398,7 +501,9 @@ class AiAssistControllerTest {
                 new AiAccessSessionService.PageAssistantCheckRequest(
                         "teamArchive.list",
                         "/teams/archive",
-                        List.of("getPageState", "search"));
+                        List.of("getPageState", "search"),
+                        null,
+                        null);
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(accessSessionService.runPageAssistantChecks(1L, "rai_page", request)).thenReturn(runResponse);
 
@@ -515,7 +620,7 @@ class AiAssistControllerTest {
                 eq(List.of("getPageState"))))
                 .thenReturn(new PageAssistantWorkflowBindingResult(
                         "agent-1",
-                        "demo-service-global-ai-assistant",
+                        "demo-service-page-copilot",
                         "workflow-1",
                         "demo-service-teamarchive_list-page-assistant",
                         42L));
@@ -583,11 +688,13 @@ class AiAssistControllerTest {
         AiAccessSessionService.PageAssistantPageRegisterSessionResult sessionResult =
                 new AiAccessSessionService.PageAssistantPageRegisterSessionResult(
                         pageAssistantSession(),
-                        List.of(new AiAccessSessionService.PageAssistantFileEvidence(
+                        List.of(new AiAccessSessionService.PageAssistantFileEvidenceView(
                                 "src/app/list.component.ts",
                                 "page-component",
                                 true,
-                                "abc")));
+                                "abc",
+                                "VERIFIED",
+                                "Local file hash captured.")));
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(scanProjectService.getById(1L)).thenReturn(project());
         when(registrySecurityService.findPrimaryActiveCredential("demo-service")).thenReturn(Optional.of(credential));
@@ -601,12 +708,9 @@ class AiAssistControllerTest {
                 new PageCatalogRegisterResult("demo-service", "bzjs3", "teamArchive.list", 1)))
                 .thenReturn(sessionResult);
         when(accessSessionService.runPageAssistantChecks(
-                1L,
-                "rai_page",
-                new AiAccessSessionService.PageAssistantCheckRequest(
-                        "teamArchive.list",
-                        "/team-build/depart-management",
-                        List.of("getPageState"))))
+                eq(1L),
+                eq("rai_page"),
+                any(AiAccessSessionService.PageAssistantCheckRequest.class)))
                 .thenReturn(checkRun);
         when(pageAssistantWorkflowBindingService.ensurePageWorkflowBinding(
                 any(ScanProjectEntity.class),
@@ -615,7 +719,7 @@ class AiAssistControllerTest {
                 eq(List.of("getPageState"))))
                 .thenReturn(new PageAssistantWorkflowBindingResult(
                         "agent-1",
-                        "demo-service-global-ai-assistant",
+                        "demo-service-page-copilot",
                         "workflow-1",
                         "demo-service-teamarchive_list-page-assistant",
                         42L));
@@ -703,6 +807,117 @@ class AiAssistControllerTest {
         assertEquals("reachai-onboarding", response.getBody().name());
         assertTrue(response.getBody().downloadUrl().endsWith("/api/ai-assist/skills/reachai-onboarding/latest.zip"));
         assertTrue(response.getBody().files().stream().anyMatch(file -> "SKILL.md".equals(file.path())));
+    }
+
+    @Test
+    void latestPageAssistantSkillMetadataPointsToDownloadUrl() {
+        ResponseEntity<AiAssistController.SkillPackageResponse> response = controller.latestPageAssistantSkill(request());
+
+        assertEquals("reachai-page-assistant-onboarding", response.getBody().name());
+        assertTrue(response.getBody().downloadUrl().endsWith("/api/ai-assist/skills/reachai-page-assistant-onboarding/latest.zip"));
+        assertTrue(response.getBody().files().stream().anyMatch(file -> "scripts/reachai-page-assistant.ps1".equals(file.path())));
+    }
+
+    @Test
+    void downloadPageAssistantHelperScriptReturnsPs1Body() throws Exception {
+        ResponseEntity<byte[]> response = controller.downloadPageAssistantHelperScript();
+
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().length > 0);
+        String content = new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(content.contains("function Invoke-Verify"));
+        assertTrue(content.contains("browserRuntime"));
+    }
+
+    @Test
+    void pageAssistantRegisterPageAcceptsStringFileShorthand() throws Exception {
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setProjectCode("demo-service");
+        credential.setAppKey("bzjs3");
+        String json = """
+                {
+                  "sessionId": "rai_page",
+                  "toolName": "Cursor",
+                  "pageKey": "teamArchive.list",
+                  "pageName": "班组档案",
+                  "routePattern": "/team-build/depart-management",
+                  "framework": "angular",
+                  "bridgeGlobal": "__REACHAI_PAGE_BRIDGE__",
+                  "replaceActions": true,
+                  "files": ["src/app/list.component.ts"],
+                  "actions": [
+                    {
+                      "actionKey": "getPageState",
+                      "title": "读取页面状态",
+                      "description": "读取筛选、分页和表格",
+                      "confirmRequired": false
+                    }
+                  ],
+                  "verification": {
+                    "browserStatic": { "status": "PASS", "message": "static only" },
+                    "browserRuntime": { "status": "SKIPPED", "message": "no browser session" }
+                  },
+                  "handoffSummary": "done"
+                }
+                """;
+        AiAccessSessionService.PageAssistantPageRegisterRequest request =
+                objectMapper.readValue(json, AiAccessSessionService.PageAssistantPageRegisterRequest.class);
+        AiAccessSessionService.PageAssistantCheckRunResponse checkRun =
+                new AiAccessSessionService.PageAssistantCheckRunResponse(
+                        new AiAccessSessionService.PageAssistantCheckResponse(
+                                1L,
+                                "demo-service",
+                                "teamArchive.list",
+                                "/team-build/depart-management",
+                                "WARN",
+                                List.of()),
+                        pageAssistantSession());
+        AiAccessSessionService.PageAssistantPageRegisterSessionResult sessionResult =
+                new AiAccessSessionService.PageAssistantPageRegisterSessionResult(
+                        pageAssistantSession(),
+                        List.of(new AiAccessSessionService.PageAssistantFileEvidenceView(
+                                "src/app/list.component.ts", "unknown", null, null,
+                                "HASH_MISSING", "Path-only evidence without sha256; run helper verify for hash missing / local verify recommended.")));
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service")).thenReturn(Optional.of(credential));
+        when(pageActionCatalogService.registerFromProjectCredential(
+                eq(credential),
+                any(PageActionCatalogContracts.PageCatalogRegisterRequest.class)))
+                .thenReturn(new PageCatalogRegisterResult("demo-service", "bzjs3", "teamArchive.list", 1));
+        when(accessSessionService.applyPageAssistantPageRegistration(
+                eq(1L),
+                any(AiAccessSessionService.PageAssistantPageRegisterRequest.class),
+                any(PageCatalogRegisterResult.class)))
+                .thenReturn(sessionResult);
+        when(accessSessionService.runPageAssistantChecks(
+                eq(1L),
+                eq("rai_page"),
+                any(AiAccessSessionService.PageAssistantCheckRequest.class)))
+                .thenReturn(checkRun);
+        when(pageAssistantWorkflowBindingService.ensurePageWorkflowBinding(
+                any(ScanProjectEntity.class),
+                eq("teamArchive.list"),
+                eq("/team-build/depart-management"),
+                eq(List.of("getPageState"))))
+                .thenReturn(new PageAssistantWorkflowBindingResult(
+                        "agent-1", "demo-service-page-copilot", "workflow-1",
+                        "demo-service-teamarchive_list-page-assistant", 42L));
+
+        assertEquals(1, request.files().size());
+        assertEquals("src/app/list.component.ts", request.files().get(0).path());
+        assertEquals("unknown", request.files().get(0).role());
+
+        ResponseEntity<?> response = controller.registerPageAssistantPage(1L, "rac_valid", request);
+
+        assertEquals(200, response.getStatusCode().value());
+        verify(accessSessionService).applyPageAssistantPageRegistration(
+                eq(1L),
+                org.mockito.ArgumentMatchers.argThat(body ->
+                        body.files() != null
+                                && body.files().size() == 1
+                                && "src/app/list.component.ts".equals(body.files().get(0).path())),
+                any(PageCatalogRegisterResult.class));
     }
 
     private AgentEntryEntity embedEntry(String id, String keySlug, String name, String projectCode, boolean enabled) {

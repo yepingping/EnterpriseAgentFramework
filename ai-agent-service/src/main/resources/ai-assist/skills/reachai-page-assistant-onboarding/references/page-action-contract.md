@@ -8,6 +8,8 @@ The business page exposes a browser global:
 window.__REACHAI_PAGE_BRIDGE__
 ```
 
+Read `pageActionContract.bridgeApi` from the page assistant manifest for the machine-readable invoke protocol. Do not guess handler signatures.
+
 Minimum API:
 
 ```ts
@@ -18,6 +20,58 @@ list(pageKey?)
 ```
 
 Handlers must operate the current page instance. They must not bypass page permissions, login state, button guards, or data scope.
+
+## bridgeApi
+
+Manifest field: `pageActionContract.bridgeApi`
+
+- `global`: `window.__REACHAI_PAGE_BRIDGE__`
+- `methods`:
+  - `register(pageKey, actionKey, handler, metadata?)`
+  - `unregisterPage(pageKey)`
+  - `execute(pageKey, actionKey, args?, options?)`
+  - `list(pageKey?)`
+- `schemas.executeRequest`: JSON Schema-like object with `pageKey`, `actionKey`, optional `args`, optional `options.confirm`
+- `schemas.executeResponse`: JSON Schema-like object with `status`, `message`, `data`, `error.code`, `metadata`
+- `statusValues`: `SUCCESS`, `WARN`, `ERROR`
+- `errorCodes`: `HANDLER_NOT_FOUND`, `HANDLER_ERROR`, `CONFIRM_REQUIRED`, `PENDING_CONFIRM`
+
+### Examples
+
+`getPageState`:
+
+```json
+{
+  "pageKey": "teamArchive.list",
+  "actionKey": "getPageState",
+  "args": {}
+}
+```
+
+Response:
+
+```json
+{
+  "status": "SUCCESS",
+  "data": {
+    "filters": { "teamName": "A" },
+    "pagination": { "page": 1, "pageSize": 10 },
+    "rows": []
+  }
+}
+```
+
+High-risk pending confirm:
+
+```json
+{
+  "status": "ERROR",
+  "error": {
+    "code": "PENDING_CONFIRM",
+    "message": "High-risk action requires user confirmation"
+  }
+}
+```
 
 ## Result Shape
 
@@ -33,6 +87,59 @@ Handlers must operate the current page instance. They must not bypass page permi
 
 Allowed status values are `SUCCESS`, `WARN`, and `ERROR`.
 
+## Register Page files
+
+`endpoints.registerPageUrl` accepts:
+
+```json
+"files": [
+  "src/app/list.component.ts",
+  { "path": "src/app/shared/reachai/reachai-page-action.service.ts", "role": "bridge-service" }
+]
+```
+
+String entries are shorthand for `{ "path": "...", "role": "unknown" }` and return `validationStatus=HASH_MISSING` until helper verify adds `exists/sha256`.
+
+## Verification
+
+Distinguish static and runtime browser checks:
+
+- `browser-verify-static`: catalog/route/action key alignment; message should include `static only`
+- `browser-verify-runtime`: authenticated browser + bridge invoke through `window.__REACHAI_PAGE_BRIDGE__`
+
+Runtime PASS rules:
+
+- Requires invoke evidence: `invokedActions` plus `redactedResults` with at least one `SUCCESS`
+- `bridgeExists=true` or HTTP 200 alone is WARN, not PASS
+- Missing FrontendUrl/login/StorageState/Cookie => `SKIPPED` or `WARN`
+
+Helper verify emits `verification.browserRuntime`:
+
+```json
+{
+  "status": "PASS",
+  "message": "Runtime bridge invoke succeeded for readonly actions.",
+  "frontendUrl": "http://localhost:9200",
+  "route": "/teams/archive",
+  "pageKey": "teamArchive.list",
+  "bridgeExists": true,
+  "listedActions": ["getPageState", "readTable"],
+  "invokedActions": ["getPageState"],
+  "redactedResults": [{ "actionKey": "getPageState", "status": "SUCCESS", "rowCount": 10 }]
+}
+```
+
+Probe rules:
+
+- Default readonly invoke: `getPageState`, `readTable`
+- `-ProbeMutatingActions` enables `setFilters/search/reset`
+- Never auto-invoke `openRowAction` or other high-risk actions
+- Do not output tokens, credentials, or full row payloads
+
+Platform merge:
+
+- AI/Cursor step evidence is preserved; platform checks append `platformCheck` instead of overwriting `reportedBy/message/evidence`
+
 ## Recommended Actions
 
 - `getPageState`: read filters, pagination, visible table rows, selected rows, and loading state.
@@ -47,4 +154,4 @@ Allowed status values are `SUCCESS`, `WARN`, and `ERROR`.
 - Default to read-only and query actions.
 - Creation, editing, deletion, approval, export, batch processing, status changes, and cross-page navigation are high-risk.
 - High-risk actions must set `confirmRequired=true` and metadata `riskLevel=HIGH`.
-
+- `bridgeApi.safety.highRiskActionsRequireConfirm=true`; handlers must not bypass page permissions.

@@ -25,10 +25,6 @@ spec:
                 secretKeyRef:
                   name: ai-secrets
                   key: dashscope-api-key
-            - name: NACOS_ADDR
-              value: nacos:8848
-            - name: NACOS_ENABLED
-              value: "true"
           resources:
             requests:
               memory: "512Mi"

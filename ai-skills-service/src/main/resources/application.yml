@@ -21,16 +21,6 @@ spring:
       database: 0
       timeout: 5000ms
 
-  cloud:
-    nacos:
-      discovery:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-      config:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-        file-extension: yml
-
 mybatis-plus:
   mapper-locations: classpath:/mapper/**/*.xml
   configuration:

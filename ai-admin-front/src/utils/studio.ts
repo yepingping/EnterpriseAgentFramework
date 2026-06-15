@@ -47,11 +47,11 @@ export function canvasToDefinition(base: AgentForm, snapshot: CanvasSnapshot): A
     }
   }
 
-  const normalized: CanvasSnapshot = {
+  const normalized: CanvasSnapshot = normalizeCanvasSnapshot({
     version: 2,
     nodes: snapshot.nodes.map((node) => ensureNodeV2(node, base)),
-    edges: snapshot.edges.map(decorateSerializableEdge),
-  }
+    edges: snapshot.edges,
+  })
 
   return {
     ...base,
@@ -526,16 +526,16 @@ function graphNodeChrome(node: CanvasNode) {
 export function definitionToCanvas(def: WorkflowCanvasSource): CanvasSnapshot {
   if (def.canvasJson) {
     const parsed = JSON.parse(def.canvasJson) as CanvasSnapshot
-    return {
+    return normalizeCanvasSnapshot({
       version: 2,
       nodes: (parsed.nodes || []).map((node) => ensureNodeV2(node, def as unknown as AgentForm)),
-      edges: (parsed.edges || []).map(decorateSerializableEdge),
-    }
+      edges: parsed.edges || [],
+    })
   }
   if (!def.graphSpec?.nodes?.length) {
     return emptyCanvas()
   }
-  return graphSpecToCanvas(def.graphSpec, def)
+  return normalizeCanvasSnapshot(graphSpecToCanvas(def.graphSpec, def))
 }
 
 function graphSpecToCanvas(graphSpec: AgentGraphSpec, def: WorkflowCanvasSource): CanvasSnapshot {
@@ -1211,6 +1211,57 @@ function emptyCanvas(): CanvasSnapshot {
     ],
     edges: [decorateSerializableEdge({ id: 'e-start-end', source: 'start', target: 'end', condition: 'always', label: 'always' })],
   }
+}
+
+const CANVAS_BRANCH_SOURCE_NODE_KINDS = new Set<CanvasNodeKind>(['classifier'])
+
+export function normalizeCanvasEdgeHandles(
+  edge: CanvasEdge,
+  nodesById: Map<string, CanvasNode>,
+): CanvasEdge {
+  const source = nodesById.get(edge.source)
+  const sourceKind = source?.data?.kind
+  let sourceHandle = edge.sourceHandle
+  let targetHandle = edge.targetHandle
+
+  if (!sourceKind || !CANVAS_BRANCH_SOURCE_NODE_KINDS.has(sourceKind)) {
+    sourceHandle = undefined
+  } else if (sourceHandle && source && !isValidClassifierSourceHandle(source, sourceHandle)) {
+    sourceHandle = undefined
+  }
+
+  targetHandle = undefined
+
+  return {
+    ...edge,
+    sourceHandle,
+    targetHandle,
+  }
+}
+
+export function normalizeCanvasSnapshot(snapshot: CanvasSnapshot): CanvasSnapshot {
+  const nodes = snapshot.nodes || []
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  return {
+    version: 2,
+    nodes,
+    edges: (snapshot.edges || []).map((edge) =>
+      decorateSerializableEdge(normalizeCanvasEdgeHandles(edge, nodesById)),
+    ),
+  }
+}
+
+function isValidClassifierSourceHandle(node: CanvasNode, handle: string): boolean {
+  const config = node.data.classifierConfig
+  if (!config) return false
+  const ids = new Set(
+    (config.classes || [])
+      .map((item) => item.id?.trim())
+      .filter((item): item is string => !!item),
+  )
+  const defaultRoute = (config.defaultRoute || 'else').trim()
+  if (defaultRoute) ids.add(defaultRoute)
+  return ids.has(handle)
 }
 
 function decorateSerializableEdge(edge: CanvasEdge): CanvasEdge {

@@ -1,5 +1,5 @@
 ##
-## 本地开发基础设施 — 一键拉起 MySQL / Redis / Milvus / Nacos
+## 本地开发基础设施 — 一键拉起 MySQL / Redis / Milvus
 ## 使用方法: docker compose -f deploy/docker-compose.infra.yml up -d
 ##
 services:
@@ -71,17 +71,6 @@ services:
       MINIO_ADDRESS: minio:9000
     volumes:
       - milvus-data:/var/lib/milvus
-
-  nacos:
-    image: nacos/nacos-server:v2.4.3
-    container_name: eaf-nacos
-    ports:
-      - "8848:8848"
-      - "9848:9848"
-    environment:
-      MODE: standalone
-      SPRING_DATASOURCE_PLATFORM: ""
-      NACOS_AUTH_ENABLE: "false"
 
 volumes:
   mysql-data:

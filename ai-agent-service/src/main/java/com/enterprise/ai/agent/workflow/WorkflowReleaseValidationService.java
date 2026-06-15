@@ -72,6 +72,9 @@ public class WorkflowReleaseValidationService {
             if (!AgentGraphNodeType.supports(type)) {
                 report.error("GRAPH_NODE_TYPE_UNSUPPORTED", nodeId, "Unsupported graph node type: " + node.getType());
             }
+            if (requiresModelInstance(type)) {
+                validateModelInstance(workflow, node, report);
+            }
             if ("PAGE_ACTION".equals(type)) {
                 validatePageActionNode(workflow, node, report);
             }
@@ -96,6 +99,24 @@ public class WorkflowReleaseValidationService {
                 report.error("GRAPH_EDGE_TO_INVALID", edge.getTo(), "Edge target node does not exist: " + edge.getTo());
             }
         }
+    }
+
+    private void validateModelInstance(WorkflowDefinitionEntity workflow,
+                                       GraphSpec.Node node,
+                                       WorkflowReleaseValidationResult.Builder report) {
+        Map<String, Object> config = node.getConfig() == null ? Map.of() : node.getConfig();
+        String nodeModelInstanceId = text(config.get("modelInstanceId"));
+        String workflowModelInstanceId = workflow == null ? null : workflow.getDefaultModelInstanceId();
+        if (!StringUtils.hasText(nodeModelInstanceId) && !StringUtils.hasText(workflowModelInstanceId)) {
+            report.error("GRAPH_MODEL_INSTANCE_REQUIRED", node.getId(),
+                    "Model node requires modelInstanceId on node config or Workflow default model instance");
+        }
+    }
+
+    private boolean requiresModelInstance(String type) {
+        return "LLM".equals(type)
+                || "INTENT_CLASSIFIER".equals(type)
+                || "PARAMETER_EXTRACT".equals(type);
     }
 
     private void validatePageActionNode(WorkflowDefinitionEntity workflow,

@@ -8,6 +8,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -59,7 +61,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         DraftResponse draft;
         try {
             String raw = llmService.chat(systemPrompt(), userPrompt(request), request.getModelInstanceId());
-            JsonNode root = objectMapper.readTree(extractJsonObject(raw));
+            JsonNode root = normalizeDraftJson(objectMapper.readTree(extractJsonObject(raw)));
             draft = objectMapper.treeToValue(root, DraftResponse.class);
         } catch (Exception ex) {
             validationErrors.add("AI did not return valid JSON workflow draft: " + ex.getMessage());
@@ -107,6 +109,8 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         }
         List<DraftNode> nodes = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
+        Set<String> usedPageActions = new LinkedHashSet<>();
+        int pageActionNodeIndex = 0;
         for (DraftNode raw : rawNodes) {
             if (raw == null) continue;
             String id = slug(firstText(raw.id(), raw.label(), raw.kind(), "node_" + (nodes.size() + 1)));
@@ -142,7 +146,8 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
             } else if (type == AgentGraphNodeType.KNOWLEDGE_RETRIEVAL) {
                 normalizeKnowledgeConfig(config, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
             } else if (type == AgentGraphNodeType.PAGE_ACTION) {
-                normalizePageActionConfig(config, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
+                normalizePageActionConfig(config, request, resources, warnings, placeholders, id, firstText(raw.label(), id),
+                        usedPageActions, pageActionNodeIndex++);
             } else if (type.isToolLike() || type == AgentGraphNodeType.HTTP_REQUEST || type == AgentGraphNodeType.MCP_CALL) {
                 normalizeCapabilityConfig(config, type, request, resources, warnings, placeholders, id, firstText(raw.label(), id));
             }
@@ -304,7 +309,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         for (DraftNode node : nodes) {
             Map<String, Object> data = data(node.label(), node.kind(), canvasData(node));
             int x = 280 + index * 260;
-            int y = 220 + (index % 2 == 0 ? 0 : 80);
+            int y = 220;
             canvasNodes.add(canvasNode(node.id(), node.kind(), x, y, data));
             index++;
         }
@@ -318,10 +323,33 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                     canvasEndpoint(edge.from()),
                     canvasEndpoint(edge.to()),
                     firstText(edge.condition(), "always"),
-                    blankToNull(edge.sourceHandle()),
-                    blankToNull(edge.targetHandle())));
+                    canvasRenderableSourceHandle(edge, nodes),
+                    null));
         }
         return Map.of("version", 2, "nodes", canvasNodes, "edges", canvasEdges, "graphCode", graph.getCode());
+    }
+
+    private String canvasRenderableSourceHandle(DraftEdge edge, List<DraftNode> nodes) {
+        String handle = blankToNull(edge.sourceHandle());
+        if (!StringUtils.hasText(handle)) {
+            return null;
+        }
+        String sourceId = canvasEndpoint(edge.from());
+        if ("start".equals(sourceId)) {
+            return null;
+        }
+        DraftNode source = nodes.stream()
+                .filter(node -> node.id().equals(sourceId))
+                .findFirst()
+                .orElse(null);
+        if (source == null || !"classifier".equals(canvasNodeKind(source))) {
+            return null;
+        }
+        return handle;
+    }
+
+    private String canvasNodeKind(DraftNode node) {
+        return firstText(node.kind(), node.type(), "").trim().toLowerCase(Locale.ROOT);
     }
 
     private Map<String, Object> canvasData(DraftNode node) {
@@ -474,12 +502,20 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                                            List<String> warnings,
                                            List<WorkflowDraftPlaceholder> placeholders,
                                            String nodeId,
-                                           String label) {
+                                           String label,
+                                           Set<String> usedPageActions,
+                                           int pageActionNodeIndex) {
         String ref = firstText(text(config.get("ref")), text(config.get("name")), text(config.get("qualifiedName")),
                 text(config.get("actionKey")), text(config.get("action")));
         WorkflowDraftResource resource = resource(ref, resources);
         if (resource == null) {
             resource = singlePageActionResource(request);
+        }
+        if (resource == null) {
+            resource = matchPageActionResource(request, nodeId, label, text(config.get("description")), usedPageActions);
+        }
+        if (resource == null) {
+            resource = fallbackPageActionByOrder(request, usedPageActions, pageActionNodeIndex);
         }
         if (resource == null) {
             markPlaceholder(config, warnings, placeholders, nodeId, "pageAction", label,
@@ -497,9 +533,124 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                     "inputSchema", mutableMap(metadata.get("inputSchema")),
                     "outputSchema", mutableMap(metadata.get("outputSchema")),
                     "sampleArgs", mutableMap(metadata.get("sampleArgs"))));
+            usedPageActions.add(firstText(text(metadata.get("actionKey")), resource.getName()));
+            if (!StringUtils.hasText(ref)) {
+                warnings.add(label + "：已根据节点语义自动绑定页面动作 " + resource.getName());
+            }
         }
         config.put("args", mutableMap(config.get("args")));
         config.put("outputAlias", firstText(text(config.get("outputAlias")), "page_action_result"));
+    }
+
+    private WorkflowDraftResource matchPageActionResource(WorkflowDraftGenerationRequest request,
+                                                          String nodeId,
+                                                          String label,
+                                                          String description,
+                                                          Set<String> usedPageActions) {
+        if (request == null || request.getPageActions() == null || request.getPageActions().isEmpty()) {
+            return null;
+        }
+        String compactId = compactToken(nodeId);
+        String compactLabel = compactToken(firstText(label, description, nodeId));
+        WorkflowDraftResource best = null;
+        int bestScore = 0;
+        for (WorkflowDraftResource candidate : request.getPageActions()) {
+            if (candidate == null || usedPageActions.contains(candidate.getName())) {
+                continue;
+            }
+            int score = scorePageActionCandidate(candidate, compactId, compactLabel, label, description);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return bestScore >= 4 ? best : null;
+    }
+
+    private WorkflowDraftResource fallbackPageActionByOrder(WorkflowDraftGenerationRequest request,
+                                                            Set<String> usedPageActions,
+                                                            int pageActionNodeIndex) {
+        if (request == null || request.getPageActions() == null) {
+            return null;
+        }
+        List<WorkflowDraftResource> available = request.getPageActions().stream()
+                .filter(Objects::nonNull)
+                .filter(resource -> !usedPageActions.contains(resource.getName()))
+                .toList();
+        if (available.isEmpty()) {
+            return null;
+        }
+        List<String> preferredOrder = List.of("setFilters", "search", "reset", "readTable", "getPageState", "openRowAction");
+        for (String preferred : preferredOrder) {
+            for (WorkflowDraftResource resource : available) {
+                if (preferred.equalsIgnoreCase(resource.getName())) {
+                    return resource;
+                }
+            }
+        }
+        return pageActionNodeIndex < available.size() ? available.get(pageActionNodeIndex) : available.get(0);
+    }
+
+    private int scorePageActionCandidate(WorkflowDraftResource candidate,
+                                         String compactId,
+                                         String compactLabel,
+                                         String label,
+                                         String description) {
+        String actionKey = firstText(candidate.getName());
+        String compactKey = compactToken(actionKey);
+        int score = 0;
+        if (StringUtils.hasText(compactKey)) {
+            if (compactId.contains(compactKey) || compactKey.contains(compactId)) {
+                score += 12;
+            }
+            if (compactLabel.contains(compactKey) || compactKey.contains(compactLabel)) {
+                score += 8;
+            }
+        }
+        score += semanticPageActionScore(label, description, actionKey);
+        String title = firstText(candidate.getDescription(), text(mutableMap(candidate.getMetadata()).get("title")));
+        if (StringUtils.hasText(title) && StringUtils.hasText(label)) {
+            if (label.contains(title) || title.contains(label)) {
+                score += 6;
+            }
+        }
+        return score;
+    }
+
+    private int semanticPageActionScore(String label, String description, String actionKey) {
+        String haystack = (firstText(label, "") + " " + firstText(description, "")).toLowerCase(Locale.ROOT);
+        String compactKey = compactToken(actionKey);
+        int score = 0;
+        if ("setfilters".equals(compactKey) || actionKey.toLowerCase(Locale.ROOT).contains("filter")) {
+            if (haystack.contains("筛选") || haystack.contains("filter")) {
+                score += 10;
+            }
+        }
+        if ("search".equals(compactKey) || actionKey.toLowerCase(Locale.ROOT).contains("search")) {
+            if (haystack.contains("查询") || haystack.contains("搜索") || haystack.contains("search")) {
+                score += 10;
+            }
+        }
+        if (actionKey.toLowerCase(Locale.ROOT).contains("reset")) {
+            if (haystack.contains("重置") || haystack.contains("reset")) {
+                score += 10;
+            }
+        }
+        if ("readtable".equals(compactKey) || actionKey.toLowerCase(Locale.ROOT).contains("read")) {
+            if (haystack.contains("表格") || haystack.contains("读取") || haystack.contains("table") || haystack.contains("read")) {
+                score += 10;
+            }
+        }
+        if (actionKey.toLowerCase(Locale.ROOT).contains("open") || actionKey.toLowerCase(Locale.ROOT).contains("row")) {
+            if (haystack.contains("打开") || haystack.contains("行操作") || haystack.contains("open")) {
+                score += 10;
+            }
+        }
+        return score;
+    }
+
+    private String compactToken(String value) {
+        return slug(value).replace("_", "").toLowerCase(Locale.ROOT);
     }
 
     private WorkflowDraftResource singlePageActionResource(WorkflowDraftGenerationRequest request) {
@@ -822,12 +973,20 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     private void indexResource(Map<String, WorkflowDraftResource> out, String key, WorkflowDraftResource resource) {
         if (StringUtils.hasText(key)) {
             out.put(key(key), resource);
+            String compact = compactToken(key);
+            if (StringUtils.hasText(compact)) {
+                out.putIfAbsent(compact, resource);
+            }
         }
     }
 
     private WorkflowDraftResource resource(String ref, Map<String, WorkflowDraftResource> resources) {
         if (!StringUtils.hasText(ref)) return null;
-        return resources.get(key(ref));
+        WorkflowDraftResource hit = resources.get(key(ref));
+        if (hit != null) {
+            return hit;
+        }
+        return resources.get(compactToken(ref));
     }
 
     private String systemPrompt() {
@@ -835,10 +994,12 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 You are Agent Studio's workflow draft generator. Return only strict JSON.
                 Generate a complete workflow draft from the user's requirement.
                 Use only node kinds listed in nodeTypes. Use only supplied tools/capabilities/knowledgeBases/pageActions when binding real resources.
+                For pageAction nodes, always set config.ref to the exact actionKey from pageActions.
                 If a business step has no matching resource, still generate the node and mark it as a placeholder by setting config.needsConfiguration=true and config.placeholderReason.
                 Do not output start/end nodes. Use START and END only as edge endpoints.
                 Required JSON shape:
                 {"summary":"short summary","nodes":[{"id":"stable_snake_case","kind":"userInput|llm|tool|skill|knowledge|pageAction|classifier|condition|answer|approval|parameter|http|code|aggregate|loop|template|variable|mcp","label":"display name","description":"what it does","config":{},"inputs":[],"outputs":[]}],"edges":[{"id":"optional","from":"START or node id","to":"node id or END","condition":"always|approved|rejected|route:key|success|error","sourceHandle":"optional","targetHandle":"optional"}],"warnings":[]}
+                inputs and outputs must be arrays of port objects like {"id":"portId","name":"portName","type":"any"}, never bare strings.
                 """;
     }
 
@@ -856,6 +1017,63 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         payload.put("pageActions", request.getPageActions() == null ? List.of() : request.getPageActions());
         payload.put("currentCanvas", request.getCurrentCanvas() == null ? Map.of() : request.getCurrentCanvas());
         return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(payload);
+    }
+
+    private JsonNode normalizeDraftJson(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            return root;
+        }
+        ObjectNode copy = root.deepCopy();
+        JsonNode nodes = copy.get("nodes");
+        if (nodes == null || !nodes.isArray()) {
+            return copy;
+        }
+        ArrayNode normalizedNodes = objectMapper.createArrayNode();
+        for (JsonNode node : nodes) {
+            if (!node.isObject()) {
+                normalizedNodes.add(node);
+                continue;
+            }
+            ObjectNode nodeCopy = node.deepCopy();
+            normalizePortArray(nodeCopy, "inputs");
+            normalizePortArray(nodeCopy, "outputs");
+            normalizedNodes.add(nodeCopy);
+        }
+        copy.set("nodes", normalizedNodes);
+        return copy;
+    }
+
+    private void normalizePortArray(ObjectNode node, String field) {
+        JsonNode ports = node.get(field);
+        if (ports == null || !ports.isArray() || ports.isEmpty()) {
+            return;
+        }
+        boolean needsNormalization = false;
+        for (JsonNode port : ports) {
+            if (port.isTextual()) {
+                needsNormalization = true;
+                break;
+            }
+        }
+        if (!needsNormalization) {
+            return;
+        }
+        ArrayNode normalized = objectMapper.createArrayNode();
+        for (JsonNode port : ports) {
+            if (port.isTextual()) {
+                String name = port.asText();
+                if (StringUtils.hasText(name)) {
+                    ObjectNode portObj = objectMapper.createObjectNode();
+                    portObj.put("id", name);
+                    portObj.put("name", name);
+                    portObj.put("type", "any");
+                    normalized.add(portObj);
+                }
+            } else if (port.isObject()) {
+                normalized.add(port);
+            }
+        }
+        node.set(field, normalized);
     }
 
     private String extractJsonObject(String raw) {

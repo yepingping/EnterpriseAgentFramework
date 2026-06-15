@@ -215,7 +215,7 @@ class AiAccessSessionServiceTest {
                                         "src/app/list.component.ts",
                                         "page-component",
                                         true,
-                                        "abc")),
+                                        null)),
                                 List.of(new PageActionCatalogContracts.PageActionDefinitionRequest(
                                         "getPageState",
                                         "读取页面状态",
@@ -236,12 +236,11 @@ class AiAccessSessionServiceTest {
         assertEquals("teamArchive.list", result.session().targetPageKey());
         assertEquals("/team-build/depart-management", result.session().targetRoute());
         assertEquals(1, result.fileEvidence().size());
+        assertEquals("HASH_MISSING", result.fileEvidence().get(0).validationStatus());
         assertTrue(result.session().steps().stream()
-                .anyMatch(step -> "frontend-handler".equals(step.stepKey()) && "PASS".equals(step.status())));
-        assertTrue(result.session().steps().stream()
-                .anyMatch(step -> "page-registry".equals(step.stepKey()) && "PASS".equals(step.status())));
-        assertTrue(result.session().steps().stream()
-                .anyMatch(step -> "browser-verify".equals(step.stepKey()) && "WARN".equals(step.status())));
+                .anyMatch(step -> "page-manifest".equals(step.stepKey())
+                        && step.message() != null
+                        && step.message().contains("hash missing")));
         verify(stepMapper, org.mockito.Mockito.atLeast(5)).updateById(any(AiAccessStepEntity.class));
         verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
     }
@@ -315,15 +314,69 @@ class AiAccessSessionServiceTest {
                 new AiAccessSessionService.PageAssistantCheckRequest(
                         "teamArchive.list",
                         "/teams/archive",
-                        List.of("getPageState", "search", "readTable")));
+                        List.of("getPageState", "search", "readTable"),
+                        null,
+                        null));
 
         assertEquals("teamArchive.list", response.checkResult().pageKey());
-        assertEquals("PASS", response.checkResult().overallStatus());
+        assertEquals("WARN", response.checkResult().overallStatus());
         assertTrue(response.checkResult().checks().stream()
                 .anyMatch(check -> "page-registry".equals(check.key()) && "PASS".equals(check.status())));
-        assertEquals("PASS", response.session().status());
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-static".equals(check.key()) && "PASS".equals(check.status())));
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-runtime".equals(check.key()) && "SKIPPED".equals(check.status())));
+        assertEquals("WARN", response.session().status());
+        assertTrue(response.session().steps().stream()
+                .anyMatch(step -> "browser-verify".equals(step.stepKey()) && "WARN".equals(step.status())));
         verify(stepMapper, org.mockito.Mockito.atLeast(4)).updateById(any(AiAccessStepEntity.class));
         verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
+    }
+
+    @Test
+    void runPageAssistantChecksNeverReportsRuntimePassWithoutProbe() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        session.setTargetPageKey("teamArchive.list");
+        session.setTargetRoute("/teams/archive");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(stepMapper.selectList(any())).thenReturn(List.of(
+                step("session-page", "browser-verify", "TODO")
+        ));
+        when(pageRegistryMapper.selectList(any())).thenReturn(List.of(page("teamArchive.list", "/teams/archive")));
+        when(pageActionRegistryMapper.selectList(any())).thenReturn(List.of(
+                action("teamArchive.list", "getPageState", false),
+                action("teamArchive.list", "search", false)
+        ));
+
+        AiAccessSessionService.PageAssistantCheckRunResponse response = service.runPageAssistantChecks(
+                1L,
+                "session-page",
+                new AiAccessSessionService.PageAssistantCheckRequest(
+                        "teamArchive.list",
+                        "/teams/archive",
+                        List.of("getPageState", "search"),
+                        null,
+                        null));
+
+        assertTrue(response.checkResult().checks().stream()
+                .noneMatch(check -> "browser-verify-runtime".equals(check.key()) && "PASS".equals(check.status())));
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-static".equals(check.key()) && "PASS".equals(check.status())));
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-runtime".equals(check.key()) && "SKIPPED".equals(check.status())));
+    }
+
+    @Test
+    void normalizeFileEvidenceAcceptsStringShorthandShape() {
+        List<AiAccessSessionService.PageAssistantFileEvidence> normalized =
+                AiAccessSessionService.normalizeFileEvidence(List.of(
+                        new AiAccessSessionService.PageAssistantFileEvidence("src/app/list.component.ts", "unknown", null, null)));
+
+        assertEquals(1, normalized.size());
+        assertEquals("src/app/list.component.ts", normalized.get(0).path());
+        assertEquals("unknown", normalized.get(0).role());
     }
 
     @Test
@@ -354,11 +407,109 @@ class AiAccessSessionServiceTest {
                 new AiAccessSessionService.PageAssistantCheckRequest(
                         null,
                         null,
-                        List.of("getPageState", "search")));
+                        List.of("getPageState", "search"),
+                        null,
+                        null));
 
         assertEquals("WARN", response.checkResult().overallStatus());
         assertTrue(response.session().steps().stream()
                 .anyMatch(step -> "page-registry".equals(step.stepKey()) && "PASS".equals(step.status())));
+    }
+
+    @Test
+    void runPageAssistantChecksRuntimePassRequiresInvokeEvidence() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(stepMapper.selectList(any())).thenReturn(List.of(step("session-page", "browser-verify", "TODO")));
+        when(pageRegistryMapper.selectList(any())).thenReturn(List.of());
+        when(pageActionRegistryMapper.selectList(any())).thenReturn(List.of());
+
+        Map<String, Object> fakePassWithoutInvoke = Map.of("status", "PASS", "message", "claimed pass");
+        AiAccessSessionService.PageAssistantCheckRunResponse response = service.runPageAssistantChecks(
+                1L,
+                "session-page",
+                new AiAccessSessionService.PageAssistantCheckRequest(
+                        "teamArchive.list",
+                        "/teams/archive",
+                        List.of("getPageState"),
+                        "http://localhost:9200",
+                        fakePassWithoutInvoke));
+
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-runtime".equals(check.key()) && "WARN".equals(check.status())));
+    }
+
+    @Test
+    void runPageAssistantChecksAcceptsRuntimePassWhenInvokeEvidencePresent() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(stepMapper.selectList(any())).thenReturn(List.of(step("session-page", "browser-verify", "TODO")));
+        when(pageRegistryMapper.selectList(any())).thenReturn(List.of(page("teamArchive.list", "/teams/archive")));
+        when(pageActionRegistryMapper.selectList(any())).thenReturn(List.of(action("teamArchive.list", "getPageState", false)));
+
+        Map<String, Object> runtime = Map.of(
+                "status", "PASS",
+                "message", "readonly invoke ok",
+                "frontendUrl", "http://localhost:9200",
+                "bridgeExists", true,
+                "invokedActions", List.of("getPageState"),
+                "redactedResults", List.of(Map.of("actionKey", "getPageState", "status", "SUCCESS")));
+        AiAccessSessionService.PageAssistantCheckRunResponse response = service.runPageAssistantChecks(
+                1L,
+                "session-page",
+                new AiAccessSessionService.PageAssistantCheckRequest(
+                        "teamArchive.list",
+                        "/teams/archive",
+                        List.of("getPageState"),
+                        "http://localhost:9200",
+                        runtime));
+
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-runtime".equals(check.key()) && "PASS".equals(check.status())));
+    }
+
+    @Test
+    void runPageAssistantChecksPreservesAiEvidenceAfterPlatformCheck() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        session.setTargetPageKey("teamArchive.list");
+        AiAccessStepEntity browser = step("session-page", "browser-verify", "PASS");
+        browser.setReportedBy("cursor");
+        browser.setMessage("AI reported runtime evidence");
+        browser.setEvidenceJson("{\"invokedActions\":[\"getPageState\"],\"note\":\"from-ai\"}");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(stepMapper.selectList(any())).thenReturn(List.of(browser));
+        when(pageRegistryMapper.selectList(any())).thenReturn(List.of());
+        when(pageActionRegistryMapper.selectList(any())).thenReturn(List.of());
+
+        AiAccessSessionService.PageAssistantCheckRunResponse response = service.runPageAssistantChecks(
+                1L,
+                "session-page",
+                new AiAccessSessionService.PageAssistantCheckRequest(
+                        null, null, List.of("getPageState"), null, null));
+
+        AiAccessSessionService.AccessStepView browserStep = response.session().steps().stream()
+                .filter(step -> "browser-verify".equals(step.stepKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("PASS", browserStep.status());
+        assertEquals("cursor", browserStep.reportedBy());
+        assertEquals("AI reported runtime evidence", browserStep.message());
+        assertTrue(browserStep.evidence().containsKey("platformCheck"));
+        assertEquals("from-ai", String.valueOf(browserStep.evidence().get("note")));
+    }
+
+    @Test
+    void enrichFileEvidenceMarksHashMissingForStringShorthand() {
+        List<AiAccessSessionService.PageAssistantFileEvidenceView> views = AiAccessSessionService.enrichFileEvidence(
+                List.of(new AiAccessSessionService.PageAssistantFileEvidence("src/app/list.component.ts", "unknown", null, null)));
+        assertEquals("HASH_MISSING", views.get(0).validationStatus());
+        assertTrue(views.get(0).validationMessage().contains("hash missing"));
     }
 
     private static ScanProjectEntity project() {

@@ -343,6 +343,7 @@ function scheduleUpdateProjectTableMaxHeight() {
 function updateProjectTableMaxHeight() {
   if (typeof window === 'undefined') return
   const root = document.querySelector('.registry-project-page')
+  const cardEl = root?.querySelector('.project-card') as HTMLElement | undefined
   const tableEl = root?.querySelector('.project-table') as HTMLElement | undefined
   const footerEl = root?.querySelector('.table-footer') as HTMLElement | undefined
   if (!tableEl) {
@@ -352,9 +353,15 @@ function updateProjectTableMaxHeight() {
   const tableTop = tableEl.getBoundingClientRect().top
   const viewportPad = 16
   let bottomLimit = window.innerHeight - viewportPad
+  if (cardEl) {
+    const cardBottom = cardEl.getBoundingClientRect().bottom
+    if (cardBottom > tableTop && cardBottom <= window.innerHeight) {
+      bottomLimit = Math.min(bottomLimit, cardBottom - 12)
+    }
+  }
   if (footerEl && footerEl.offsetParent !== null) {
     const footerTop = footerEl.getBoundingClientRect().top
-    if (footerTop > tableTop && footerTop < window.innerHeight) {
+    if (footerTop > tableTop && footerTop < bottomLimit) {
       bottomLimit = footerTop - 12
     }
   }
@@ -627,10 +634,12 @@ function goDetail(project: ScanProject) {
 <style scoped lang="scss">
 .registry-project-page {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 16px;
-  min-height: 100%;
-  padding: 24px 28px 32px;
+  min-height: 0;
+  height: calc(100vh - 56px);
+  padding: 24px 28px 24px;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -646,6 +655,7 @@ function goDetail(project: ScanProject) {
   width: 100%;
   min-width: 0;
   margin: 0;
+  flex-shrink: 0;
 
   h1 {
     margin: 0 0 8px;
@@ -731,6 +741,7 @@ function goDetail(project: ScanProject) {
   width: 100%;
   min-width: 0;
   margin: 0;
+  flex-shrink: 0;
 }
 
 .metric-card {
@@ -817,14 +828,22 @@ function goDetail(project: ScanProject) {
 }
 
 .project-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   margin: 0;
   border: 1px solid #eaecf5;
   border-radius: 12px;
   box-shadow: 0 14px 34px rgba(17, 24, 39, 0.045);
 
   :deep(.el-card__body) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
     padding: 0;
   }
 }
@@ -837,6 +856,7 @@ function goDetail(project: ScanProject) {
   padding: 14px 22px 16px;
   border-bottom: 1px solid #eef1f7;
   background: #fff;
+  flex-shrink: 0;
 
   .search-input {
     width: 100%;
@@ -870,10 +890,13 @@ function goDetail(project: ScanProject) {
   background: rgb(var(--brand-selected-rgb) / 0.52);
   border-bottom: 1px solid rgb(var(--brand-selected-rgb) / 0.72);
   font-size: 13px;
+  flex-shrink: 0;
 }
 
 .project-table {
   width: 100%;
+  flex: 1;
+  min-height: 0;
 
   :deep(th.el-table__cell) {
     height: 44px;
@@ -1046,6 +1069,7 @@ function goDetail(project: ScanProject) {
 
 .empty-state {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: stretch;
   gap: 0;
@@ -1054,6 +1078,7 @@ function goDetail(project: ScanProject) {
   border: 1px dashed rgb(var(--brand-primary-rgb) / 0.28);
   border-radius: 18px;
   background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.06), rgb(var(--brand-hover-rgb) / 0.03));
+  min-height: 0;
 
   h3 {
     margin: 0 0 8px;
@@ -1085,6 +1110,8 @@ function goDetail(project: ScanProject) {
   border-top: 1px solid #eef1f7;
   color: #667085;
   font-size: 13px;
+  flex-shrink: 0;
+  margin-top: auto;
 
   :deep(.el-pagination.is-background .el-pager li.is-active) {
     background-color: var(--brand-primary);
@@ -1476,6 +1503,12 @@ function goDetail(project: ScanProject) {
     }
   }
 
+}
+
+:global(.main-layout.registry-shell .main-content:has(.registry-project-page)) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 @media (max-width: 1200px) {

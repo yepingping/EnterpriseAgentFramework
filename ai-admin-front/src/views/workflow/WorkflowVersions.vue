@@ -2,24 +2,24 @@
   <div class="workflow-versions">
     <header class="page-header">
       <div>
-        <h1>{{ workflow?.name || 'Workflow Versions' }}</h1>
+        <h1>{{ workflow?.name || 'Workflow 版本' }}</h1>
         <p>{{ workflow?.keySlug || workflowId }}</p>
         <div class="meta-row">
-          <el-tag size="small" effect="plain">{{ workflow?.workflowType || 'CHAT' }}</el-tag>
-          <el-tag size="small" type="info" effect="plain">{{ workflow?.runtimeType || 'LANGGRAPH4J' }}</el-tag>
-          <el-tag size="small" :type="workflow?.status === 'ACTIVE' ? 'success' : 'warning'">
-            {{ workflow?.status || 'DRAFT' }}
+          <el-tag size="small" effect="plain">{{ formatWorkflowTypeLabel(workflow?.workflowType) }}</el-tag>
+          <el-tag size="small" type="info" effect="plain">{{ formatRuntimeTypeLabel(workflow?.runtimeType) }}</el-tag>
+          <el-tag size="small" :type="workflowStatusTagType(workflow?.status)">
+            {{ formatWorkflowStatusLabel(workflow?.status) }}
           </el-tag>
         </div>
       </div>
       <div class="header-actions">
         <el-button :icon="ArrowLeft" @click="router.push(`/workflows/${workflowId}/studio`)">
-          Studio
+          编排
         </el-button>
         <el-button :icon="CircleCheck" :loading="validating" @click="validateRelease">
-          Validate
+          校验
         </el-button>
-        <el-button type="primary" :icon="Upload" @click="publishOpen = true">Publish</el-button>
+        <el-button type="primary" :icon="Upload" @click="publishOpen = true">发布</el-button>
       </div>
     </header>
 
@@ -29,12 +29,14 @@
       :type="validation.valid ? 'success' : 'error'"
       :closable="false"
       show-icon
-      :title="validation.valid ? 'Workflow is ready to publish' : `${validation.errors.length} release issue(s)`"
+      :title="validation.valid ? 'Workflow 已可发布' : `${validation.errors.length} 个发布问题`"
     />
 
     <section v-if="validation && (!validation.valid || validation.warnings.length)" class="validation-panel">
       <div v-for="item in validationItems" :key="`${item.level}-${item.code}-${item.nodeId || ''}`" class="validation-item">
-        <el-tag size="small" :type="item.level === 'ERROR' ? 'danger' : 'warning'">{{ item.level }}</el-tag>
+        <el-tag size="small" :type="item.level === 'ERROR' ? 'danger' : 'warning'">
+          {{ item.level === 'ERROR' ? '错误' : '警告' }}
+        </el-tag>
         <strong>{{ item.code }}</strong>
         <span v-if="item.nodeId">{{ item.nodeId }}</span>
         <p>{{ item.message }}</p>
@@ -42,21 +44,21 @@
     </section>
 
     <el-table :data="versions" v-loading="loading" stripe>
-      <el-table-column prop="version" label="Version" min-width="160">
+      <el-table-column prop="version" label="版本" min-width="160">
         <template #default="{ row }">
           <strong>{{ row.version }}</strong>
           <el-tag v-if="row.status === 'ACTIVE'" class="active-tag" size="small" type="success">
-            ACTIVE
+            当前生效
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="rolloutPercent" label="Rollout" width="110">
+      <el-table-column prop="rolloutPercent" label="灰度" width="110">
         <template #default="{ row }">{{ row.rolloutPercent ?? 100 }}%</template>
       </el-table-column>
-      <el-table-column prop="publishedBy" label="Published By" min-width="140" />
-      <el-table-column prop="publishedAt" label="Published At" min-width="180" />
-      <el-table-column prop="note" label="Note" min-width="220" />
-      <el-table-column label="Actions" width="160" fixed="right">
+      <el-table-column prop="publishedBy" label="发布人" min-width="140" />
+      <el-table-column prop="publishedAt" label="发布时间" min-width="180" />
+      <el-table-column prop="note" label="备注" min-width="220" />
+      <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button
             size="small"
@@ -64,30 +66,30 @@
             :loading="rollingBackId === row.id"
             @click="rollback(row)"
           >
-            Rollback
+            回滚
           </el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="publishOpen" title="Publish Workflow Version" width="460px">
+    <el-dialog v-model="publishOpen" title="发布 Workflow 版本" width="460px">
       <el-form :model="publishForm" label-width="110px">
-        <el-form-item label="Version">
+        <el-form-item label="版本">
           <el-input v-model="publishForm.version" placeholder="v1.0.0" />
         </el-form-item>
-        <el-form-item label="Rollout">
+        <el-form-item label="灰度">
           <el-input-number v-model="publishForm.rolloutPercent" :min="0" :max="100" />
         </el-form-item>
-        <el-form-item label="Published By">
+        <el-form-item label="发布人">
           <el-input v-model="publishForm.publishedBy" placeholder="operator" />
         </el-form-item>
-        <el-form-item label="Note">
+        <el-form-item label="备注">
           <el-input v-model="publishForm.note" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="publishOpen = false">Cancel</el-button>
-        <el-button type="primary" :loading="publishing" @click="publishVersion">Publish</el-button>
+        <el-button @click="publishOpen = false">取消</el-button>
+        <el-button type="primary" :loading="publishing" @click="publishVersion">发布</el-button>
       </template>
     </el-dialog>
   </div>
@@ -111,6 +113,12 @@ import type {
   WorkflowReleaseValidationResult,
   WorkflowVersion,
 } from '@/types/workflow'
+import { formatRuntimeTypeLabel } from '@/utils/registryLabels'
+import {
+  formatWorkflowStatusLabel,
+  formatWorkflowTypeLabel,
+  workflowStatusTagType,
+} from '@/utils/workflowLabels'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,7 +168,7 @@ async function validateRelease() {
   try {
     const { data } = await validateWorkflowVersion(workflowId)
     validation.value = data
-    if (data.valid) ElMessage.success('Workflow release validation passed')
+    if (data.valid) ElMessage.success('Workflow 发布校验通过')
   } finally {
     validating.value = false
   }
@@ -168,7 +176,7 @@ async function validateRelease() {
 
 async function publishVersion() {
   if (!publishForm.version.trim()) {
-    ElMessage.warning('Version is required')
+    ElMessage.warning('请填写版本号')
     return
   }
   publishing.value = true
@@ -181,7 +189,7 @@ async function publishVersion() {
     })
     publishOpen.value = false
     validation.value = null
-    ElMessage.success('Workflow version published')
+    ElMessage.success('Workflow 版本已发布')
     await Promise.all([loadWorkflow(), loadVersions()])
   } finally {
     publishing.value = false
@@ -189,13 +197,13 @@ async function publishVersion() {
 }
 
 async function rollback(row: WorkflowVersion) {
-  await ElMessageBox.confirm(`Rollback to ${row.version}?`, 'Rollback Workflow', {
+  await ElMessageBox.confirm(`确认回滚到 ${row.version}？`, '回滚 Workflow', {
     type: 'warning',
   })
   rollingBackId.value = row.id
   try {
     await rollbackWorkflowVersion(workflowId, row.id, publishForm.publishedBy || undefined)
-    ElMessage.success('Workflow rolled back')
+    ElMessage.success('Workflow 已回滚')
     await Promise.all([loadWorkflow(), loadVersions()])
   } finally {
     rollingBackId.value = null

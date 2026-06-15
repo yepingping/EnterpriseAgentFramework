@@ -90,11 +90,12 @@ For request DTOs, annotate important fields with `@ReachParam` so generated para
 SDK onboarding is not complete if the business gateway is untouched and the business front end has no safe token path.
 
 Before changing gateway or front-end code, read the manifest's `embed` section:
-- Prefer `agentWorkflow.globalAgentKeySlug` as the front-end `agentId` when present. This is the single project-level embedded AI entry.
-- Otherwise prefer `embed.defaultAgentKeySlug` as the front-end `agentId`.
+- Call `agentProvisioning.provisionAgentUrl` when present. It creates or reuses the project `PAGE_COPILOT` Agent and default Workflow binding.
+- Use the response `agent.keySlug` as the front-end `agentId`. Store it in a local variable such as `provisionedAgentKeySlug` during the integration.
+- If provisioning is unavailable, prefer `agentProvisioning.defaultKeySlug`, then `agentWorkflow.globalAgentKeySlug`, then `embed.defaultAgentKeySlug`.
 - Use `embed.defaultAgentId` only when no key slug is available.
 - Treat `embed.allowedAgents` as the platform-approved list. Do not invent a new `agentId` in the business repo.
-- If no default Agent is present, stop and ask the ReachAI platform owner to create, enable, or whitelist an embeddable Agent for this project.
+- Do not ask the business user to manually create, choose, or configure the page copilot Agent during SDK onboarding.
 
 Inspect the repository for the real gateway boundary:
 - Spring Cloud Gateway `application.yml` / `bootstrap.yml` routes.
@@ -112,13 +113,14 @@ Add the gateway authentication whitelist required by embed chat:
 - Keep the token broker path, for example `/api/reachai/embed-token`, behind the business login token because it maps the current user to `principal.externalUserId`.
 - Route `/api/reachai/embed/**` to ReachAI `/api/embed/**` as an anonymous proxy or with a dedicated security chain. Browser calls to this path use `Authorization: Bearer <embedToken>`, and business OAuth/JWT filters must not parse or reject that token.
 - If the gateway has a global authentication filter, add an explicit skip for `/api/reachai/embed/**` while preserving the `Authorization`, `Origin`, and `Content-Type` headers.
+- Inspect any existing whitelist or anonymous-path filter that removes JWT headers, including names such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, `RemoveRequestHeader=Authorization`, or code that calls `mutate().header("Authorization", "")`. Do not let those filters clear `Authorization` on `/api/reachai/embed/**`; the path is anonymous only with respect to business login validation, not with respect to ReachAI embed-token forwarding.
 - In Spring Cloud Gateway this usually means both a route rewrite and a gateway authentication whitelist/security matcher. If both the gateway and ReachAI add CORS response headers, add route-level dedupe such as `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST` so the browser does not hide the real 401/500 response as `status 0 Unknown Error`.
 - In Nginx or a BFF, apply the same auth bypass and CORS de-duplication rule at the real authentication/proxy boundary.
 
 Expose a server-side embed token broker for the business UI, for example:
 
 ```http
-GET /api/reachai/embed-token?projectCode=demo-service&agentId=<manifest.agentWorkflow.globalAgentKeySlug>&pageKey=teamArchive.list&pageInstanceId=page-001&route=/teams&origin=http://localhost:5173
+GET /api/reachai/embed-token?projectCode=demo-service&agentId=<provisionedAgentKeySlug>&pageKey=teamArchive.list&pageInstanceId=page-001&route=/teams&origin=http://localhost:5173
 ```
 
 The broker must:
@@ -139,10 +141,17 @@ Add the ReachAI chat/embed entry in the real business front end when that front 
 Use a token provider that calls the business gateway token broker:
 
 ```ts
+const provisionedAgentKeySlug =
+  agentProvisionResponse.agent.keySlug ||
+  manifest.agentProvisioning?.defaultKeySlug ||
+  manifest.agentWorkflow?.globalAgentKeySlug ||
+  manifest.embed.defaultAgentKeySlug ||
+  manifest.embed.defaultAgentId
+
 const tokenProvider = async () => {
   const query = new URLSearchParams({
     projectCode: 'demo-service',
-    agentId: manifest.agentWorkflow?.globalAgentKeySlug || manifest.embed.defaultAgentKeySlug || manifest.embed.defaultAgentId,
+    agentId: provisionedAgentKeySlug,
     pageKey: 'teamArchive.list',
     pageInstanceId,
     route: window.location.pathname,
@@ -162,7 +171,7 @@ When creating the global chat entry, pass the same page descriptor to the SDK so
 createEafChat({
   mount: '#reachai-chat',
   apiBase: '/api/reachai/embed',
-  agentId: manifest.agentWorkflow?.globalAgentKeySlug || manifest.embed.defaultAgentKeySlug || manifest.embed.defaultAgentId,
+  agentId: provisionedAgentKeySlug,
   tokenProvider,
   page: {
     pageKey: 'teamArchive.list',

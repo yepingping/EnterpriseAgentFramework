@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -42,7 +43,7 @@ public class WorkflowRuntimeGraphAdapter {
                 .projectCode(firstText(requiredWorkflow.getProjectCode(), requiredAgent.getProjectCode()))
                 .runtimeType(firstText(requiredWorkflow.getRuntimeType(), "LANGGRAPH4J"))
                 .runtimePlacement("CENTRAL")
-                .modelInstanceId(firstText(requiredWorkflow.getDefaultModelInstanceId(), requiredAgent.getModelInstanceId()))
+                .modelInstanceId(resolveModelInstanceId(requiredAgent, requiredWorkflow, activeVersion))
                 .systemPrompt(requiredAgent.getSystemPrompt())
                 .canvasJson(resolveCanvasJson(requiredWorkflow, activeVersion))
                 .extra(extra)
@@ -96,6 +97,42 @@ public class WorkflowRuntimeGraphAdapter {
             return objectMapper.convertValue(graphSpec, GraphSpec.class);
         }
         throw new IllegalArgumentException("workflow graphSpec is required");
+    }
+
+    private String resolveModelInstanceId(AgentEntryEntity agent,
+                                          WorkflowDefinitionEntity workflow,
+                                          WorkflowVersionEntity activeVersion) {
+        return firstText(
+                modelInstanceIdFromGraphSpec(resolveGraphSpecJson(workflow, activeVersion)),
+                workflow.getDefaultModelInstanceId(),
+                agent.getModelInstanceId());
+    }
+
+    private String modelInstanceIdFromGraphSpec(String graphSpecJson) {
+        if (!StringUtils.hasText(graphSpecJson)) {
+            return null;
+        }
+        GraphSpec graphSpec = readGraphSpec(graphSpecJson);
+        List<GraphSpec.Node> nodes = graphSpec.getNodes();
+        if (nodes == null || nodes.isEmpty()) {
+            return null;
+        }
+        for (GraphSpec.Node node : nodes) {
+            if (node == null || !requiresModelInstance(node.getType()) || node.getConfig() == null) {
+                continue;
+            }
+            String modelInstanceId = stringValue(node.getConfig().get("modelInstanceId"));
+            if (StringUtils.hasText(modelInstanceId)) {
+                return modelInstanceId.trim();
+            }
+        }
+        return null;
+    }
+
+    private boolean requiresModelInstance(String type) {
+        return "LLM".equals(type)
+                || "INTENT_CLASSIFIER".equals(type)
+                || "PARAMETER_EXTRACT".equals(type);
     }
 
     private Map<String, Object> buildRuntimeExtra(AgentEntryEntity entryAgent,

@@ -12,6 +12,7 @@ import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -238,16 +239,17 @@ public class AiAccessSessionService {
         session.setUpdatedAt(LocalDateTime.now());
 
         List<AiAccessStepEntity> steps = ensureDefaultSteps(session, loadSteps(session.getSessionId()));
-        List<String> files = request.files() == null
-                ? List.of()
-                : request.files().stream()
-                .filter(file -> file != null && StringUtils.hasText(file.path()))
-                .map(PageAssistantFileEvidence::path)
-                .toList();
+        List<PageAssistantFileEvidence> normalizedFiles = normalizeFileEvidence(request.files());
+        List<PageAssistantFileEvidenceView> enrichedFiles = enrichFileEvidence(normalizedFiles);
+        List<String> files = normalizedFiles.stream().map(PageAssistantFileEvidence::path).toList();
+        String fileEvidenceMessage = describeFileEvidenceQuality(enrichedFiles);
         reportKnownStep(steps, "page-manifest", "PASS",
-                "Page assistant target and register request received.",
+                fileEvidenceMessage,
                 files,
-                Map.of("pageKey", pageKey, "framework", valueOrEmpty(request.framework())),
+                Map.of(
+                        "pageKey", pageKey,
+                        "framework", valueOrEmpty(request.framework()),
+                        "fileEvidence", enrichedFiles.stream().map(this::fileEvidenceToMap).toList()),
                 "page-assistant-register");
         reportKnownStep(steps, "route-detection", StringUtils.hasText(routePattern) ? "PASS" : "WARN",
                 StringUtils.hasText(routePattern) ? "Target route is registered by AI coding report." : "Route pattern is missing.",
@@ -273,10 +275,14 @@ public class AiAccessSessionService {
                         "actionCount", registerResult == null ? 0 : registerResult.actionCount(),
                         "actionKeys", actionKeys),
                 "page-assistant-register");
-        reportKnownStep(steps, "browser-verify", verificationStatus(request.verification(), "browser", "WARN"),
-                verificationMessage(request.verification(), "browser", "Browser verification was not reported."),
+        String browserStaticStatus = verificationStatus(request.verification(), "browserStatic",
+                verificationStatus(request.verification(), "staticHandler", "WARN"));
+        String browserRuntimeStatus = resolveRuntimeVerificationStatus(request.verification());
+        reportKnownStep(steps, "browser-verify",
+                combineBrowserVerifyStatus(browserStaticStatus, browserRuntimeStatus),
+                browserVerifyMessage(request.verification(), browserStaticStatus, browserRuntimeStatus),
                 files,
-                verificationEvidence(request.verification(), "browser", Map.of("routePattern", valueOrEmpty(routePattern))),
+                browserVerifyEvidence(request.verification(), routePattern, browserStaticStatus, browserRuntimeStatus),
                 "page-assistant-register");
         reportKnownStep(steps, "handoff-summary", StringUtils.hasText(request.handoffSummary()) ? "PASS" : "WARN",
                 StringUtils.hasText(request.handoffSummary()) ? request.handoffSummary().trim() : "Handoff summary is missing.",
@@ -285,7 +291,7 @@ public class AiAccessSessionService {
                 "page-assistant-register");
         return new PageAssistantPageRegisterSessionResult(
                 persistProgress(session, steps),
-                request.files() == null ? List.of() : request.files());
+                enrichedFiles);
     }
 
     public AccessCheckRunResponse runChecks(Long projectId,
@@ -351,6 +357,15 @@ public class AiAccessSessionService {
         boolean allActionsActive = !expectedActions.isEmpty()
                 && expectedActions.stream().allMatch(actionsByKey::containsKey);
 
+        boolean staticCatalogOk = routeMatched && allActionsActive;
+        String staticStatus = staticCatalogOk ? "PASS" : "WARN";
+        String staticMessage = staticCatalogOk
+                ? "Static catalog connectivity checks passed (static only)."
+                : "Static catalog alignment incomplete; verify route and action keys in the business frontend.";
+        String runtimeStatus = resolveRuntimeCheckStatus(request);
+        String runtimeMessage = resolveRuntimeCheckMessage(request, runtimeStatus);
+        Map<String, Object> runtimeEvidence = resolveRuntimeCheckEvidence(request);
+
         List<PageAssistantCheckItem> checks = List.of(
                 new PageAssistantCheckItem(
                         "page-manifest",
@@ -377,35 +392,41 @@ public class AiAccessSessionService {
                         allActionsActive ? "Page action keys are ready for frontend handlers." : "Cursor still needs to register or align frontend handlers.",
                         String.join(",", actionsByKey.keySet())),
                 new PageAssistantCheckItem(
-                        "browser-verify",
-                        "Browser verification",
-                        allActionsActive && routeMatched ? "PASS" : "WARN",
-                        allActionsActive && routeMatched ? "Static catalog connectivity checks passed." : "Run browser verification after the business page is available.",
+                        "browser-verify-static",
+                        "Browser verification (static)",
+                        staticStatus,
+                        staticMessage,
+                        routePattern),
+                new PageAssistantCheckItem(
+                        "browser-verify-runtime",
+                        "Browser verification (runtime)",
+                        runtimeStatus,
+                        runtimeMessage,
                         routePattern)
         );
 
         Map<String, AiAccessStepEntity> byKey = steps.stream()
                 .collect(Collectors.toMap(AiAccessStepEntity::getStepKey, Function.identity(), (a, b) -> a, LinkedHashMap::new));
         for (PageAssistantCheckItem item : checks) {
+            if ("browser-verify-static".equals(item.key()) || "browser-verify-runtime".equals(item.key())) {
+                continue;
+            }
             AiAccessStepEntity step = byKey.get(item.key());
             if (step == null) {
                 continue;
             }
             applyPlatformPageAssistantCheck(step, item);
-            LocalDateTime now = LocalDateTime.now();
-            if (step.getStartedAt() == null) {
-                step.setStartedAt(now);
-            }
-            if (isCompleted(step.getStatus())) {
-                step.setCompletedAt(now);
-            }
-            step.setUpdatedAt(now);
+            touchPlatformCheckStep(step);
             stepMapper.updateById(step);
         }
+        AiAccessStepEntity browserStep = byKey.get("browser-verify");
+        if (browserStep != null) {
+            applyBrowserVerifyPlatformCheck(browserStep, staticStatus, staticMessage, runtimeStatus, runtimeMessage, runtimeEvidence);
+            touchPlatformCheckStep(browserStep);
+            stepMapper.updateById(browserStep);
+        }
         AccessSessionView view = persistProgress(session, steps);
-        String overall = checks.stream().anyMatch(check -> "FAIL".equalsIgnoreCase(check.status()))
-                ? "FAIL"
-                : checks.stream().anyMatch(check -> "WARN".equalsIgnoreCase(check.status())) ? "WARN" : "PASS";
+        String overall = resolvePageAssistantOverallStatus(checks);
         return new PageAssistantCheckRunResponse(
                 new PageAssistantCheckResponse(projectId, project.getProjectCode(), pageKey, routePattern, overall, checks),
                 view);
@@ -575,6 +596,252 @@ public class AiAccessSessionService {
         return fallback;
     }
 
+    private static String combineBrowserVerifyStatus(String staticStatus, String runtimeStatus) {
+        if ("FAIL".equalsIgnoreCase(staticStatus) || "FAIL".equalsIgnoreCase(runtimeStatus)) {
+            return "FAIL";
+        }
+        if ("PASS".equalsIgnoreCase(staticStatus) && "PASS".equalsIgnoreCase(runtimeStatus)) {
+            return "PASS";
+        }
+        return "WARN";
+    }
+
+    private static String browserVerifyMessage(Map<String, Object> verification,
+                                               String staticStatus,
+                                               String runtimeStatus) {
+        String staticMessage = verificationMessage(verification, "browserStatic",
+                verificationMessage(verification, "staticHandler", "Static browser verification was not reported."));
+        String runtimeMessage = verificationMessage(verification, "browserRuntime",
+                verificationMessage(verification, "browser", "Runtime browser verification was not reported."));
+        return "static=" + staticStatus + " (" + staticMessage + "); runtime=" + runtimeStatus + " (" + runtimeMessage + ")";
+    }
+
+    private static Map<String, Object> browserVerifyEvidence(Map<String, Object> verification,
+                                                             String routePattern,
+                                                             String staticStatus,
+                                                             String runtimeStatus) {
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("routePattern", valueOrEmpty(routePattern));
+        evidence.put("browserStatic", verificationEvidence(verification, "browserStatic",
+                verificationEvidence(verification, "staticHandler", Map.of("status", staticStatus))));
+        evidence.put("browserRuntime", verificationEvidence(verification, "browserRuntime",
+                verificationEvidence(verification, "browser", Map.of("status", runtimeStatus))));
+        return evidence;
+    }
+
+    private static String resolveRuntimeVerificationStatus(Map<String, Object> verification) {
+        Map<String, Object> runtime = extractRuntimeVerification(verification);
+        if (runtime.isEmpty()) {
+            return verificationStatus(verification, "browser", "WARN");
+        }
+        return resolveRuntimeStatusFromEvidence(runtime, verification != null && StringUtils.hasText(textValue(verification.get("frontendUrl"))));
+    }
+
+    private static Map<String, Object> extractRuntimeVerification(Map<String, Object> verification) {
+        Map<String, Object> runtime = verificationEvidence(verification, "browserRuntime", Map.of());
+        if (!runtime.isEmpty()) {
+            return runtime;
+        }
+        return verificationEvidence(verification, "browser", Map.of());
+    }
+
+    public static Map<String, Object> extractRuntimeVerificationForCheck(PageAssistantCheckRequest request) {
+        if (request != null && request.runtimeVerification() != null && !request.runtimeVerification().isEmpty()) {
+            return new LinkedHashMap<>(request.runtimeVerification());
+        }
+        return Map.of();
+    }
+
+    public static String extractFrontendUrl(PageAssistantCheckRequest request, Map<String, Object> runtimeVerification) {
+        if (request != null && StringUtils.hasText(request.frontendUrl())) {
+            return request.frontendUrl().trim();
+        }
+        String fromRuntime = textValue(runtimeVerification.get("frontendUrl"));
+        return StringUtils.hasText(fromRuntime) ? fromRuntime.trim() : null;
+    }
+
+    private static String resolveRuntimeCheckStatus(PageAssistantCheckRequest request) {
+        Map<String, Object> runtime = extractRuntimeVerificationForCheck(request);
+        if (runtime.isEmpty() && request != null && StringUtils.hasText(request.frontendUrl())) {
+            return "WARN";
+        }
+        if (runtime.isEmpty()) {
+            return "SKIPPED";
+        }
+        return resolveRuntimeStatusFromEvidence(runtime, StringUtils.hasText(extractFrontendUrl(request, runtime)));
+    }
+
+    private static String resolveRuntimeStatusFromEvidence(Map<String, Object> runtime, boolean frontendUrlProvided) {
+        String reported = textValue(runtime.get("status"));
+        if (!StringUtils.hasText(reported)) {
+            return frontendUrlProvided ? "WARN" : "SKIPPED";
+        }
+        if ("PASS".equalsIgnoreCase(reported)) {
+            return hasSuccessfulBridgeInvoke(runtime) ? "PASS" : "WARN";
+        }
+        return reported.toUpperCase(Locale.ROOT);
+    }
+
+    private static boolean hasSuccessfulBridgeInvoke(Map<String, Object> runtime) {
+        if (!objectListToStrings(runtime.get("invokedActions")).isEmpty()) {
+            Object redacted = runtime.get("redactedResults");
+            if (redacted instanceof List<?> results) {
+                return results.stream().anyMatch(item -> {
+                    if (item instanceof Map<?, ?> map) {
+                        Object status = map.get("status");
+                        return status != null && "SUCCESS".equalsIgnoreCase(String.valueOf(status));
+                    }
+                    return false;
+                });
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static Map<String, Object> resolveRuntimeCheckEvidence(PageAssistantCheckRequest request) {
+        Map<String, Object> runtime = extractRuntimeVerificationForCheck(request);
+        if (!runtime.isEmpty()) {
+            return runtime;
+        }
+        if (request != null && StringUtils.hasText(request.frontendUrl())) {
+            return Map.of(
+                    "status", "WARN",
+                    "message", "FrontendUrl was provided but runtime bridge invoke evidence is missing.",
+                    "frontendUrl", request.frontendUrl().trim());
+        }
+        return Map.of(
+                "status", "SKIPPED",
+                "message", "Runtime browser verification skipped: no FrontendUrl, browser session, login state, or bridge invoke probe.");
+    }
+
+    private static String resolveRuntimeCheckMessage(PageAssistantCheckRequest request, String runtimeStatus) {
+        Map<String, Object> runtime = extractRuntimeVerificationForCheck(request);
+        if ("PASS".equalsIgnoreCase(runtimeStatus)) {
+            return readRuntimeVerificationMessage(runtime, "Runtime bridge invoke verification reported PASS.");
+        }
+        if ("FAIL".equalsIgnoreCase(runtimeStatus)) {
+            return readRuntimeVerificationMessage(runtime, "Runtime bridge invoke verification failed.");
+        }
+        if ("WARN".equalsIgnoreCase(runtimeStatus)) {
+            if (runtime.isEmpty() && request != null && StringUtils.hasText(request.frontendUrl())) {
+                return "FrontendUrl was provided but authenticated browser bridge invoke was not confirmed.";
+            }
+            return readRuntimeVerificationMessage(runtime, "Runtime browser verification reported WARN.");
+        }
+        return readRuntimeVerificationMessage(runtime,
+                "Runtime browser verification skipped: no FrontendUrl, browser session, login state, or bridge invoke probe.");
+    }
+
+    private static String readRuntimeVerificationMessage(Map<String, Object> runtimeVerification, String fallback) {
+        if (runtimeVerification == null || runtimeVerification.isEmpty()) {
+            return fallback;
+        }
+        Object message = runtimeVerification.get("message");
+        return message != null && StringUtils.hasText(String.valueOf(message)) ? String.valueOf(message) : fallback;
+    }
+
+    public static List<PageAssistantFileEvidenceView> enrichFileEvidence(List<PageAssistantFileEvidence> files) {
+        return normalizeFileEvidence(files).stream()
+                .map(AiAccessSessionService::toFileEvidenceView)
+                .toList();
+    }
+
+    public static String describeFileEvidenceQuality(List<PageAssistantFileEvidenceView> files) {
+        if (files == null || files.isEmpty()) {
+            return "No file evidence was reported.";
+        }
+        long hashMissing = files.stream().filter(file -> "HASH_MISSING".equalsIgnoreCase(file.validationStatus())).count();
+        if (hashMissing > 0) {
+            return "File evidence recorded for " + files.size() + " path(s); "
+                    + hashMissing + " path(s) are path-only without sha256 (hash missing / local verify recommended).";
+        }
+        return "File evidence recorded for " + files.size() + " path(s) with sha256 verification.";
+    }
+
+    private static PageAssistantFileEvidenceView toFileEvidenceView(PageAssistantFileEvidence file) {
+        boolean exists = file.exists() == null || Boolean.TRUE.equals(file.exists());
+        boolean hashVerified = StringUtils.hasText(file.sha256());
+        String validationStatus = hashVerified ? "VERIFIED" : "HASH_MISSING";
+        String validationMessage = hashVerified
+                ? "Local file hash captured."
+                : "Path-only evidence without sha256; run helper verify for hash missing / local verify recommended.";
+        return new PageAssistantFileEvidenceView(
+                file.path(),
+                file.role(),
+                exists,
+                file.sha256(),
+                validationStatus,
+                validationMessage);
+    }
+
+    private Map<String, Object> fileEvidenceToMap(PageAssistantFileEvidenceView file) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("path", file.path());
+        map.put("role", file.role());
+        map.put("exists", file.exists());
+        map.put("sha256", file.sha256());
+        map.put("validationStatus", file.validationStatus());
+        map.put("validationMessage", file.validationMessage());
+        return map;
+    }
+
+    public static List<PageAssistantFileEvidence> normalizeFileEvidence(List<PageAssistantFileEvidence> files) {
+        if (files == null || files.isEmpty()) {
+            return List.of();
+        }
+        return files.stream()
+                .filter(file -> file != null && StringUtils.hasText(file.path()))
+                .map(file -> new PageAssistantFileEvidence(
+                        file.path().trim(),
+                        StringUtils.hasText(file.role()) ? file.role().trim() : "unknown",
+                        file.exists(),
+                        StringUtils.hasText(file.sha256()) ? file.sha256().trim() : null))
+                .toList();
+    }
+
+    private void applyBrowserVerifyPlatformCheck(AiAccessStepEntity step,
+                                                 String staticStatus,
+                                                 String staticMessage,
+                                                 String runtimeStatus,
+                                                 String runtimeMessage,
+                                                 Map<String, Object> runtimeEvidence) {
+        Map<String, Object> platformEvidence = new LinkedHashMap<>();
+        platformEvidence.put("browserStatic", Map.of("status", staticStatus, "message", staticMessage));
+        Map<String, Object> browserRuntime = new LinkedHashMap<>(runtimeEvidence == null ? Map.of() : runtimeEvidence);
+        if (!browserRuntime.containsKey("status")) {
+            browserRuntime.put("status", runtimeStatus);
+        }
+        if (!browserRuntime.containsKey("message")) {
+            browserRuntime.put("message", runtimeMessage);
+        }
+        platformEvidence.put("browserRuntime", browserRuntime);
+        mergePlatformCheck(step, platformEvidence, combineBrowserVerifyStatus(staticStatus, runtimeStatus),
+                "static=" + staticStatus + " (static only); runtime=" + runtimeStatus);
+    }
+
+    private void mergePlatformCheck(AiAccessStepEntity step,
+                                    Map<String, Object> platformEvidence,
+                                    String platformStatus,
+                                    String platformMessage) {
+        if (isExternalReport(step)) {
+            Map<String, Object> evidence = new LinkedHashMap<>(readMap(step.getEvidenceJson()));
+            evidence.put("platformCheck", platformEvidence);
+            step.setEvidenceJson(writeJson(evidence));
+            return;
+        }
+        step.setStatus(platformStatus);
+        step.setMessage(platformMessage);
+        step.setEvidenceJson(writeJson(platformEvidence));
+        step.setReportedBy("platform-page-assistant-check");
+    }
+
+    private static boolean isExternalReport(AiAccessStepEntity step) {
+        return StringUtils.hasText(step.getReportedBy())
+                && !"platform-page-assistant-check".equalsIgnoreCase(step.getReportedBy())
+                && !"platform-check".equalsIgnoreCase(step.getReportedBy());
+    }
+
     private static String verificationStatus(Map<String, Object> verification, String key, String fallback) {
         Object value = verificationEvidence(verification, key, Map.of()).get("status");
         if (!StringUtils.hasText(value == null ? null : String.valueOf(value))) {
@@ -614,25 +881,35 @@ public class AiAccessSessionService {
         applyTarget(session, pageKey, route, actionKeys.isEmpty() ? Map.of() : Map.of("actionKeys", actionKeys));
     }
 
+    private static String resolvePageAssistantOverallStatus(List<PageAssistantCheckItem> checks) {
+        if (checks.stream().anyMatch(check -> "FAIL".equalsIgnoreCase(check.status()))) {
+            return "FAIL";
+        }
+        if (checks.stream().anyMatch(check -> "WARN".equalsIgnoreCase(check.status())
+                || "SKIPPED".equalsIgnoreCase(check.status()))) {
+            return "WARN";
+        }
+        return "PASS";
+    }
+
+    private void touchPlatformCheckStep(AiAccessStepEntity step) {
+        LocalDateTime now = LocalDateTime.now();
+        if (step.getStartedAt() == null) {
+            step.setStartedAt(now);
+        }
+        if (isCompleted(step.getStatus())) {
+            step.setCompletedAt(now);
+        }
+        step.setUpdatedAt(now);
+    }
+
     private void applyPlatformPageAssistantCheck(AiAccessStepEntity step, PageAssistantCheckItem item) {
-        boolean keepAiReportedPass = "PASS".equalsIgnoreCase(step.getStatus())
-                && "WARN".equalsIgnoreCase(item.status())
-                && !"platform-page-assistant-check".equalsIgnoreCase(step.getReportedBy());
         Map<String, Object> platformEvidence = Map.of(
                 "label", item.label(),
                 "status", item.status(),
                 "message", item.message(),
                 "evidence", item.evidence() == null ? "" : item.evidence());
-        if (keepAiReportedPass) {
-            Map<String, Object> evidence = new LinkedHashMap<>(readMap(step.getEvidenceJson()));
-            evidence.put("platformCheck", platformEvidence);
-            step.setEvidenceJson(writeJson(evidence));
-            return;
-        }
-        step.setStatus(item.status());
-        step.setMessage(item.message());
-        step.setEvidenceJson(writeJson(platformEvidence));
-        step.setReportedBy("platform-page-assistant-check");
+        mergePlatformCheck(step, platformEvidence, item.status(), item.message());
     }
 
     private AccessSessionView persistProgress(AiAccessSessionEntity session, List<AiAccessStepEntity> steps) {
@@ -984,7 +1261,9 @@ public class AiAccessSessionService {
     public record PageAssistantCheckRequest(
             String pageKey,
             String routePattern,
-            List<String> actionKeys
+            List<String> actionKeys,
+            String frontendUrl,
+            Map<String, Object> runtimeVerification
     ) {
     }
 
@@ -1006,6 +1285,7 @@ public class AiAccessSessionService {
             String frameworkVersion,
             String bridgeGlobal,
             Boolean replaceActions,
+            @JsonDeserialize(using = PageAssistantFileEvidenceListDeserializer.class)
             List<PageAssistantFileEvidence> files,
             List<PageActionCatalogContracts.PageActionDefinitionRequest> actions,
             Map<String, Object> verification,
@@ -1013,9 +1293,30 @@ public class AiAccessSessionService {
     ) {
     }
 
+    public static PageAssistantCheckRequest buildCheckRequestFromRegister(PageAssistantPageRegisterRequest request,
+                                                                          List<String> actionKeys) {
+        Map<String, Object> runtime = extractRuntimeVerification(request == null ? null : request.verification());
+        return new PageAssistantCheckRequest(
+                request == null ? null : request.pageKey(),
+                request == null ? null : request.routePattern(),
+                actionKeys,
+                extractFrontendUrl(new PageAssistantCheckRequest(null, null, null, null, runtime), runtime),
+                runtime.isEmpty() ? null : runtime);
+    }
+
+    public record PageAssistantFileEvidenceView(
+            String path,
+            String role,
+            Boolean exists,
+            String sha256,
+            String validationStatus,
+            String validationMessage
+    ) {
+    }
+
     public record PageAssistantPageRegisterSessionResult(
             AccessSessionView session,
-            List<PageAssistantFileEvidence> fileEvidence
+            List<PageAssistantFileEvidenceView> fileEvidence
     ) {
     }
 

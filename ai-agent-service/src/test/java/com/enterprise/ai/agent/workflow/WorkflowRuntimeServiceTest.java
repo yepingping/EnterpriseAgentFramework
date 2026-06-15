@@ -124,6 +124,23 @@ class WorkflowRuntimeServiceTest {
         assertEquals("agent-1", runtimeGraph.runtimeContext().getExtra().get("entryAgentId"));
     }
 
+    @Test
+    void runtimeContextFallsBackToNodeModelInstanceFromActiveVersion() throws Exception {
+        WorkflowRuntimeService service = new WorkflowRuntimeService(mock(AgentRouter.class), new WorkflowRuntimeGraphAdapter(new ObjectMapper()));
+        AgentEntryEntity agent = agent();
+        agent.setModelInstanceId(null);
+        WorkflowDefinitionEntity workflow = workflow("{\"code\":\"draft\",\"nodes\":[{\"id\":\"answer\",\"type\":\"LLM\"}],\"entry\":\"answer\"}");
+        workflow.setDefaultModelInstanceId(null);
+
+        WorkflowRuntimeGraphAdapter.RuntimeGraph runtimeGraph = service.toRuntimeGraph(
+                agent,
+                workflow,
+                activeVersion("v1", "{\"code\":\"active\",\"nodes\":[{\"id\":\"answer\",\"type\":\"LLM\",\"config\":{\"modelInstanceId\":\"node-llm-1\"}}],\"entry\":\"answer\"}"),
+                Map.of("bindingId", 7L));
+
+        assertEquals("node-llm-1", runtimeGraph.runtimeContext().getModelInstanceId());
+    }
+
     private AgentEntryEntity agent() {
         AgentEntryEntity agent = new AgentEntryEntity();
         agent.setId("agent-1");

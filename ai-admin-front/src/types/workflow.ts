@@ -17,7 +17,7 @@ import type {
 } from './agent'
 import type { UiRequestPayload } from './interaction'
 
-export type AgentEntryKind = 'PROJECT_ENTRY' | 'GLOBAL_EMBED' | 'PAGE_ENTRY' | string
+export type AgentEntryKind = 'PROJECT_ENTRY' | 'PAGE_COPILOT' | 'GLOBAL_EMBED' | 'PAGE_ENTRY' | string
 export type AgentEntryVisibility = 'PROJECT' | 'PRIVATE' | 'PUBLIC' | string
 export type WorkflowType = 'CHAT' | 'SDK_GRAPH' | 'PAGE_ACTION' | string
 export type WorkflowRuntimeType = AgentRuntimeType | string
@@ -250,4 +250,21 @@ export interface AgentWorkflowResolveRequest {
   route?: string
   actionKey?: string
   intentType?: string
+}
+
+export interface PageAssistantWorkflowBindRequest {
+  projectId?: number | null
+  projectCode?: string | null
+  agentId?: string | null
+  pageKey: string
+  routePattern?: string | null
+  actionKeys?: string[]
+}
+
+export interface PageAssistantWorkflowBindingResult {
+  agentId: string
+  agentKeySlug: string
+  workflowId: string
+  workflowKeySlug: string
+  bindingId: number
 }

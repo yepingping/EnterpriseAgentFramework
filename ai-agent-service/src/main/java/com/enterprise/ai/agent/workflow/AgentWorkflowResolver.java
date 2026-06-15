@@ -33,7 +33,9 @@ public class AgentWorkflowResolver {
                 .map(binding -> new RankedBinding(binding, rank(binding, request)))
                 .filter(ranked -> ranked.rank() > 0)
                 .max(Comparator.comparingInt(RankedBinding::rank)
-                        .thenComparingInt(ranked -> priority(ranked.binding())))
+                        .thenComparingInt(ranked -> priority(ranked.binding()))
+                        .thenComparing(ranked -> updatedAtKey(ranked.binding()))
+                        .thenComparingLong(ranked -> idKey(ranked.binding())))
                 .map(RankedBinding::binding);
     }
 
@@ -74,6 +76,14 @@ public class AgentWorkflowResolver {
 
     private int priority(AgentWorkflowBindingEntity binding) {
         return binding.getPriority() == null ? 0 : binding.getPriority();
+    }
+
+    private String updatedAtKey(AgentWorkflowBindingEntity binding) {
+        return binding.getUpdatedAt() == null ? "" : binding.getUpdatedAt().toString();
+    }
+
+    private long idKey(AgentWorkflowBindingEntity binding) {
+        return binding.getId() == null ? 0L : binding.getId();
     }
 
     private record RankedBinding(AgentWorkflowBindingEntity binding, int rank) {

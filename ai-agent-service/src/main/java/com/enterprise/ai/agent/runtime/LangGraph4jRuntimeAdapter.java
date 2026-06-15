@@ -887,7 +887,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         LocalDateTime startedAt = LocalDateTime.now();
         Map<String, Object> config = safeMap(node.getConfig());
         String modelInstanceId = firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), state.value(MODEL_INSTANCE_ID, ""));
-        String systemPrompt = firstNonBlank(asString(config.get(SYSTEM_PROMPT)), state.value(SYSTEM_PROMPT, ""));
+        String systemPrompt = firstNonBlank(asString(config.get(SYSTEM_PROMPT)), asString(config.get("prompt")), state.value(SYSTEM_PROMPT, ""));
         String configuredPrompt = asString(config.get(CONFIG_USER_PROMPT));
         String userMessage = configuredPrompt.isBlank() ? renderModelInput(state) : renderTemplate(state, configuredPrompt);
         List<ModelServiceClient.ModelChatRequest.ChatMessage> messages = buildLlmMessages(state, config, systemPrompt, userMessage);
@@ -1384,6 +1384,12 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             if (isBlankValue(value) && field.containsKey("defaultValue")) {
                 value = field.get("defaultValue");
             }
+            if (isBlankValue(value)) {
+                value = userInputFieldSourceValue(state, field);
+            }
+            if (isBlankValue(value)) {
+                value = conventionalUserInputFallback(state, name);
+            }
             if (Boolean.TRUE.equals(field.get("required")) && isBlankValue(value)) {
                 throw new IllegalArgumentException("Required user input field is missing: " + name);
             }
@@ -1399,6 +1405,20 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         update.put(nodeOutputKey(node.getId()), params);
         putOutputAlias(update, node, params);
         return update;
+    }
+
+    private Object userInputFieldSourceValue(LangGraphState state, Map<String, Object> field) {
+        String source = firstNonBlank(
+                asString(field.get("source")),
+                asString(field.get(CONFIG_SOURCE_EXPRESSION)));
+        return source == null ? null : resolveExpression(state, source);
+    }
+
+    private Object conventionalUserInputFallback(LangGraphState state, String name) {
+        if (!"question".equalsIgnoreCase(name) && !"message".equalsIgnoreCase(name) && !"input".equalsIgnoreCase(name)) {
+            return null;
+        }
+        return state.value(INPUT).orElse(null);
     }
 
     private Map<String, Object> executeInteraction(LangGraphState state, GraphSpec.Node node) {
@@ -2641,7 +2661,7 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         if (isWorkflowSourceType(runtimeContext.getSourceType())) {
             state.put("workflowId", nullToEmpty(runtimeContext.getSourceId()));
         }
-        state.put(SYSTEM_PROMPT, firstNonBlank(asString(config.get(SYSTEM_PROMPT)), nullToEmpty(runtimeContext.getSystemPrompt())));
+        state.put(SYSTEM_PROMPT, firstNonBlank(asString(config.get(SYSTEM_PROMPT)), asString(config.get("prompt")), nullToEmpty(runtimeContext.getSystemPrompt())));
         state.put(MODEL_INSTANCE_ID, firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), nullToEmpty(runtimeContext.getModelInstanceId())));
         return state;
     }

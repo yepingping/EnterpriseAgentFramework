@@ -485,6 +485,80 @@ class EmbedChatControllerAuditTest {
     }
 
     @Test
+    void sendMessageAcceptsContentAliasFromEmbedClients() throws Exception {
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        EmbedSessionService sessionService = mock(EmbedSessionService.class);
+        AgentRouter agentRouter = mock(AgentRouter.class);
+        EmbedWorkflowRuntimeService embedWorkflowRuntimeService = mock(EmbedWorkflowRuntimeService.class);
+        WorkflowRuntimeService workflowRuntimeService = mock(WorkflowRuntimeService.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        EmbedChatController controller = new EmbedChatController(
+                mock(RegistrySecurityService.class),
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                sessionService,
+                mock(AgentEntryService.class),
+                agentRouter,
+                objectMapper,
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class),
+                embedWorkflowRuntimeService,
+                workflowRuntimeService);
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setProjectCode("orders");
+        claims.setAgentId("global-agent");
+        claims.setExternalUserId("u-1");
+        when(tokenService.verify("token")).thenReturn(claims);
+        EmbedSessionEntity session = new EmbedSessionEntity();
+        session.setSessionId("embed-session-1");
+        session.setAppId("orders");
+        session.setProjectCode("orders");
+        session.setAgentId("global-agent");
+        session.setPageKey("orders.list");
+        session.setRoute("/orders");
+        session.setExternalUserId("u-1");
+        when(sessionService.requireActiveSession("embed-session-1", claims)).thenReturn(session);
+
+        AgentEntryEntity agent = new AgentEntryEntity();
+        agent.setId("global-agent");
+        agent.setKeySlug("orders-global-ai");
+        agent.setProjectCode("orders");
+        AgentWorkflowBindingEntity binding = new AgentWorkflowBindingEntity();
+        binding.setId(7L);
+        binding.setBindingType("PAGE");
+        WorkflowDefinitionEntity workflow = new WorkflowDefinitionEntity();
+        workflow.setId("workflow-1");
+        workflow.setKeySlug("orders-list-assistant");
+        workflow.setWorkflowType("PAGE_ASSISTANT");
+        WorkflowVersionEntity activeVersion = new WorkflowVersionEntity();
+        activeVersion.setId(3L);
+        activeVersion.setWorkflowId("workflow-1");
+        activeVersion.setVersion("v3");
+
+        when(embedWorkflowRuntimeService.resolveRunnableWorkflowContext(session, null))
+                .thenReturn(Optional.of(new EmbedWorkflowRuntimeService.RunnableWorkflowContext(
+                        agent, binding, workflow, activeVersion)));
+        when(workflowRuntimeService.execute(any(WorkflowRuntimeRequest.class)))
+                .thenReturn(AgentResult.builder().answer("ok").metadata(Map.of()).build());
+
+        EmbedChatController.EmbedChatMessageRequest request = objectMapper.readValue(
+                "{\"content\":\"show orders\"}",
+                EmbedChatController.EmbedChatMessageRequest.class);
+        ResponseEntity<ApiResult<ChatResponse>> response = controller.sendMessage(
+                "embed-session-1",
+                "Bearer token",
+                request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        ArgumentCaptor<WorkflowRuntimeRequest> runtimeRequest = ArgumentCaptor.forClass(WorkflowRuntimeRequest.class);
+        verify(workflowRuntimeService).execute(runtimeRequest.capture());
+        assertEquals("show orders", runtimeRequest.getValue().getMessage());
+        verify(agentRouter, never()).executeByProfile(any(), any(), any(), any(), anyList(), any());
+    }
+
+    @Test
     void sendMessageRejectsPageActionMissingFromCurrentSessionBridgeActions() {
         EmbedTokenService tokenService = mock(EmbedTokenService.class);
         EmbedSessionService sessionService = mock(EmbedSessionService.class);

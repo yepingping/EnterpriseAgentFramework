@@ -291,7 +291,7 @@
                 </button>
               </div>
 
-              <el-form-item label="Agent 名称">
+              <el-form-item label="Workflow 名称">
                 <el-input v-model="agentName" placeholder="例如：班组档案页面助手" />
               </el-form-item>
               <el-form-item label="模型实例">
@@ -342,15 +342,15 @@
           </el-form>
 
           <div class="draft-generate-row">
-            <el-button type="primary" :icon="MagicStick" :loading="generating" @click="generateDraft">生成 Studio 草稿</el-button>
+            <el-button type="primary" :icon="MagicStick" :loading="generating" @click="generateDraft">生成 Workflow 草稿</el-button>
           </div>
         </div>
 
-        <div v-else :key="'studio'" class="step-screen">
+        <div v-else-if="displayedStep === 'confirm'" :key="'confirm'" class="step-screen">
           <div class="panel-head">
             <div>
               <span class="step-kicker">步骤 5</span>
-              <h2>进入 Agent Studio</h2>
+              <h2>确认草稿</h2>
             </div>
           </div>
 
@@ -364,30 +364,42 @@
               </div>
               <div class="studio-ready-copy">
                 <span>{{ draftIssueCount ? '需要复核' : '草稿已就绪' }}</span>
-                <strong>{{ draftIssueCount ? '草稿仍有校验问题' : '可以进入 Agent Studio' }}</strong>
+                <strong>{{ draftIssueCount ? '草稿仍有校验问题' : '确认后将创建 PAGE_ASSISTANT Workflow' }}</strong>
                 <p>
                   {{ draftIssueCount
-                    ? '请返回配置或重新生成，修复后再进入 Studio。'
-                    : '下一步检查画布结构、参数映射和发布校验，再保存为正式智能体。' }}
+                    ? '请返回配置或重新生成，修复后再创建 Workflow。'
+                    : '创建 Workflow 后将继续挂载到页面副驾驶 Agent，再进入 Workflow Studio。' }}
                 </p>
               </div>
               <div class="studio-ready-state">
-                <em>{{ draftIssueCount ? `${draftIssueCount} 个问题` : 'Ready' }}</em>
+                <em>{{ draftIssueCount ? `${draftIssueCount} 个问题` : 'Preview' }}</em>
               </div>
             </div>
 
             <div class="studio-ready-metrics">
               <div>
-                <span>页面</span>
-                <strong>{{ selectedPage?.name || selectedPageKey || '未选择' }}</strong>
+                <span>Workflow 名称</span>
+                <strong>{{ pageAssistantWorkflowName() }}</strong>
+              </div>
+              <div>
+                <span>pageKey</span>
+                <strong>{{ selectedPageKey || '未选择' }}</strong>
+              </div>
+              <div>
+                <span>routePattern</span>
+                <strong>{{ selectedPage?.routePattern || '未设置' }}</strong>
+              </div>
+              <div>
+                <span>已选动作</span>
+                <strong>{{ selectedActions.map((item) => item.actionKey).join('、') || '无' }}</strong>
               </div>
               <div>
                 <span>流程结构</span>
                 <strong>{{ draftNodeCount }} 节点 / {{ draftEdgeCount }} 连线</strong>
               </div>
               <div>
-                <span>资源</span>
-                <strong>{{ selectedActions.length }} 动作 · {{ selectedApiAssets.length }} API</strong>
+                <span>模型</span>
+                <strong>{{ selectedModelLabel }}</strong>
               </div>
             </div>
 
@@ -399,9 +411,9 @@
               <button type="button" class="secondary" @click="selectStep('draft')">
                 返回配置
               </button>
-              <button type="button" class="primary" :disabled="Boolean(draftIssueCount)" @click="openStudioDraft">
-                <el-icon><Connection /></el-icon>
-                进入 Agent Studio
+              <button type="button" class="primary" :disabled="Boolean(draftIssueCount) || creatingWorkflow" @click="confirmCreateWorkflow">
+                <el-icon><Finished /></el-icon>
+                {{ creatingWorkflow ? '创建中...' : '确认创建 Workflow' }}
               </button>
             </div>
           </div>
@@ -410,8 +422,133 @@
               <el-icon><MagicStick /></el-icon>
             </div>
             <strong>还没有生成草稿</strong>
-            <span>先完成配置并生成 GraphSpec，再进入 Agent Studio。</span>
+            <span>先完成配置并生成 GraphSpec 预览，再确认创建 Workflow。</span>
             <button type="button" @click="selectStep('draft')">去生成草稿</button>
+          </div>
+        </div>
+
+        <div v-else-if="displayedStep === 'bind'" :key="'bind'" class="step-screen">
+          <div class="panel-head">
+            <div>
+              <span class="step-kicker">步骤 6</span>
+              <h2>挂载智能体</h2>
+            </div>
+          </div>
+
+          <div v-if="createdWorkflowId" class="studio-ready">
+            <p class="bind-intro">
+              页面副驾驶 Agent 是业务系统统一 AI 按钮的入口。这里会把当前页面助手 Workflow 挂载到它，让嵌入式对话在该页面可调用这些动作。
+            </p>
+
+            <div class="studio-ready-metrics">
+              <div>
+                <span>Agent 名称</span>
+                <strong>{{ pageCopilotAgent?.name || '页面副驾驶 Agent' }}</strong>
+              </div>
+              <div>
+                <span>keySlug</span>
+                <strong>{{ pageCopilotAgent?.keySlug || `${projectCode}-page-copilot` }}</strong>
+              </div>
+              <div>
+                <span>agentKind</span>
+                <strong>{{ pageCopilotAgent?.agentKind || 'PAGE_COPILOT' }}</strong>
+              </div>
+              <div>
+                <span>状态</span>
+                <strong>{{ pageCopilotAgent ? '已存在' : '将自动创建/复用' }}</strong>
+              </div>
+              <div>
+                <span>bindingType</span>
+                <strong>PAGE</strong>
+              </div>
+              <div>
+                <span>pageKey</span>
+                <strong>{{ selectedPageKey || '未选择' }}</strong>
+              </div>
+              <div>
+                <span>routePattern</span>
+                <strong>{{ selectedPage?.routePattern || '未设置' }}</strong>
+              </div>
+              <div>
+                <span>actionKeys</span>
+                <strong>{{ selectedActions.map((item) => item.actionKey).join('、') || '无' }}</strong>
+              </div>
+            </div>
+
+            <div class="studio-ready-actions">
+              <button type="button" class="secondary" @click="selectStep('confirm')">
+                返回确认草稿
+              </button>
+              <button type="button" class="primary" :disabled="bindingAgent" @click="bindToPageCopilot">
+                <el-icon><Connection /></el-icon>
+                {{ bindingAgent ? '挂载中...' : '挂载到页面副驾驶 Agent' }}
+              </button>
+            </div>
+          </div>
+          <div v-else class="studio-ready-empty">
+            <strong>还没有创建 Workflow</strong>
+            <span>请先在上一步确认并创建 PAGE_ASSISTANT Workflow。</span>
+            <button type="button" @click="selectStep('confirm')">去确认草稿</button>
+          </div>
+        </div>
+
+        <div v-else :key="'studio'" class="step-screen">
+          <div class="panel-head">
+            <div>
+              <span class="step-kicker">步骤 7</span>
+              <h2>进入 Workflow Studio</h2>
+            </div>
+          </div>
+
+          <div v-if="bindingResult" class="studio-ready">
+            <div class="studio-ready-hero">
+              <div class="studio-ready-icon">
+                <el-icon><Finished /></el-icon>
+              </div>
+              <div class="studio-ready-copy">
+                <span>挂载完成</span>
+                <strong>页面助手 Workflow 已绑定到页面副驾驶 Agent</strong>
+                <p>下一步进入 Workflow Studio，检查画布结构、参数映射和发布校验。</p>
+              </div>
+              <div class="studio-ready-state">
+                <em>Bound</em>
+              </div>
+            </div>
+
+            <div class="studio-ready-metrics">
+              <div>
+                <span>agentId</span>
+                <strong>{{ bindingResult.agentId }}</strong>
+              </div>
+              <div>
+                <span>agentKeySlug</span>
+                <strong>{{ bindingResult.agentKeySlug }}</strong>
+              </div>
+              <div>
+                <span>workflowId</span>
+                <strong>{{ bindingResult.workflowId }}</strong>
+              </div>
+              <div>
+                <span>workflowKeySlug</span>
+                <strong>{{ bindingResult.workflowKeySlug }}</strong>
+              </div>
+              <div>
+                <span>bindingId</span>
+                <strong>{{ bindingResult.bindingId }}</strong>
+              </div>
+            </div>
+
+            <div class="studio-ready-actions">
+              <button type="button" class="primary" @click="enterWorkflowStudio">
+                <el-icon><Connection /></el-icon>
+                进入 Workflow Studio
+              </button>
+            </div>
+          </div>
+          <div v-else class="studio-ready-empty">
+            <strong>还没有完成挂载</strong>
+            <span>请先在“挂载智能体”步骤完成 Agent binding。</span>
+            <button type="button" @click="selectStep('bind')">去挂载智能体</button>
           </div>
         </div>
         </section>
@@ -615,7 +752,7 @@ import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Close, Connection, DocumentCopy, Finished, MagicStick, Operation, Plus, Search, Warning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { generateWorkflowDraft } from '@/api/workflow'
+import { bindPageAssistantWorkflow, createWorkflow, generateWorkflowDraft, listAgentEntries, saveWorkflowStudio } from '@/api/workflow'
 import { listApiAssets } from '@/api/apiAsset'
 import {
   declarePageActionCatalog,
@@ -633,14 +770,13 @@ import {
   getScanProjects,
   runPageAssistantAccessSessionChecks,
 } from '@/api/scanProject'
-import type { WorkflowDraftGenerationResult, WorkflowDraftResource } from '@/types/workflow'
+import type { AgentEntry, WorkflowDefinitionDraft, WorkflowDraftGenerationResult, WorkflowDraftResource, PageAssistantWorkflowBindingResult } from '@/types/workflow'
 import type { ApiAssetItem } from '@/types/apiAsset'
 import type { ModelInstance } from '@/types/model'
 import type { AiAccessSession, PageAssistantOnboardingManifest, PageAssistantSessionRequest, PageAssistantSessionSummary, ScanProject } from '@/types/scanProject'
 import { buildPageAssistantOnboardingPrompt } from './pageAssistantOnboardingPrompt'
 
-const STUDIO_DRAFT_KEY = 'reachai:page-assistant-draft'
-type WizardStepKey = 'connect' | 'page' | 'action' | 'draft' | 'studio'
+type WizardStepKey = 'connect' | 'page' | 'action' | 'draft' | 'confirm' | 'bind' | 'studio'
 type AssistantGoal = 'query' | 'operate' | 'queryThenAction'
 
 const route = useRoute()
@@ -666,7 +802,12 @@ const agentName = ref('')
 const requirement = ref('')
 const loading = ref(false)
 const generating = ref(false)
+const creatingWorkflow = ref(false)
+const bindingAgent = ref(false)
 const draftPreview = ref<WorkflowDraftGenerationResult | null>(null)
+const createdWorkflowId = ref('')
+const bindingResult = ref<PageAssistantWorkflowBindingResult | null>(null)
+const pageCopilotAgent = ref<AgentEntry | null>(null)
 const manualDialogVisible = ref(false)
 const manualSubmitting = ref(false)
 const aiPromptDialogVisible = ref(false)
@@ -709,10 +850,13 @@ const activeStep = computed(() => {
   if (!pageRegistry.value.length && !pageActions.value.length) return 'connect'
   if (!selectedPageKey.value) return 'page'
   if (!selectedActions.value.length) return 'action'
-  return draftPreview.value ? 'studio' : 'draft'
+  if (!draftPreview.value) return 'draft'
+  if (!createdWorkflowId.value) return 'confirm'
+  if (!bindingResult.value) return 'bind'
+  return 'studio'
 })
 const displayedStep = computed(() => focusedStep.value || activeStep.value)
-const stepKeys: WizardStepKey[] = ['connect', 'page', 'action', 'draft', 'studio']
+const stepKeys: WizardStepKey[] = ['connect', 'page', 'action', 'draft', 'confirm', 'bind', 'studio']
 const displayedStepIndex = computed(() => stepKeys.indexOf(displayedStep.value))
 const canGoPrev = computed(() => displayedStepIndex.value > 0)
 const canGoNext = computed(() => displayedStepIndex.value >= 0 && displayedStepIndex.value < stepKeys.length - 1)
@@ -724,12 +868,18 @@ const selectedPage = computed(() =>
 const draftNodeCount = computed(() => draftPreview.value?.graphSpec?.nodes?.length || 0)
 const draftEdgeCount = computed(() => draftPreview.value?.graphSpec?.edges?.length || 0)
 const draftIssueCount = computed(() => draftPreview.value?.validationErrors?.length || 0)
+const selectedModelLabel = computed(() => {
+  const model = modelOptions.value.find((item) => item.id === modelInstanceId.value)
+  return model ? modelOptionLabel(model) : modelInstanceId.value || '未选择'
+})
 const steps = computed(() => [
   { index: 1, key: 'connect' as const, title: '接入准备', desc: 'AI 或手动接入页面动作', done: pageRegistry.value.length > 0 || pageActions.value.length > 0 },
   { index: 2, key: 'page' as const, title: '选择页面', desc: selectedPage.value?.name || selectedPageKey.value || '定位业务页面', done: Boolean(selectedPageKey.value) },
   { index: 3, key: 'action' as const, title: '选择动作', desc: '声明可执行能力', done: selectedActions.value.length > 0 },
   { index: 4, key: 'draft' as const, title: '生成草稿', desc: '构建 GraphSpec', done: Boolean(draftPreview.value) },
-  { index: 5, key: 'studio' as const, title: '进入 Studio', desc: '预览保存发布', done: false },
+  { index: 5, key: 'confirm' as const, title: '确认草稿', desc: '创建 Workflow', done: Boolean(createdWorkflowId.value) },
+  { index: 6, key: 'bind' as const, title: '挂载智能体', desc: '绑定 PAGE_COPILOT', done: Boolean(bindingResult.value) },
+  { index: 7, key: 'studio' as const, title: '进入 Studio', desc: '预览保存发布', done: false },
 ])
 const stats = computed(() => [
   { key: 'page', icon: '页', label: '页面', value: String(pageRegistry.value.length) },
@@ -787,10 +937,14 @@ const aiCodingAccessState = computed(() => {
 const pageAssistantManifestUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.manifestUrl) || '')
 const pageAssistantRegisterPageUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.registerPageUrl) || '')
 const pageAssistantScaffoldCommand = computed(() => {
+  const fromManifest = pageAssistantManifest.value?.scaffold?.scaffoldCommand
+  if (fromManifest) return fromManifest
   const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
   return `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "${manifestUrl}" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
 })
 const pageAssistantVerifyCommand = computed(() => {
+  const fromManifest = pageAssistantManifest.value?.scaffold?.verifyCommand
+  if (fromManifest) return fromManifest
   const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
   const routePattern = selectedPage.value?.routePattern || '<目标路由>'
   const pageKey = selectedPage.value?.pageKey || selectedPageKey.value || '<pageKey>'
@@ -828,8 +982,13 @@ const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardin
     catalogSyncUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.catalogSyncUrl),
     checksRunUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.checksRunUrl),
     registerPageUrl: pageAssistantRegisterPageUrlWithKey.value,
+    skillPackageUrl: pageAssistantManifest.value?.endpoints.skillPackageUrl || pageAssistantManifest.value?.scaffold?.skillPackageUrl,
+    scriptDownloadUrl: pageAssistantManifest.value?.endpoints.scriptDownloadUrl || pageAssistantManifest.value?.scaffold?.scriptDownloadUrl,
+    helperScriptPath: pageAssistantManifest.value?.scaffold?.helperScriptPath || 'scripts/reachai-page-assistant.ps1',
     scaffoldCommand: pageAssistantScaffoldCommand.value,
     verifyCommand: pageAssistantVerifyCommand.value,
+    bridgeApiGlobal: pageAssistantManifest.value?.pageActionContract?.bridgeApi?.global
+      || `window.${pageAssistantManifest.value?.pageActionContract?.bridgeGlobal || '__REACHAI_PAGE_BRIDGE__'}`,
   },
 }))
 
@@ -872,6 +1031,19 @@ watch([selectedPageKey, pageAssistantActionKeys, aiPromptTool], () => {
   }
 })
 
+function clearPersistedWizardState(options: { includePreview?: boolean } = {}) {
+  if (options.includePreview !== false) {
+    draftPreview.value = null
+  }
+  createdWorkflowId.value = ''
+  bindingResult.value = null
+  pageCopilotAgent.value = null
+}
+
+function resetWizardProgressFromDraft() {
+  clearPersistedWizardState()
+}
+
 function actionCount(pageKey: string) {
   return pageActions.value.filter((action) => action.pageKey === pageKey).length
 }
@@ -894,33 +1066,35 @@ function toggleActionSelection(action: PageActionRegistryView) {
   selectedActions.value = isActionSelected(action)
     ? selectedActions.value.filter((item) => actionRowKey(item) !== key)
     : [...selectedActions.value, action]
-  draftPreview.value = null
+  resetWizardProgressFromDraft()
 }
 
 function selectAllFilteredActions() {
   const visibleKeys = new Set(filteredActions.value.map(actionRowKey))
   const kept = selectedActions.value.filter((action) => !visibleKeys.has(actionRowKey(action)))
   selectedActions.value = [...kept, ...filteredActions.value]
-  draftPreview.value = null
+  resetWizardProgressFromDraft()
 }
 
 function clearFilteredActions() {
   const visibleKeys = new Set(filteredActions.value.map(actionRowKey))
   selectedActions.value = selectedActions.value.filter((action) => !visibleKeys.has(actionRowKey(action)))
-  draftPreview.value = null
+  resetWizardProgressFromDraft()
 }
 
 function requiredStepComplete(key: WizardStepKey) {
   if (key === 'page') return Boolean(selectedPageKey.value)
   if (key === 'action') return selectedActions.value.length > 0
   if (key === 'draft') return Boolean(draftPreview.value)
+  if (key === 'confirm') return Boolean(createdWorkflowId.value)
+  if (key === 'bind') return Boolean(bindingResult.value)
   return true
 }
 
 function firstBlockingStep(targetKey: WizardStepKey) {
   const targetIndex = stepKeys.indexOf(targetKey)
   if (targetIndex <= displayedStepIndex.value) return null
-  const requiredKeys: WizardStepKey[] = ['page', 'action', 'draft']
+  const requiredKeys: WizardStepKey[] = ['page', 'action', 'draft', 'confirm', 'bind']
   return requiredKeys.find((key) => stepKeys.indexOf(key) < targetIndex && !requiredStepComplete(key)) || null
 }
 
@@ -970,6 +1144,11 @@ function selectStep(key: WizardStepKey) {
     focusStepCard(blocker, { attention: true })
     return false
   }
+  if (['page', 'action', 'draft'].includes(key) && createdWorkflowId.value && !bindingResult.value) {
+    createdWorkflowId.value = ''
+    pageCopilotAgent.value = null
+    ElMessage.warning('已创建但未挂载的 Workflow 状态已清空，请重新确认创建')
+  }
   focusStepCard(key)
   return true
 }
@@ -1004,7 +1183,7 @@ function selectPage(page: PageRegistryView) {
   selectedPageKey.value = pageKey
   selectedPageIdentity.value = pageIdentity(page)
   selectedActions.value = selectedActions.value.filter((action) => action.pageKey === pageKey)
-  draftPreview.value = null
+  resetWizardProgressFromDraft()
   selectStep('action')
 }
 
@@ -1029,7 +1208,7 @@ async function loadAll() {
       selectedPageIdentity.value = ''
       selectedPageKey.value = ''
       selectedActions.value = []
-      draftPreview.value = null
+      resetWizardProgressFromDraft()
     }
     if (project.value?.id) {
       await loadPageAssistantSessions({ silent: true })
@@ -1052,6 +1231,29 @@ function defaultRequirement() {
     queryThenAction: '先理解用户查询意图，必要时调用后端资产补充信息，再联动页面动作。',
   }[assistantGoal.value]
   return `为${pageName}创建页面助手。${goalText}可用页面动作：${actionNames}。生成 USER_INPUT、参数提取/LLM、PAGE_ACTION 和 ANSWER 组成的可发布草稿。`
+}
+
+function workflowKeyPart(value: unknown, fallback: string) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/\./g, '-')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/[-_]{2,}/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/[^A-Za-z0-9]+$/, '')
+    .toLowerCase()
+  return (normalized || fallback).slice(0, 48)
+}
+
+function pageAssistantWorkflowKeySlug() {
+  const projectPart = workflowKeyPart(projectCode.value, 'project')
+  const pagePart = workflowKeyPart(selectedPageKey.value || selectedPage.value?.pageKey || selectedPage.value?.name, 'page')
+  const suffix = Date.now().toString(36)
+  return `${projectPart}-${pagePart}-page-assistant-${suffix}`.slice(0, 128)
+}
+
+function pageAssistantWorkflowName() {
+  return agentName.value.trim() || `${selectedPage.value?.name || selectedPageKey.value || '页面'}页面助手 Workflow`
 }
 
 function parseJsonObject(text: string, label: string) {
@@ -1351,7 +1553,7 @@ function usePageAssistantAccess(session: PageAssistantSessionSummary) {
   agentName.value = agentName.value || `${page?.name || pageKey}页面助手`
   requirement.value = defaultRequirement()
   selectedPageAssistantAccess.value = null
-  draftPreview.value = null
+  resetWizardProgressFromDraft()
   selectStep(selectedActions.value.length ? 'draft' : 'action')
   ElMessage.success('已带入页面和动作，可继续创建页面助手')
 }
@@ -1378,48 +1580,123 @@ async function generateDraft() {
       currentCanvas: { version: 2, nodes: [], edges: [] },
     })
     draftPreview.value = data
-    selectStep('studio')
+    clearPersistedWizardState({ includePreview: false })
+    selectStep('confirm')
     if (data.validationErrors?.length) {
       ElMessage.warning('草稿已返回，但仍有校验问题，请查看提示')
     } else {
-      ElMessage.success('Studio 草稿已生成')
+      ElMessage.success('Workflow 草稿已生成')
     }
   } catch (error) {
-    ElMessage.error((error as Error).message || '生成 Studio 草稿失败')
+    ElMessage.error((error as Error).message || '生成 Workflow 草稿失败')
   } finally {
     generating.value = false
   }
 }
 
-function openStudioDraft() {
+async function loadPageCopilotAgent() {
+  if (!project.value?.id && !projectCode.value) return
+  try {
+    const { data } = await listAgentEntries({
+      projectId: project.value?.id ?? undefined,
+      projectCode: projectCode.value,
+      agentKind: 'PAGE_COPILOT',
+    })
+    pageCopilotAgent.value = data[0] || null
+  } catch {
+    pageCopilotAgent.value = null
+  }
+}
+
+async function confirmCreateWorkflow() {
   if (!draftPreview.value) return
-  sessionStorage.setItem(STUDIO_DRAFT_KEY, JSON.stringify({
-    form: {
-      name: agentName.value,
+  creatingWorkflow.value = true
+  try {
+    const graphSpecJson = JSON.stringify(draftPreview.value.graphSpec)
+    const canvasJson = JSON.stringify(draftPreview.value.canvasSnapshot || { version: 2, nodes: [], edges: [] })
+    const extraJson = JSON.stringify({
+      pageAssistant: {
+        source: 'PAGE_ASSISTANT_WIZARD',
+        pageKey: selectedPageKey.value,
+        pageName: selectedPage.value?.name || selectedPageKey.value,
+        routePattern: selectedPage.value?.routePattern || '',
+        actionKeys: selectedActions.value.map((item) => item.actionKey),
+      },
+    })
+    const workflowDraft: WorkflowDefinitionDraft = {
+      name: pageAssistantWorkflowName(),
+      keySlug: pageAssistantWorkflowKeySlug(),
       description: requirement.value || defaultRequirement(),
       projectId: project.value?.id ?? null,
       projectCode: projectCode.value,
-      modelInstanceId: modelInstanceId.value,
+      workflowType: 'PAGE_ASSISTANT',
       runtimeType: 'LANGGRAPH4J',
-      agentMode: 'WORKFLOW',
-      intentType: 'PAGE_ASSISTANT',
       graphSpec: draftPreview.value.graphSpec,
-      canvasJson: JSON.stringify(draftPreview.value.canvasSnapshot),
-      extra: {
-        pageAssistant: {
-          source: 'PAGE_ASSISTANT_WIZARD',
-          pageKey: selectedPageKey.value,
-          actionKeys: selectedActions.value.map((item) => item.actionKey),
-        },
-      },
-    },
-    canvasSnapshot: draftPreview.value.canvasSnapshot,
-  }))
-  router.push({
-    path: '/agent/new/studio',
-    query: { projectId: project.value?.id || undefined, intent: 'page-assistant' },
-  })
+      graphSpecJson,
+      canvasJson,
+      defaultModelInstanceId: modelInstanceId.value,
+      status: 'DRAFT',
+      managedBy: 'PAGE_ASSISTANT',
+      extraJson,
+    }
+    const { data: workflow } = await createWorkflow(workflowDraft)
+    await saveWorkflowStudio(workflow.id, { graphSpecJson, canvasJson, extraJson })
+    createdWorkflowId.value = workflow.id
+    bindingResult.value = null
+    await loadPageCopilotAgent()
+    ElMessage.success('页面助手 Workflow 草稿已创建')
+    selectStep('bind')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '创建页面助手 Workflow 失败')
+  } finally {
+    creatingWorkflow.value = false
+  }
 }
+
+async function bindToPageCopilot() {
+  if (!createdWorkflowId.value) return
+  bindingAgent.value = true
+  try {
+    const { data } = await bindPageAssistantWorkflow(createdWorkflowId.value, {
+      projectId: project.value?.id ?? null,
+      projectCode: projectCode.value,
+      agentId: pageCopilotAgent.value?.id ?? null,
+      pageKey: selectedPageKey.value,
+      routePattern: selectedPage.value?.routePattern || '',
+      actionKeys: selectedActions.value.map((item) => item.actionKey).filter(Boolean),
+    })
+    bindingResult.value = data
+    if (!pageCopilotAgent.value) {
+      pageCopilotAgent.value = {
+        id: data.agentId,
+        keySlug: data.agentKeySlug,
+        name: `${project.value?.name || projectCode.value} Page Copilot`,
+        agentKind: 'PAGE_COPILOT',
+      }
+    }
+    ElMessage.success('页面助手 Workflow 已挂载到页面副驾驶 Agent')
+    selectStep('studio')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '挂载页面副驾驶 Agent 失败')
+  } finally {
+    bindingAgent.value = false
+  }
+}
+
+function enterWorkflowStudio() {
+  const workflowId = bindingResult.value?.workflowId || createdWorkflowId.value
+  if (!workflowId) {
+    ElMessage.warning('缺少 Workflow ID，无法进入 Studio')
+    return
+  }
+  router.push(`/workflows/${workflowId}/studio`)
+}
+
+watch(displayedStep, (step) => {
+  if (step === 'bind' && createdWorkflowId.value) {
+    void loadPageCopilotAgent()
+  }
+})
 
 async function copySdkTemplate() {
   try {
@@ -1499,6 +1776,12 @@ onMounted(loadAll)
     opacity: 0.5;
     transform: rotate(-2deg);
   }
+}
+
+.bind-intro {
+  margin: 0 0 18px;
+  color: #53627d;
+  line-height: 1.6;
 }
 
 .page-header,

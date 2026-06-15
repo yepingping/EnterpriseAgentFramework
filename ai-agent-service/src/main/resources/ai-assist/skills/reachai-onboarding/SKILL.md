@@ -43,13 +43,16 @@ Prefer minimal, reviewable changes:
    - Implement the token endpoint server-side so it maps the current business user to `principal.externalUserId`, signs the platform call with the project `appKey/appSecret`, and calls ReachAI `POST /api/embed/token/exchange`.
    - Keep `/api/reachai/embed-token` on the normal business login token path. It reads the current business user and exchanges that identity for a ReachAI embed token.
    - Add the gateway authentication whitelist or dedicated security chain for `/api/reachai/embed/**`. This path carries ReachAI embed tokens, so business OAuth/JWT filters must not validate it as a business login token; forward `Authorization: Bearer <embedToken>` unchanged to ReachAI.
+   - Inspect whitelist/anonymous filters that remove or rewrite JWT headers, such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, `RemoveRequestHeader=Authorization`, or security filters that call `mutate().header("Authorization", "")`. Do not apply that header-clearing behavior to `/api/reachai/embed/**`; skipping business authentication must still preserve the embed token `Authorization` header.
    - If Spring Cloud Gateway proxies `/api/reachai/embed/**`, dedupe duplicate CORS response headers when both the gateway and ReachAI write them. A typical route filter is `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST`.
-   - Use `manifest.agentWorkflow.globalAgentKeySlug` first, then `manifest.embed.defaultAgentKeySlug` or `manifest.embed.defaultAgentId`, as the front-end `agentId`; do not ask the user to invent an Agent id when the manifest provides one.
-   - Treat that Agent as the single global embedded AI entry. Page-specific behavior is selected later by `pageKey` through Agent/Workflow bindings, not by rendering one button per workflow.
+   - Before front-end embed work, call `manifest.agentProvisioning.provisionAgentUrl` when present. It is idempotent and creates or reuses the project `PAGE_COPILOT` Agent plus its default Workflow binding.
+   - Use the provisioning response `agent.keySlug` as the front-end `agentId`. Fall back to `manifest.agentProvisioning.defaultKeySlug`, `manifest.agentWorkflow.globalAgentKeySlug`, or `manifest.embed.defaultAgentKeySlug` only when the provisioning API is unavailable.
+   - Do not ask the business user to manually create, choose, or configure the page copilot Agent during SDK onboarding.
+   - Treat that Agent as the single embedded page copilot entry. Page-specific behavior is selected later by `pageKey` through Agent/Workflow bindings, not by rendering one button per workflow.
    - Never move `appSecret` into browser code.
 9. Add or update the business front-end integration:
    - Add the ReachAI chat/embed entry in a real business page or shared shell, not only in documentation.
-   - Configure `apiBase`, `projectCode`, `agentId`, and a `tokenProvider` that calls the business gateway token broker. Prefer the manifest's stable Agent `keySlug` for `agentId`.
+   - Configure `apiBase`, `projectCode`, `agentId`, and a `tokenProvider` that calls the business gateway token broker. Use the provisioned page copilot Agent `keySlug` for `agentId`.
    - Pass `pageKey`, `pageInstanceId`, `route`, and `origin` into the token request so ReachAI can isolate sessions and route the current page to the right Workflow.
    - Pass the same stable `pageKey` through `createEafChat({ page: { pageKey, routePattern } })`; the browser SDK will create the chat session with `pageKey`, `route`, `pageInstanceId`, and registered page actions.
    - Do not reuse the business login token for ReachAI chat session or message calls. Use the broker-returned short-lived embed token for `/api/reachai/embed/**`, `/api/embed/chat/sessions`, and message APIs.

@@ -18,14 +18,6 @@ spring:
       password: ${REDIS_PASSWORD:}
 
   cloud:
-    nacos:
-      discovery:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-      config:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-        file-extension: yml
     # LLM 单次可能超过 1～2 分钟，默认 Feign 读超时会报 Read timed out；调大以匹配长生成
     # OpenFeign：有 contextId 时按 contextId 取配置，不按 name。ScannerServiceClient 的 contextId=scannerServiceClient，
     # 仅配 ai-skills-service 不会作用于扫描客户端，仍会默认短读超时 → agent Read timed out，skills 侧「客户端中断连接」。

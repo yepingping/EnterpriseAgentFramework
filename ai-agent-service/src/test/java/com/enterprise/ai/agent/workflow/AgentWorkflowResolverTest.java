@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,6 +55,30 @@ class AgentWorkflowResolverTest {
 
         assertTrue(resolved.isPresent());
         assertEquals("high", resolved.get().getWorkflowId());
+    }
+
+    @Test
+    void resolveUsesLatestBindingWhenRankAndPriorityTie() {
+        AgentWorkflowBindingMapper mapper = mock(AgentWorkflowBindingMapper.class);
+        AgentWorkflowBindingEntity oldBinding = binding("old-unpublished", "PAGE", "team.list", null, null, "/teams", 100);
+        oldBinding.setId(1L);
+        oldBinding.setUpdatedAt(LocalDateTime.parse("2026-06-15T10:00:00"));
+        AgentWorkflowBindingEntity latestBinding = binding("latest-published", "PAGE", "team.list", null, null, "/teams", 100);
+        latestBinding.setId(2L);
+        latestBinding.setUpdatedAt(LocalDateTime.parse("2026-06-15T11:00:00"));
+        when(mapper.selectList(any())).thenReturn(List.of(oldBinding, latestBinding));
+        AgentWorkflowResolver resolver = new AgentWorkflowResolver(mapper);
+
+        Optional<AgentWorkflowBindingEntity> resolved = resolver.resolve(new AgentWorkflowResolveRequest(
+                "entry-agent",
+                "demo",
+                "team.list",
+                "/teams",
+                null,
+                null));
+
+        assertTrue(resolved.isPresent());
+        assertEquals("latest-published", resolved.get().getWorkflowId());
     }
 
     private AgentWorkflowBindingEntity binding(String workflowId,

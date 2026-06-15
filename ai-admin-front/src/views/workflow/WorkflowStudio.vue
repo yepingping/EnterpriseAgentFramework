@@ -8,18 +8,33 @@
             <span>返回</span>
           </button>
         </el-tooltip>
-        <h2>Workflow 编排 - {{ studio?.name || workflowMeta.name || '未命名' }}</h2>
-        <el-tag size="small" effect="plain">草稿</el-tag>
-        <el-tag
-          size="small"
-          :type="graphLintErrors.length ? 'danger' : graphLintWarnings.length ? 'warning' : 'success'"
-          effect="plain"
-        >
-          {{ graphLintErrors.length ? '阻断' : graphLintWarnings.length ? '提醒' : '健康' }}
-        </el-tag>
-        <el-tag v-if="studio?.keySlug || workflowMeta.keySlug" size="small" type="info">{{ studio?.keySlug || workflowMeta.keySlug }}</el-tag>
-        <el-tag size="small" type="success">{{ studio?.projectCode || '全局' }}</el-tag>
-        <el-tag size="small">{{ workflowVisibilityLabel }}</el-tag>
+        <div class="studio-title-wrap">
+          <div class="studio-title-row">
+            <span class="studio-eyebrow">Workflow 编排</span>
+            <el-tooltip :content="studioDisplayName" placement="bottom" :show-after="400">
+              <h1>{{ studioDisplayName }}</h1>
+            </el-tooltip>
+          </div>
+          <div class="studio-meta-row">
+            <el-tag size="small" effect="plain">{{ workflowVisibilityLabel }}</el-tag>
+            <el-tag
+              size="small"
+              :type="graphLintErrors.length ? 'danger' : graphLintWarnings.length ? 'warning' : 'success'"
+              effect="plain"
+            >
+              {{ graphLintErrors.length ? '阻断' : graphLintWarnings.length ? '提醒' : '健康' }}
+            </el-tag>
+            <el-tooltip
+              v-if="studioKeySlug"
+              :content="studioKeySlug"
+              placement="bottom"
+              :show-after="400"
+            >
+              <el-tag size="small" type="info" class="studio-slug-tag">{{ studioKeySlug }}</el-tag>
+            </el-tooltip>
+            <el-tag size="small" type="success">{{ studio?.projectCode || '全局' }}</el-tag>
+          </div>
+        </div>
       </div>
       <div class="header-right">
         <span class="save-state" :class="saveStateClass">
@@ -2039,7 +2054,7 @@ import type { ToolParameter } from '@/types/tool'
 import LlmModelIcon from '@/components/icons/LlmModelIcon.vue'
 import SendIcon from '@/components/icons/SendIcon.vue'
 import type { StudioFieldSchema } from '@/types/studio'
-import { interactionOutputPorts } from '@/utils/studio'
+import { interactionOutputPorts, normalizeCanvasEdgeHandles } from '@/utils/studio'
 import {
   STUDIO_NODE_GROUPS,
   STUDIO_NODE_REGISTRY,
@@ -2353,6 +2368,10 @@ const workflowVisibilityLabel = computed(() => {
   if (status === 'ARCHIVED') return '已归档'
   return '草稿'
 })
+
+const studioDisplayName = computed(() => studio.value?.name || workflowMeta.name || '未命名')
+
+const studioKeySlug = computed(() => studio.value?.keySlug || workflowMeta.keySlug || '')
 
 const propertyDetailSectionLabel = computed(() => {
   const sectionLabel: Record<PropertyDetailSection, string> = {
@@ -4233,16 +4252,18 @@ function isKnownVariableReference(source: string, currentNodeId?: string) {
 }
 
 function decorateWorkflowEdge(edge: CanvasEdge): CanvasEdge {
-  const condition = edge.condition || edge.label || 'always'
+  const nodesById = new Map(nodes.value.map((node) => [node.id, node]))
+  const normalized = normalizeCanvasEdgeHandles(edge, nodesById)
+  const condition = normalized.condition || normalized.label || 'always'
   return {
-    ...edge,
+    ...normalized,
     condition,
-    type: edge.type || 'smoothstep',
-    markerEnd: edge.markerEnd || 'arrowclosed',
-    interactionWidth: edge.interactionWidth || 18,
-    animated: edge.animated ?? isDynamicCondition(condition),
-    label: edgeDisplayLabel(condition, edge) || undefined,
-    class: edgeRuntimeClass(edge, condition),
+    type: normalized.type || 'smoothstep',
+    markerEnd: normalized.markerEnd || 'arrowclosed',
+    interactionWidth: normalized.interactionWidth || 18,
+    animated: normalized.animated ?? isDynamicCondition(condition),
+    label: edgeDisplayLabel(condition, normalized) || undefined,
+    class: edgeRuntimeClass(normalized, condition),
   }
 }
 
@@ -6773,10 +6794,66 @@ function readJsonObject(value: string, fallback: Record<string, unknown>) {
   background: rgba(255, 255, 255, 0.96);
 }
 
-.header-left h2 {
-  margin: 0;
-  font-size: 18px;
+.header-left {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 12px;
+}
+
+.header-right {
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.studio-title-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.studio-title-row {
+  gap: 10px;
+  min-width: 0;
+}
+
+.studio-eyebrow {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.studio-title-row h1 {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: min(520px, calc(100vw - 760px));
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-title-row :deep(.el-tooltip__trigger) {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.studio-meta-row {
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.studio-slug-tag {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-left,
@@ -6785,16 +6862,6 @@ function readJsonObject(value: string, fallback: Record<string, unknown>) {
 .studio-meta-row {
   display: flex;
   align-items: center;
-}
-
-.header-left {
-  min-width: 0;
-  gap: 12px;
-}
-
-.header-right {
-  flex: none;
-  gap: 10px;
 }
 
 .studio-back-btn {
@@ -6843,30 +6910,6 @@ function readJsonObject(value: string, fallback: Record<string, unknown>) {
 
 .studio-back-btn:active {
   transform: translateY(0);
-}
-
-.studio-title-wrap {
-  min-width: 0;
-}
-
-.studio-title-row {
-  gap: 12px;
-}
-
-.studio-title-row h1 {
-  overflow: hidden;
-  max-width: min(560px, 36vw);
-  margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.studio-meta-row {
-  gap: 8px;
-  margin-top: 6px;
 }
 
 .save-state {
@@ -9538,7 +9581,7 @@ function readJsonObject(value: string, fallback: Record<string, unknown>) {
 
 @media (max-width: 760px) {
   .studio-title-row h1 {
-    max-width: 76vw;
+    max-width: calc(100vw - 120px);
   }
 
   .studio-body,

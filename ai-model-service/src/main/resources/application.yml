@@ -9,15 +9,6 @@ spring:
     username: ${AI_MYSQL_USER:ai_text_service}
     password: ${AI_MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
-  cloud:
-    nacos:
-      discovery:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-      config:
-        server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: ${NACOS_ENABLED:false}
-        file-extension: yml
 
 model:
   credential-secret: ${MODEL_CREDENTIAL_SECRET:dev-only-change-me-please-32-bytes}

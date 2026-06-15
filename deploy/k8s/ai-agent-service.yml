@@ -36,10 +36,6 @@ spec:
               value: http://ai-model-service:8601
             - name: SKILLS_SERVICE_URL
               value: http://ai-skills-service:8602
-            - name: NACOS_ADDR
-              value: nacos:8848
-            - name: NACOS_ENABLED
-              value: "true"
           resources:
             requests:
               memory: "512Mi"

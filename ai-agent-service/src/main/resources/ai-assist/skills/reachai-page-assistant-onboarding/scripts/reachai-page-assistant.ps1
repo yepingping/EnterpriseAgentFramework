@@ -8,11 +8,16 @@ param(
   [string] $FrontendUrl = "",
   [string] $Route = "",
   [string] $PageKey = "",
+  [string] $StorageStatePath = "",
+  [int] $RuntimeProbeTimeoutSec = 30,
+  [switch] $ProbeMutatingActions,
   [switch] $ReportToPlatform,
   [switch] $Help
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Write-HelpText {
   @"
@@ -21,11 +26,18 @@ ReachAI page assistant helper.
 Usage:
   .\scripts\reachai-page-assistant.ps1 scaffold -ManifestUrl <url> -Framework angular -OutputDir .\src\app\shared\reachai
   .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -WorkspaceRoot . -FrontendUrl http://localhost:9200 -Route /team-build/depart-management -PageKey teamArchive.list
-  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -ReportToPlatform
+  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -FrontendUrl http://localhost:9200 -Route /teams/archive -PageKey teamArchive.list -StorageStatePath .\playwright\.auth\user.json -ReportToPlatform
 
-Notes:
+Runtime probe notes:
+  - With -FrontendUrl, the script tries a real browser bridge invoke via Playwright (requires Node.js + playwright package).
+  - Default readonly probes: getPageState, readTable. High-risk actions such as openRowAction are never auto-invoked.
+  - Use -ProbeMutatingActions to allow setFilters/search/reset probes.
+  - Without login/session, runtime returns WARN and mentions StorageState/Cookie/manual login.
+  - Static file scan is not runtime verification.
+
+Other notes:
   - Use local PowerShell/curl for localhost ReachAI APIs. Remote WebFetch often cannot reach localhost.
-  - The script never reads or prints app secrets.
+  - The script never reads or prints app secrets, business tokens, or full table payloads.
   - verify reports to ReachAI only when -ReportToPlatform is set.
 "@
 }
@@ -46,6 +58,10 @@ function ConvertTo-Hashtable($value) {
     $table[$property.Name] = $property.Value
   }
   return $table
+}
+
+function Test-CommandExists([string] $name) {
+  return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
 function Get-TemplateContent([string] $name) {
@@ -362,6 +378,336 @@ function New-ActionDefinition([string] $actionKey) {
   }
 }
 
+function Get-RuntimeProbeNodeScript {
+  @'
+const fs = require('fs');
+const args = JSON.parse(process.argv[2] || '{}');
+
+function redactResult(actionKey, raw) {
+  const data = raw && raw.data && typeof raw.data === 'object' ? raw.data : {};
+  const rows = Array.isArray(data.rows) ? data.rows : (Array.isArray(data.items) ? data.items : null);
+  return {
+    actionKey,
+    status: raw && raw.status ? raw.status : 'ERROR',
+    errorCode: raw && raw.error && raw.error.code ? raw.error.code : null,
+    rowCount: rows ? rows.length : (typeof data.rowCount === 'number' ? data.rowCount : null),
+    hasFilters: !!(data.filters && Object.keys(data.filters).length),
+    hasPagination: !!data.pagination,
+  };
+}
+
+(async () => {
+  let playwright;
+  try {
+    playwright = require('playwright');
+  } catch (error) {
+    process.stdout.write(JSON.stringify({
+      ok: false,
+      code: 'PLAYWRIGHT_MISSING',
+      message: 'Node.js playwright package is not installed. Run npm install -D playwright, or provide StorageState/login manually and retry.',
+      bridgeExists: false,
+      listedActions: [],
+      invokedActions: [],
+      redactedResults: [],
+    }));
+    return;
+  }
+
+  const browser = await playwright.chromium.launch({ headless: true });
+  const contextOptions = {};
+  if (args.storageStatePath && fs.existsSync(args.storageStatePath)) {
+    contextOptions.storageState = args.storageStatePath;
+  }
+  const context = await browser.newContext(contextOptions);
+  const page = await context.newPage();
+  const result = {
+    ok: false,
+    bridgeExists: false,
+    listedActions: [],
+    invokedActions: [],
+    redactedResults: [],
+    loginLikelyRequired: false,
+    message: '',
+    finalUrl: '',
+  };
+
+  try {
+    const response = await page.goto(args.targetUrl, {
+      timeout: args.timeoutMs || 30000,
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForTimeout(2500);
+    result.finalUrl = page.url();
+
+    const title = await page.title();
+    const bodyText = ((await page.textContent('body')) || '').toLowerCase();
+    const looksLikeLogin = /login|sign in|password|登录|口令|账号/.test(bodyText)
+      || /login|signin|auth/.test(result.finalUrl.toLowerCase())
+      || (response && (response.status() === 401 || response.status() === 403));
+
+    const probe = await page.evaluate(async ({ bridgeGlobal, pageKey, readonlyActions, mutatingActions }) => {
+      const bridge = window[bridgeGlobal] || window.__REACHAI_PAGE_BRIDGE__;
+      const output = {
+        bridgeExists: !!bridge,
+        listedActions: [],
+        invokedActions: [],
+        redactedResults: [],
+      };
+      if (!bridge) return output;
+
+      if (typeof bridge.list === 'function') {
+        output.listedActions = bridge.list(pageKey).map((item) => item.actionKey);
+      }
+
+      const candidates = readonlyActions.filter((key) => output.listedActions.includes(key));
+      for (const actionKey of candidates) {
+        try {
+          const raw = typeof bridge.execute === 'function'
+            ? await bridge.execute(pageKey, actionKey, {})
+            : { status: 'ERROR', error: { code: 'HANDLER_ERROR', message: 'execute is unavailable' } };
+          output.invokedActions.push(actionKey);
+          const data = raw && raw.data && typeof raw.data === 'object' ? raw.data : {};
+          const rows = Array.isArray(data.rows) ? data.rows : (Array.isArray(data.items) ? data.items : null);
+          output.redactedResults.push({
+            actionKey,
+            status: raw && raw.status ? raw.status : 'ERROR',
+            errorCode: raw && raw.error && raw.error.code ? raw.error.code : null,
+            rowCount: rows ? rows.length : (typeof data.rowCount === 'number' ? data.rowCount : null),
+            hasFilters: !!(data.filters && Object.keys(data.filters).length),
+            hasPagination: !!data.pagination,
+          });
+        } catch (error) {
+          output.redactedResults.push({
+            actionKey,
+            status: 'ERROR',
+            errorCode: 'HANDLER_ERROR',
+            message: error && error.message ? error.message : String(error),
+          });
+        }
+      }
+
+      if (mutatingActions && mutatingActions.length) {
+        for (const actionKey of mutatingActions.filter((key) => output.listedActions.includes(key))) {
+          try {
+            const raw = await bridge.execute(pageKey, actionKey, {});
+            output.invokedActions.push(actionKey);
+            output.redactedResults.push({
+              actionKey,
+              status: raw && raw.status ? raw.status : 'ERROR',
+              errorCode: raw && raw.error && raw.error.code ? raw.error.code : null,
+              mutating: true,
+            });
+          } catch (error) {
+            output.redactedResults.push({
+              actionKey,
+              status: 'ERROR',
+              errorCode: 'HANDLER_ERROR',
+              mutating: true,
+            });
+          }
+        }
+      }
+      return output;
+    }, {
+      bridgeGlobal: args.bridgeGlobal,
+      pageKey: args.pageKey,
+      readonlyActions: args.readonlyActions || ['getPageState', 'readTable'],
+      mutatingActions: args.mutatingActions || [],
+    });
+
+    result.bridgeExists = !!probe.bridgeExists;
+    result.listedActions = probe.listedActions || [];
+    result.invokedActions = probe.invokedActions || [];
+    result.redactedResults = probe.redactedResults || [];
+    result.loginLikelyRequired = looksLikeLogin;
+
+    const successCount = result.redactedResults.filter((item) => item.status === 'SUCCESS').length;
+    if (successCount > 0) {
+      result.ok = true;
+      result.message = 'Runtime bridge invoke succeeded for readonly actions.';
+    } else if (!result.bridgeExists) {
+      result.message = looksLikeLogin
+        ? 'Page loaded but login/session is likely required before the bridge is available. Provide StorageState/Cookie or login manually, then retry.'
+        : 'Page loaded but window bridge was not found. Ensure the target route is open and handlers are registered.';
+    } else if (result.listedActions.length === 0) {
+      result.message = 'Bridge exists but no actions are registered for the target pageKey.';
+    } else {
+      result.message = looksLikeLogin
+        ? 'Bridge detected but invoke failed, likely due to missing login/session. Provide StorageState/Cookie or login manually.'
+        : 'Bridge detected but readonly invoke did not return SUCCESS.';
+    }
+  } catch (error) {
+    result.message = 'Runtime browser probe failed: ' + (error && error.message ? error.message : String(error));
+    result.loginLikelyRequired = /login|auth|401|403/i.test(result.message);
+  } finally {
+    await browser.close();
+  }
+
+  process.stdout.write(JSON.stringify(result));
+})().catch((error) => {
+  process.stdout.write(JSON.stringify({
+    ok: false,
+    code: 'PROBE_FAILED',
+    message: error && error.message ? error.message : String(error),
+    bridgeExists: false,
+    listedActions: [],
+    invokedActions: [],
+    redactedResults: [],
+  }));
+});
+'@
+}
+
+function Invoke-RuntimeBridgeProbe {
+  param(
+    [string] $TargetUrl,
+    [string] $PageKey,
+    [string] $BridgeGlobal,
+    [string[]] $ReadonlyActions,
+    [string[]] $MutatingActions,
+    [string] $StorageStatePath,
+    [int] $TimeoutSec
+  )
+
+  if (-not (Test-CommandExists "node")) {
+    return [pscustomobject]@{
+      status = "WARN"
+      message = "Node.js is not available; runtime bridge invoke skipped. Install Node.js + playwright for real runtime PASS."
+      bridgeExists = $false
+      listedActions = @()
+      invokedActions = @()
+      redactedResults = @()
+      probeEngine = "none"
+    }
+  }
+
+  $bridgeKey = $BridgeGlobal
+  if ($bridgeKey.StartsWith("window.")) {
+    $bridgeKey = $bridgeKey.Substring(7)
+  }
+
+  $probeArgs = @{
+    targetUrl = $TargetUrl
+    pageKey = $PageKey
+    bridgeGlobal = $bridgeKey
+    readonlyActions = $ReadonlyActions
+    mutatingActions = $MutatingActions
+    storageStatePath = $StorageStatePath
+    timeoutMs = $TimeoutSec * 1000
+  } | ConvertTo-Json -Compress
+
+  $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("reachai-runtime-probe-" + [guid]::NewGuid().ToString("N") + ".cjs")
+  try {
+    Set-Content -Path $tempScript -Value (Get-RuntimeProbeNodeScript) -Encoding UTF8
+    $output = & node $tempScript $probeArgs 2>&1 | Out-String
+    $parsed = $null
+    try { $parsed = $output.Trim() | ConvertFrom-Json } catch { $parsed = $null }
+    if ($null -eq $parsed) {
+      return [pscustomobject]@{
+        status = "WARN"
+        message = "Runtime probe did not return JSON. Ensure playwright is installed and the dev server is reachable."
+        bridgeExists = $false
+        listedActions = @()
+        invokedActions = @()
+        redactedResults = @()
+        probeEngine = "node"
+        rawOutput = ($output | Select-Object -First 500)
+      }
+    }
+
+    $successCount = @($parsed.redactedResults | Where-Object { $_.status -eq "SUCCESS" }).Count
+    $status = "WARN"
+    $message = [string]$parsed.message
+    if ($parsed.code -eq "PLAYWRIGHT_MISSING") {
+      $status = "WARN"
+      $message = [string]$parsed.message
+    } elseif ($successCount -gt 0) {
+      $status = "PASS"
+      $message = "Runtime bridge invoke succeeded for readonly actions (getPageState/readTable)."
+    } elseif ($parsed.loginLikelyRequired) {
+      $status = "WARN"
+      $message = if ($message) { $message } else { "Login/session likely required. Provide StorageState/Cookie or login manually before runtime PASS." }
+    } elseif ($parsed.bridgeExists -and @($parsed.listedActions).Count -gt 0) {
+      $status = "WARN"
+      $message = if ($message) { $message } else { "Bridge exists but readonly invoke did not succeed." }
+    } elseif (-not $parsed.bridgeExists) {
+      $status = "WARN"
+      $message = if ($message) { $message } else { "Bridge was not found in the loaded page." }
+    }
+
+    return [pscustomobject]@{
+      status = $status
+      message = $message
+      bridgeExists = [bool]$parsed.bridgeExists
+      listedActions = @($parsed.listedActions)
+      invokedActions = @($parsed.invokedActions)
+      redactedResults = @($parsed.redactedResults)
+      probeEngine = "playwright"
+      loginLikelyRequired = [bool]$parsed.loginLikelyRequired
+      finalUrl = [string]$parsed.finalUrl
+    }
+  } finally {
+    if (Test-Path $tempScript) { Remove-Item -Force $tempScript -ErrorAction SilentlyContinue }
+  }
+}
+
+function Build-BrowserRuntimeVerification {
+  param(
+    [string] $FrontendUrl,
+    [string] $Route,
+    [string] $PageKey,
+    [string] $BridgeGlobal,
+    [string[]] $CandidateActions,
+    [switch] $AllowMutating
+  )
+
+  if (-not $FrontendUrl) {
+    return @{
+      status = "SKIPPED"
+      message = "Runtime browser verification skipped: FrontendUrl was not provided."
+      frontendUrl = ""
+      route = $Route
+      pageKey = $PageKey
+      bridgeExists = $false
+      listedActions = @()
+      invokedActions = @()
+      redactedResults = @()
+    }
+  }
+
+  $targetUrl = $FrontendUrl.TrimEnd("/") + $Route
+  $readonlyActions = @("getPageState", "readTable") | Where-Object { $CandidateActions -contains $_ }
+  if ($readonlyActions.Count -eq 0) { $readonlyActions = @("getPageState", "readTable") }
+  $mutatingActions = @()
+  if ($AllowMutating) {
+    $mutatingActions = @("setFilters", "search", "reset") | Where-Object { $CandidateActions -contains $_ }
+  }
+
+  $probe = Invoke-RuntimeBridgeProbe `
+    -TargetUrl $targetUrl `
+    -PageKey $PageKey `
+    -BridgeGlobal $BridgeGlobal `
+    -ReadonlyActions $readonlyActions `
+    -MutatingActions $mutatingActions `
+    -StorageStatePath $StorageStatePath `
+    -TimeoutSec $RuntimeProbeTimeoutSec
+
+  return @{
+    status = $probe.status
+    message = $probe.message
+    frontendUrl = $FrontendUrl
+    route = $Route
+    pageKey = $PageKey
+    bridgeExists = $probe.bridgeExists
+    listedActions = @($probe.listedActions)
+    invokedActions = @($probe.invokedActions)
+    redactedResults = @($probe.redactedResults)
+    probeEngine = $probe.probeEngine
+    loginLikelyRequired = [bool]$probe.loginLikelyRequired
+    targetUrl = $targetUrl
+  }
+}
+
 function Invoke-Verify {
   $manifest = Read-Manifest $ManifestUrl
   $contract = ConvertTo-Hashtable $manifest.pageActionContract
@@ -379,19 +725,19 @@ function Invoke-Verify {
   $files = @(Find-ReachAiFiles $root $bridgeGlobal $resolvedPageKey)
   $hasBridge = $files.Count -gt 0
   $staticStatus = if ($hasBridge -and $resolvedPageKey) { "PASS" } else { "WARN" }
-  $browserStatus = "SKIPPED"
-  $browserMessage = "FrontendUrl was not provided."
-  if ($FrontendUrl) {
-    $targetUrl = $FrontendUrl.TrimEnd("/") + $resolvedRoute
-    try {
-      $response = Invoke-WebRequest -Method Get -Uri $targetUrl -TimeoutSec 8 -UseBasicParsing
-      $browserStatus = if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { "WARN" } else { "FAIL" }
-      $browserMessage = "HTTP route probe returned $($response.StatusCode). Runtime bridge probe requires an authenticated browser session."
-    } catch {
-      $browserStatus = "WARN"
-      $browserMessage = "Frontend route probe failed or requires login: $($_.Exception.Message)"
-    }
+  $staticMessage = if ($hasBridge -and $resolvedPageKey) {
+    "Static handler evidence found (static only)."
+  } else {
+    "No bridge or handler files were found for static verification."
   }
+
+  $browserRuntime = Build-BrowserRuntimeVerification `
+    -FrontendUrl $FrontendUrl `
+    -Route $resolvedRoute `
+    -PageKey $resolvedPageKey `
+    -BridgeGlobal $bridgeGlobal `
+    -CandidateActions $actions `
+    -AllowMutating:$ProbeMutatingActions
 
   $verification = [ordered]@{
     build = @{ status = "WARN"; message = "Build command was not executed by this helper. Run the business frontend minimal build separately." }
@@ -399,9 +745,11 @@ function Invoke-Verify {
       status = $staticStatus
       bridgeGlobal = $bridgeGlobal
       handlerCount = $files.Count
-      message = if ($hasBridge) { "Bridge or handler files were found." } else { "No bridge or handler files were found." }
+      message = $staticMessage
     }
-    browser = @{ status = $browserStatus; message = $browserMessage }
+    browserStatic = @{ status = $staticStatus; message = $staticMessage }
+    browserRuntime = $browserRuntime
+    browser = $browserRuntime
   }
   $result = [ordered]@{
     ok = $true
@@ -413,6 +761,7 @@ function Invoke-Verify {
     files = $files
     actions = $actions
     verification = $verification
+    runtimeVerification = $browserRuntime
   }
 
   if ($ReportToPlatform) {
@@ -430,11 +779,27 @@ function Invoke-Verify {
       files = $files
       actions = @($actions | ForEach-Object { New-ActionDefinition ([string]$_) })
       verification = $verification
-      handoffSummary = "reachai-page-assistant verify reported static evidence"
+      handoffSummary = "reachai-page-assistant verify reported static and runtime evidence"
     }
     $report = Invoke-RestMethod -Method Post -Uri $endpoints.registerPageUrl -ContentType "application/json; charset=utf-8" -Body ($body | ConvertTo-Json -Depth 50 -Compress)
     $result.reportedToPlatform = $true
     $result.platformResponse = $report
+
+    if ($endpoints.checksRunUrl) {
+      $checkBody = @{
+        pageKey = $resolvedPageKey
+        routePattern = $resolvedRoute
+        actionKeys = @($actions)
+        frontendUrl = $FrontendUrl
+        runtimeVerification = $browserRuntime
+      }
+      try {
+        $checkReport = Invoke-RestMethod -Method Post -Uri $endpoints.checksRunUrl -ContentType "application/json; charset=utf-8" -Body ($checkBody | ConvertTo-Json -Depth 50 -Compress)
+        $result.platformCheckResponse = $checkReport
+      } catch {
+        $result.platformCheckError = $_.Exception.Message
+      }
+    }
   }
   $result | ConvertTo-Json -Depth 50
 }

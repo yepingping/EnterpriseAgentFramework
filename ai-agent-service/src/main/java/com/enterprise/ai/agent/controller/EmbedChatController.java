@@ -31,6 +31,8 @@ import com.enterprise.ai.agent.workflow.WorkflowRuntimeRequest;
 import com.enterprise.ai.agent.workflow.WorkflowRuntimeService;
 import com.enterprise.ai.common.dto.ApiResult;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -709,7 +711,8 @@ public class EmbedChatController {
     public record EmbedChatSessionResponse(String sessionId, String agentId, Map<String, String> principal) {
     }
 
-    public record EmbedChatMessageRequest(String message) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record EmbedChatMessageRequest(@JsonAlias({"content", "text"}) String message) {
     }
 
     public record PageActionResultRequest(

@@ -260,7 +260,7 @@ cd EnterpriseAgentFramework
 docker compose -f deploy/docker-compose.infra.yml up -d
 ```
 
-基础设施包含 MySQL、Redis、Milvus、Nacos 等。
+基础设施包含 MySQL、Redis、Milvus 等。
 
 ### 3. 初始化数据库
 

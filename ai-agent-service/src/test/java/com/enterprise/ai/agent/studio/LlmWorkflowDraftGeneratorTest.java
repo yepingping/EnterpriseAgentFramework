@@ -310,6 +310,160 @@ class LlmWorkflowDraftGeneratorTest {
         assertEquals("extract_params_llm.result.teamName", pageAction.getInputs().get(0).getSource());
     }
 
+    @Test
+    void bindsMultiplePageActionsWhenModelOmitsActionRefs() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "班组档案查询助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "extract_params", "kind": "llm", "label": "提取查询条件", "config": { "userPrompt": "{{ params.question }}", "outputFormat": "json", "structuredOutput": true } },
+                    { "id": "set_filters", "kind": "pageAction", "label": "设置筛选条件", "config": { "args": { "teamName": "{{ extract_params.result.teamName }}" } } },
+                    { "id": "execute_query", "kind": "pageAction", "label": "执行查询", "config": {} },
+                    { "id": "reply", "kind": "answer", "label": "结果反馈", "config": { "template": "已触发查询" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "extract_params" },
+                    { "from": "extract_params", "to": "set_filters" },
+                    { "from": "set_filters", "to": "execute_query" },
+                    { "from": "execute_query", "to": "reply" },
+                    { "from": "reply", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("班组页面助手")
+                .requirement("根据用户输入设置筛选条件并执行查询")
+                .projectCode("qmssmp-teams-construction-service")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(
+                        pageActionResource("setFilters", "设置筛选条件"),
+                        pageActionResource("search", "执行查询"),
+                        pageActionResource("reset", "重置筛选")))
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        assertEquals(List.of(), result.placeholderNodes());
+        GraphSpec.Node setFilters = result.graphSpec().getNodes().stream()
+                .filter(node -> "set_filters".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        GraphSpec.Node executeQuery = result.graphSpec().getNodes().stream()
+                .filter(node -> "execute_query".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("setFilters", setFilters.getConfig().get("actionKey"));
+        assertEquals("search", executeQuery.getConfig().get("actionKey"));
+    }
+
+    @Test
+    void normalizesStringPortAliasesInInputsAndOutputs() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面查询助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "extract_params", "kind": "llm", "label": "提取筛选参数", "config": { "userPrompt": "{{ params.question }}" }, "outputs": ["query"] },
+                    { "id": "set_filters", "kind": "pageAction", "label": "设置筛选条件", "config": { "actionKey": "setFilters" }, "inputs": ["query"] },
+                    { "id": "reply", "kind": "answer", "label": "回复", "config": { "template": "完成" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "extract_params" },
+                    { "from": "extract_params", "to": "set_filters" },
+                    { "from": "set_filters", "to": "reply" },
+                    { "from": "reply", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("提取参数并触发页面动作")
+                .modelInstanceId("model-1")
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        assertFalse(result.graphSpec().getNodes().isEmpty());
+        assertTrue(result.graphSpec().getNodes().stream().anyMatch(node -> "extract_params".equals(node.getId())));
+        assertTrue(result.graphSpec().getNodes().stream().anyMatch(node -> "set_filters".equals(node.getId())));
+    }
+
+    @Test
+    void canvasEdgesOmitSemanticPortHandlesForLinearNodes() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面查询助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "extract_params", "kind": "llm", "label": "提取筛选参数", "config": { "userPrompt": "{{ params.question }}" } },
+                    { "id": "set_filters", "kind": "pageAction", "label": "设置筛选条件", "config": { "actionKey": "setFilters" } },
+                    { "id": "reply", "kind": "answer", "label": "回复", "config": { "template": "完成" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input", "condition": "always" },
+                    { "from": "user_input", "to": "extract_params", "condition": "always", "sourceHandle": "output", "targetHandle": "input" },
+                    { "from": "extract_params", "to": "set_filters", "condition": "always", "sourceHandle": "output", "targetHandle": "filterParams" },
+                    { "from": "set_filters", "to": "reply", "condition": "always" },
+                    { "from": "reply", "to": "END", "condition": "always" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("提取参数并触发页面动作")
+                .modelInstanceId("model-1")
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        assertTrue(result.graphSpec().getEdges().stream().anyMatch(edge ->
+                "user_input".equals(edge.getFrom())
+                        && "extract_params".equals(edge.getTo())
+                        && "output".equals(edge.getSourceHandle())
+                        && "input".equals(edge.getTargetHandle())));
+        Map<String, Object> llmEdge = canvasEdges(result).stream()
+                .filter(edge -> "user_input".equals(edge.get("source")) && "extract_params".equals(edge.get("target")))
+                .findFirst()
+                .orElseThrow();
+        assertFalse(llmEdge.containsKey("sourceHandle"));
+        assertFalse(llmEdge.containsKey("targetHandle"));
+        Map<String, Object> pageActionEdge = canvasEdges(result).stream()
+                .filter(edge -> "extract_params".equals(edge.get("source")) && "set_filters".equals(edge.get("target")))
+                .findFirst()
+                .orElseThrow();
+        assertFalse(pageActionEdge.containsKey("sourceHandle"));
+        assertFalse(pageActionEdge.containsKey("targetHandle"));
+    }
+
+    private WorkflowDraftResource pageActionResource(String actionKey, String title) {
+        return WorkflowDraftResource.builder()
+                .kind("PAGE_ACTION")
+                .name(actionKey)
+                .qualifiedName("teamArchive.list/" + actionKey)
+                .projectCode("qmssmp-teams-construction-service")
+                .description(title)
+                .metadata(Map.of(
+                        "pageKey", "teamArchive.list",
+                        "routePattern", "/teams/archive",
+                        "actionKey", actionKey,
+                        "confirmRequired", false))
+                .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> canvasEdges(WorkflowDraftGenerationResult result) {
+        return (List<Map<String, Object>>) (List<?>) result.canvasSnapshot().get("edges");
+    }
+
     private void assertCanvasContainsNode(WorkflowDraftGenerationResult result, String id, String kind) {
         Map<String, Object> node = canvasNodes(result).stream()
                 .filter(item -> id.equals(item.get("id")))

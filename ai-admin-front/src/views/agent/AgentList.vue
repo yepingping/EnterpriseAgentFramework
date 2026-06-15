@@ -198,6 +198,7 @@ const viewMode = ref<'table' | 'card'>('table')
 
 const agentKindOptions = [
   { value: 'PROJECT_ENTRY', label: '项目入口' },
+  { value: 'PAGE_COPILOT', label: '页面副驾驶' },
   { value: 'GLOBAL_EMBED', label: '全局嵌入' },
   { value: 'PAGE_ENTRY', label: '页面入口' },
 ]

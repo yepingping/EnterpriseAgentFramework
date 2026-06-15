@@ -9,8 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * ai-model-service Feign Client。
- * Nacos 启用时按服务名路由，否则使用 url 属性直连。
+ * ai-model-service Feign Client，通过 url 属性直连模型网关。
  */
 @FeignClient(
         name = "ai-model-service",

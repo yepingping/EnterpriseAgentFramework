@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -68,6 +69,83 @@ class LangGraph4jRuntimeAdapterTest {
         assertTrue(result.isSuccess());
         assertEquals("How do I transfer? / file-001", result.getAnswer());
         assertTrue(result.getMetadata().containsKey("graphNodes"));
+    }
+
+    @Test
+    void userInputQuestionFallsBackToChatMessage() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-user-input-message-fallback")
+                .sessionId("session-user-input-message-fallback")
+                .message("帮我查询负责人为靳圣辉的班组")
+                .graphSpec(GraphSpec.builder()
+                                .code("user_input_message_fallback_graph")
+                                .entry("user_input")
+                                .finishNode("answer")
+                                .node(GraphSpec.Node.builder()
+                                        .id("user_input")
+                                        .type("USER_INPUT")
+                                        .config(Map.of(
+                                                "outputAlias", "params",
+                                                "fields", List.of(Map.of(
+                                                        "name", "question",
+                                                        "type", "string",
+                                                        "required", true))))
+                                        .build())
+                                .node(GraphSpec.Node.builder()
+                                        .id("answer")
+                                        .type("ANSWER")
+                                        .config(Map.of("template", "{{ params.question }}"))
+                                        .build())
+                                .edge(GraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                                .edge(GraphSpec.Edge.builder().from("user_input").to("answer").condition("always").build())
+                                .edge(GraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                                .build())
+                .graphRuntimeContext(GraphRuntimeContext.builder().runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE).build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("帮我查询负责人为靳圣辉的班组", result.getAnswer());
+    }
+
+    @Test
+    void userInputFieldSourceReadsInputMessage() {
+        LangGraph4jRuntimeAdapter adapter = adapter(null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-user-input-source")
+                .sessionId("session-user-input-source")
+                .message("帮我查询负责人为靳圣辉的班组")
+                .graphSpec(GraphSpec.builder()
+                                .code("user_input_source_graph")
+                                .entry("user_input")
+                                .finishNode("answer")
+                                .node(GraphSpec.Node.builder()
+                                        .id("user_input")
+                                        .type("USER_INPUT")
+                                        .config(Map.of(
+                                                "outputAlias", "params",
+                                                "fields", List.of(Map.of(
+                                                        "name", "question",
+                                                        "type", "string",
+                                                        "required", true,
+                                                        "source", "input.message"))))
+                                        .build())
+                                .node(GraphSpec.Node.builder()
+                                        .id("answer")
+                                        .type("ANSWER")
+                                        .config(Map.of("template", "{{ params.question }}"))
+                                        .build())
+                                .edge(GraphSpec.Edge.builder().from("START").to("user_input").condition("always").build())
+                                .edge(GraphSpec.Edge.builder().from("user_input").to("answer").condition("always").build())
+                                .edge(GraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                                .build())
+                .graphRuntimeContext(GraphRuntimeContext.builder().runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE).build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("帮我查询负责人为靳圣辉的班组", result.getAnswer());
     }
 
     @Test
@@ -1548,6 +1626,46 @@ class LangGraph4jRuntimeAdapterTest {
         verify(skillsServiceClient).importKnowledgeChunks(any(SkillsServiceClient.KnowledgeImportRequest.class));
     }
 
+    @Test
+    void llmNodeUsesLegacyPromptAsSystemPromptFallback() {
+        AtomicReference<ModelServiceClient.ModelChatRequest> captured = new AtomicReference<>();
+        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(
+                capturingModelClient(captured),
+                mock(ToolDefinitionService.class),
+                null,
+                mock(AgentTraceSpanService.class),
+                new ObjectMapper(),
+                null,
+                null,
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-legacy-prompt")
+                .sessionId("session-legacy-prompt")
+                .message("你好")
+                .graphSpec(GraphSpec.builder()
+                        .code("legacy_prompt_graph")
+                        .entry("answer")
+                        .finishNode("answer")
+                        .node(GraphSpec.Node.builder()
+                                .id("answer")
+                                .type("LLM")
+                                .config(Map.of(
+                                        "modelInstanceId", "llm-1",
+                                        "prompt", "Answer as the project page copilot."))
+                                .build())
+                        .edge(GraphSpec.Edge.builder().from("START").to("answer").condition("always").build())
+                        .edge(GraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                        .build())
+                .graphRuntimeContext(defaultContext())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("system", captured.get().getMessages().get(0).getRole());
+        assertEquals("Answer as the project page copilot.", captured.get().getMessages().get(0).getContent());
+        assertEquals("你好", captured.get().getMessages().get(1).getContent());
+    }
+
     private AgentRuntimeRequest request(GraphSpec graphSpec) {
         return AgentRuntimeRequest.builder()
                 .traceId("trace")
@@ -1635,6 +1753,44 @@ class LangGraph4jRuntimeAdapterTest {
 
     private ModelServiceClient successModelClient() {
         return jsonModelClient("langgraph answer");
+    }
+
+    private ModelServiceClient capturingModelClient(AtomicReference<ModelServiceClient.ModelChatRequest> captured) {
+        return new ModelServiceClient() {
+            @Override
+            public ModelChatResult chat(ModelChatRequest request) {
+                captured.set(request);
+                return new ModelChatResult(200, "ok", new ModelChatData(
+                        "ok",
+                        "qwen-plus",
+                        "tongyi",
+                        new ModelUsage(3, 4, 7),
+                        null,
+                        null,
+                        "stop"));
+            }
+
+            @Override
+            public ModelEmbeddingResult embed(ModelEmbeddingRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ModelInstanceResult getModelInstance(String id) {
+                return new ModelInstanceResult(200, "ok", new ModelInstanceData(
+                        id,
+                        "LLM",
+                        "tongyi",
+                        "LLM",
+                        "qwen-plus",
+                        null,
+                        null,
+                        Map.of(),
+                        null,
+                        "ACTIVE",
+                        null));
+            }
+        };
     }
 
     private ModelServiceClient jsonModelClient(String content) {

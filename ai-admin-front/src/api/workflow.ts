@@ -14,6 +14,8 @@ import type {
   WorkflowDraftEditResult,
   WorkflowDraftGenerationRequest,
   WorkflowDraftGenerationResult,
+  PageAssistantWorkflowBindRequest,
+  PageAssistantWorkflowBindingResult,
   WorkflowRuntimeValidationRequest,
   WorkflowRuntimeValidationResult,
   WorkflowNodeDebugRequest,
@@ -196,6 +198,13 @@ export function deleteAgentWorkflowBinding(agentId: string, bindingId: number) {
 export function resolveAgentWorkflowBinding(agentId: string, data: AgentWorkflowResolveRequest) {
   return agentRequest.post<AgentWorkflowBinding>(
     `/api/agents/${encodeURIComponent(agentId)}/workflow-bindings/resolve-preview`,
+    data,
+  )
+}
+
+export function bindPageAssistantWorkflow(workflowId: string, data: PageAssistantWorkflowBindRequest) {
+  return agentRequest.post<PageAssistantWorkflowBindingResult>(
+    `/api/workflows/${encodeURIComponent(workflowId)}/page-assistant/bind`,
     data,
   )
 }

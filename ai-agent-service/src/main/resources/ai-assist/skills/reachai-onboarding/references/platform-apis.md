@@ -24,14 +24,64 @@ Important fields:
 - `embed.defaultAgentKeySlug`: preferred stable Agent identifier for front-end `agentId`.
 - `embed.defaultAgentId`: internal Agent id fallback when no key slug is available.
 - `embed.allowedAgents`: Agent ids/key slugs exposed by the project's embed policy or project ownership.
+- `agentProvisioning.model`: Agent provisioning contract model, normally `agent-provisioning.v1`.
+- `agentProvisioning.provisionAgentUrl`: idempotent API for AI coding tools to create or reuse the project page copilot Agent.
+- `agentProvisioning.defaultAgentKind`: default Agent kind, normally `PAGE_COPILOT`.
+- `agentProvisioning.defaultKeySlug`: predictable page copilot Agent key slug if provisioning has not been called yet.
 - `agentWorkflow.model`: decoupled Agent/Workflow manifest model, normally `agent-workflow.decoupled.v1`.
-- `agentWorkflow.globalAgentKeySlug`: preferred stable global embedded Agent entry. Use this before `embed.defaultAgentKeySlug` when present.
-- `agentWorkflow.bindingStrategy`: how page/action/intent Workflows are bound to the global Agent.
+- `agentWorkflow.globalAgentKeySlug`: stable page copilot Agent entry used for Agent/Workflow routing.
+- `agentWorkflow.bindingStrategy`: how page/action/intent Workflows are bound to the page copilot Agent.
 - `agentWorkflow.endpoints`: platform APIs for managing Agents, Workflows, bindings, and resolve preview.
 
 The manifest does not include `appSecret`.
 
-If `agentWorkflow.globalAgentKeySlug`, `embed.defaultAgentKeySlug`, or `embed.defaultAgentId` is present, use that value directly. Prefer `agentWorkflow.globalAgentKeySlug`. Do not ask the business user to choose an Agent id. If all are empty, stop front-end embed work and ask the ReachAI platform owner to create or enable a project Agent first.
+Before front-end embed work, call `agentProvisioning.provisionAgentUrl` when present. Use the response `agent.keySlug` as the business front-end `agentId`. The call is idempotent, so it is safe for Cursor or another AI coding tool to retry. Do not ask the business user to choose an Agent id. If provisioning is unavailable, fall back to `agentProvisioning.defaultKeySlug`, `agentWorkflow.globalAgentKeySlug`, `embed.defaultAgentKeySlug`, or `embed.defaultAgentId`.
+
+## Agent Provisioning
+
+AI coding tools can create or reuse the project page copilot Agent without requiring manual platform configuration:
+
+```http
+POST /api/ai-assist/projects/{projectId}/agents/provision?aiCodingKey={key}
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "agentKind": "PAGE_COPILOT",
+  "ensureDefaultWorkflow": true,
+  "requestedBy": "Cursor"
+}
+```
+
+Response body:
+
+```json
+{
+  "schema": "agent-provisioning.v1",
+  "agent": {
+    "id": "agent-001",
+    "keySlug": "demo-service-page-copilot",
+    "agentKind": "PAGE_COPILOT"
+  },
+  "defaultWorkflow": {
+    "id": "workflow-001",
+    "keySlug": "demo-service-page-copilot-default",
+    "workflowType": "PAGE_COPILOT_DEFAULT"
+  },
+  "defaultBinding": {
+    "id": 1,
+    "bindingType": "DEFAULT"
+  },
+  "createdAgent": true,
+  "createdDefaultWorkflow": true,
+  "createdDefaultBinding": true
+}
+```
+
+Use `agent.keySlug` everywhere the business gateway token broker or front-end embed SDK asks for `agentId`.
 
 ## Embed Token Exchange
 
@@ -48,7 +98,7 @@ Minimum request shape:
 ```json
 {
   "projectCode": "demo-service",
-  "agentId": "<manifest.agentWorkflow.globalAgentKeySlug>",
+  "agentId": "<provisionedAgentKeySlug>",
   "pageKey": "teamArchive.list",
   "pageInstanceId": "page-001",
   "route": "/teams",
@@ -68,14 +118,14 @@ Business front-end flow:
 
 1. Generate or reuse a stable page instance id for the current page.
 2. Determine the stable current page key, for example `teamArchive.list`.
-3. Call the business gateway token broker, for example `/api/reachai/embed-token`, with the normal business login token and include `agentId`, `pageKey`, `pageInstanceId`, `route`, and `origin`.
+3. Call the business gateway token broker, for example `/api/reachai/embed-token`, with the normal business login token and include `agentId=<provisionedAgentKeySlug>`, `pageKey`, `pageInstanceId`, `route`, and `origin`.
 4. Use the returned embed token as `Authorization: Bearer <token>` for ReachAI chat session and message APIs.
 5. Create the chat session with the same `pageKey`. The ReachAI SDK does this when `createEafChat({ page: { pageKey, routePattern } })` is configured.
 6. Never send `appSecret` or project signing material to the browser.
 
 Token boundary note: the business login token and the ReachAI embed token are different credentials. The business login token belongs only on the token broker request. `/api/reachai/embed/**`, `/api/embed/chat/sessions`, and message APIs must use the short-lived embed token returned by the broker.
 
-Gateway authentication note: `/api/reachai/embed-token` should use the business login token, but `/api/reachai/embed/**` must forward the ReachAI embed token unchanged. Do not let business OAuth/JWT filters validate `/api/reachai/embed/**` as a business login request.
+Gateway authentication note: `/api/reachai/embed-token` should use the business login token, but `/api/reachai/embed/**` must forward the ReachAI embed token unchanged. Do not let business OAuth/JWT filters validate `/api/reachai/embed/**` as a business login request. Also check whitelist filters that remove login JWTs, such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, `RemoveRequestHeader=Authorization`, or code that calls `mutate().header("Authorization", "")`; those filters must not clear the embed-token `Authorization` header on `/api/reachai/embed/**`.
 
 Gateway CORS note: when Spring Cloud Gateway proxies `/api/reachai/embed/**` to ReachAI `/api/embed/**`, both the gateway and ReachAI may add CORS headers. Duplicate `Access-Control-Allow-Origin` or `Access-Control-Allow-Credentials` values can make browsers hide the real response as `status 0 Unknown Error`. Add a route-level dedupe filter such as:
 
@@ -171,5 +221,4 @@ Use after SDK startup/sync when the platform has received capability snapshots a
 Do not assume these exist unless the manifest exposes them:
 - MCP tool endpoints.
 - One-time secret token endpoints.
-- Agent or page-assistant generation endpoints.
 - Deployment or production rollout endpoints.

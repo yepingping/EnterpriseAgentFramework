@@ -290,6 +290,8 @@ export interface PageAssistantFileEvidence {
   role?: string | null
   exists?: boolean | null
   sha256?: string | null
+  validationStatus?: 'VERIFIED' | 'HASH_MISSING' | string | null
+  validationMessage?: string | null
 }
 
 export interface PageAssistantPageRegisterRequest {
@@ -361,6 +363,8 @@ export interface PageAssistantOnboardingManifest {
     catalogSyncUrl: string
     checksRunUrl: string
     registerPageUrl?: string | null
+    skillPackageUrl?: string | null
+    scriptDownloadUrl?: string | null
   }
   security: AiOnboardingManifest['security']
   localExecution?: {
@@ -376,6 +380,27 @@ export interface PageAssistantOnboardingManifest {
       readonlyFirst: boolean
       highRiskActionsRequireConfirm: boolean
     }
+    bridgeApi?: {
+      global: string
+      methods: Record<string, string>
+      schemas: {
+        registerRequest: Record<string, unknown>
+        executeRequest: Record<string, unknown>
+        executeResponse: Record<string, unknown>
+      }
+      statusValues: string[]
+      errorCodes: string[]
+      examples: Array<{
+        name: string
+        actionKey: string
+        request: Record<string, unknown>
+        response: Record<string, unknown>
+      }>
+      safety: {
+        readonlyFirst: boolean
+        highRiskActionsRequireConfirm: boolean
+      }
+    }
   }
   scaffold?: {
     framework: string
@@ -383,6 +408,11 @@ export interface PageAssistantOnboardingManifest {
       name: string
       role: string
     }>
+    helperScriptPath?: string | null
+    scriptDownloadUrl?: string | null
+    skillPackageUrl?: string | null
+    scaffoldCommand?: string | null
+    verifyCommand?: string | null
   }
 }
 
@@ -438,6 +468,16 @@ export interface AiOnboardingManifest {
       projectCode?: string | null
       enabled: boolean
     }>
+  }
+  agentProvisioning?: {
+    model: string
+    defaultAgentKind?: string | null
+    defaultKeySlug?: string | null
+    provisionAgentUrl?: string | null
+    idempotent?: boolean
+    createsDefaultWorkflow?: boolean
+    createsDefaultBinding?: boolean
+    requiredSteps?: string[]
   }
   agentWorkflow?: {
     model: string
