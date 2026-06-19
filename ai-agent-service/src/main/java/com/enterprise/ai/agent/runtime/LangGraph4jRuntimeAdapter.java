@@ -155,6 +155,15 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
     static final String CONFIG_DIRECT_RETURN_THRESHOLD = "directReturnThreshold";
     static final String CONFIG_CONDITION_GROUPS = "conditionGroups";
     static final String CONFIG_DEFAULT_ROUTE = "defaultRoute";
+    static final String CONFIG_STRATEGY = "strategy";
+    static final String CONFIG_CONFIDENCE_THRESHOLD = "confidenceThreshold";
+    static final String CONFIG_LLM_PROMPT = "llmPrompt";
+    static final String CLASSIFIER_STRATEGY_KEYWORD = "KEYWORD";
+    static final String CLASSIFIER_STRATEGY_LLM = "LLM";
+    static final String CLASSIFIER_STRATEGY_HYBRID = "HYBRID";
+    static final String CLASSIFIER_MATCHED_BY_KEYWORD = "keyword";
+    static final String CLASSIFIER_MATCHED_BY_LLM = "llm";
+    static final String CLASSIFIER_MATCHED_BY_DEFAULT = "default";
     static final String CONFIG_INTERACTION_TYPE = "interactionType";
     static final String CONFIG_COMPONENT = "component";
     static final String CONFIG_DATA_EXPRESSION = "dataExpression";
@@ -1690,8 +1699,46 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
     private Map<String, Object> executeIntentClassifier(LangGraphState state, GraphSpec.Node node) {
         Map<String, Object> config = safeMap(node.getConfig());
         String inputExpression = firstNonBlank(asString(config.get(CONFIG_INPUT_EXPRESSION)), INPUT);
-        String input = stringify(resolveExpression(state, inputExpression)).toLowerCase();
-        String route = firstNonBlank(asString(config.get(CONFIG_DEFAULT_ROUTE)), "else");
+        String rawInput = stringify(resolveExpression(state, inputExpression));
+        String inputLower = rawInput.toLowerCase();
+        String defaultRoute = firstNonBlank(asString(config.get(CONFIG_DEFAULT_ROUTE)), "else");
+        String strategy = normalizeClassifierStrategy(config.get(CONFIG_STRATEGY));
+        double confidenceThreshold = doubleValue(config.get(CONFIG_CONFIDENCE_THRESHOLD), 0.7D);
+        IntentClassification classification;
+        if (CLASSIFIER_STRATEGY_LLM.equals(strategy)) {
+            classification = llmClassify(state, config, rawInput, defaultRoute, confidenceThreshold);
+        } else if (CLASSIFIER_STRATEGY_HYBRID.equals(strategy)) {
+            String keywordRoute = keywordClassify(inputLower, config, defaultRoute);
+            if (!defaultRoute.equals(keywordRoute)) {
+                classification = IntentClassification.keyword(keywordRoute);
+            } else {
+                classification = llmClassify(state, config, rawInput, defaultRoute, confidenceThreshold);
+            }
+        } else {
+            String keywordRoute = keywordClassify(inputLower, config, defaultRoute);
+            classification = IntentClassification.keyword(keywordRoute, defaultRoute);
+        }
+        Map<String, Object> result = classification.toResultMap(rawInput, strategy);
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put(LAST_OUTPUT, result);
+        update.put(LAST_SUCCESS, true);
+        update.put(LAST_ERROR, "");
+        update.put(LAST_ROUTE, classification.route());
+        update.put(nodeOutputKey(node.getId()), result);
+        putOutputAlias(update, node, result);
+        return update;
+    }
+
+    private String normalizeClassifierStrategy(Object raw) {
+        String strategy = asString(raw).trim().toUpperCase();
+        if (CLASSIFIER_STRATEGY_LLM.equals(strategy) || CLASSIFIER_STRATEGY_HYBRID.equals(strategy)) {
+            return strategy;
+        }
+        return CLASSIFIER_STRATEGY_KEYWORD;
+    }
+
+    private String keywordClassify(String inputLower, Map<String, Object> config, String defaultRoute) {
+        String route = defaultRoute;
         Object rawClasses = config.get(CONFIG_CLASSES);
         if (rawClasses instanceof List<?> classes) {
             for (Object raw : classes) {
@@ -1704,23 +1751,159 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                 if (rawKeywords instanceof List<?> keywords && keywords.stream()
                         .map(LangGraph4jRuntimeAdapter::asString)
                         .filter(keyword -> !keyword.isBlank())
-                        .anyMatch(keyword -> input.contains(keyword.toLowerCase()))) {
+                        .anyMatch(keyword -> inputLower.contains(keyword.toLowerCase()))) {
                     route = id;
                     break;
                 }
             }
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("route", route);
-        result.put("input", input);
-        Map<String, Object> update = new LinkedHashMap<>();
-        update.put(LAST_OUTPUT, result);
-        update.put(LAST_SUCCESS, true);
-        update.put(LAST_ERROR, "");
-        update.put(LAST_ROUTE, route);
-        update.put(nodeOutputKey(node.getId()), result);
-        putOutputAlias(update, node, result);
-        return update;
+        return route;
+    }
+
+    private IntentClassification llmClassify(LangGraphState state,
+                                               Map<String, Object> config,
+                                               String input,
+                                               String defaultRoute,
+                                               double confidenceThreshold) {
+        try {
+            String modelInstanceId = firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), state.value(MODEL_INSTANCE_ID, ""));
+            List<Map<String, Object>> classList = classifierClassList(config.get(CONFIG_CLASSES));
+            Set<String> allowedRoutes = new HashSet<>();
+            for (Map<String, Object> item : classList) {
+                String id = asString(item.get("id"));
+                if (!id.isBlank()) {
+                    allowedRoutes.add(id);
+                }
+            }
+            String customPrompt = asString(config.get(CONFIG_LLM_PROMPT));
+            String userPrompt = customPrompt.isBlank()
+                    ? buildClassifierUserPrompt(input, classList, defaultRoute)
+                    : renderTemplate(state, customPrompt);
+            ModelServiceClient.ModelChatResult result = modelServiceClient.chat(ModelServiceClient.ModelChatRequest.builder()
+                    .modelInstanceId(modelInstanceId)
+                    .messages(List.of(
+                            ModelServiceClient.ModelChatRequest.ChatMessage.builder()
+                                    .role("system")
+                                    .content(buildClassifierSystemPrompt(allowedRoutes, defaultRoute))
+                                    .build(),
+                            ModelServiceClient.ModelChatRequest.ChatMessage.builder()
+                                    .role("user")
+                                    .content(userPrompt)
+                                    .build()))
+                    .build());
+            if (result == null || result.getCode() != SUCCESS_CODE || result.getData() == null) {
+                String message = result == null ? "empty response" : result.getMessage();
+                return IntentClassification.fallback(defaultRoute, "model call failed: " + message);
+            }
+            Map<String, Object> parsed = parseJsonObjectOrNull(nullToEmpty(result.getData().getContent()));
+            if (parsed == null) {
+                return IntentClassification.fallback(defaultRoute, "invalid JSON response");
+            }
+            String route = asString(parsed.get("route"));
+            double confidence = doubleValue(parsed.get("confidence"), 0D);
+            String reason = asString(parsed.get("reason"));
+            if (!allowedRoutes.contains(route) || confidence < confidenceThreshold) {
+                return IntentClassification.fallback(defaultRoute, reason.isBlank() ? "fallback to default route" : reason, confidence);
+            }
+            return IntentClassification.llm(route, confidence, reason);
+        } catch (Exception ex) {
+            log.warn("intent classifier llm failed: {}", ex.getMessage());
+            return IntentClassification.fallback(defaultRoute, nullToEmpty(ex.getMessage()));
+        }
+    }
+
+    private String buildClassifierSystemPrompt(Set<String> allowedRoutes, String defaultRoute) {
+        return "You classify user input into one predefined route id. "
+                + "Return only a JSON object with keys route, confidence, reason. "
+                + "route must be one of: " + String.join(", ", allowedRoutes)
+                + ". If uncertain, use route \"" + defaultRoute + "\" with low confidence. "
+                + "Example: {\"route\":\"search\",\"confidence\":0.92,\"reason\":\"用户要求查询表格\"}";
+    }
+
+    private String buildClassifierUserPrompt(String input, List<Map<String, Object>> classList, String defaultRoute) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Classify the user input.\n");
+        builder.append("Allowed routes:\n");
+        for (Map<String, Object> item : classList) {
+            String id = asString(item.get("id"));
+            if (id.isBlank()) {
+                continue;
+            }
+            builder.append("- id=").append(id);
+            String label = asString(item.get("label"));
+            if (!label.isBlank()) {
+                builder.append(", label=").append(label);
+            }
+            String description = asString(item.get("description"));
+            if (!description.isBlank()) {
+                builder.append(", description=").append(description);
+            }
+            builder.append('\n');
+        }
+        builder.append("Default route when uncertain: ").append(defaultRoute).append('\n');
+        builder.append("User input:\n").append(input);
+        return builder.toString();
+    }
+
+    private List<Map<String, Object>> classifierClassList(Object rawClasses) {
+        if (!(rawClasses instanceof List<?> classes)) {
+            return List.of();
+        }
+        return classes.stream()
+                .map(LangGraph4jRuntimeAdapter::asMap)
+                .filter(item -> !asString(item.get("id")).isBlank())
+                .toList();
+    }
+
+    private Map<String, Object> parseJsonObjectOrNull(String content) {
+        String normalized = stripJsonFence(content);
+        if (normalized.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(normalized, new TypeReference<LinkedHashMap<String, Object>>() {
+            });
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private record IntentClassification(String route, String matchedBy, Double confidence, String reason) {
+        static IntentClassification keyword(String route) {
+            return new IntentClassification(route, CLASSIFIER_MATCHED_BY_KEYWORD, null, null);
+        }
+
+        static IntentClassification keyword(String route, String defaultRoute) {
+            String matchedBy = defaultRoute.equals(route) ? CLASSIFIER_MATCHED_BY_DEFAULT : CLASSIFIER_MATCHED_BY_KEYWORD;
+            return new IntentClassification(route, matchedBy, null, null);
+        }
+
+        static IntentClassification llm(String route, double confidence, String reason) {
+            return new IntentClassification(route, CLASSIFIER_MATCHED_BY_LLM, confidence, reason);
+        }
+
+        static IntentClassification fallback(String defaultRoute, String reason) {
+            return fallback(defaultRoute, reason, null);
+        }
+
+        static IntentClassification fallback(String defaultRoute, String reason, Double confidence) {
+            return new IntentClassification(defaultRoute, CLASSIFIER_MATCHED_BY_DEFAULT, confidence, reason);
+        }
+
+        Map<String, Object> toResultMap(String input, String strategy) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("route", route);
+            result.put("input", input);
+            result.put("strategy", strategy);
+            result.put("matchedBy", matchedBy);
+            if (confidence != null) {
+                result.put("confidence", confidence);
+            }
+            if (reason != null && !reason.isBlank()) {
+                result.put("reason", reason);
+            }
+            return result;
+        }
     }
 
     private Map<String, Object> executeVariableAggregator(LangGraphState state, GraphSpec.Node node) {
@@ -2846,7 +3029,70 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                             GraphRuntimeContext runtimeContext,
                             AgentTraceSpanService.SpanRecord record) {
         if (traceSpanService != null) {
-            traceSpanService.record(context, runtimeContext, record);
+            traceSpanService.record(context, runtimeContext, enrichSpanRecord(context, runtimeContext, record));
+        }
+    }
+
+    private AgentTraceSpanService.SpanRecord enrichSpanRecord(ToolExecutionContext context,
+                                                              GraphRuntimeContext runtimeContext,
+                                                              AgentTraceSpanService.SpanRecord record) {
+        if (record == null) {
+            return null;
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (record.metadata() != null) {
+            metadata.putAll(record.metadata());
+        }
+        mergeRuntimeMetadata(metadata, runtimeContext);
+        return AgentTraceSpanService.SpanRecord.builder()
+                .traceId(firstNonBlank(record.traceId(), context == null ? null : context.getTraceId()))
+                .spanId(record.spanId())
+                .parentSpanId(record.parentSpanId())
+                .spanType(record.spanType())
+                .runtimeType(firstNonBlank(record.runtimeType(), runtimeContext == null ? null : runtimeContext.getRuntimeType()))
+                .nodeId(record.nodeId())
+                .toolName(record.toolName())
+                .modelInstanceId(record.modelInstanceId())
+                .input(record.input())
+                .output(record.output())
+                .status(record.status())
+                .success(record.success())
+                .errorCode(record.errorCode())
+                .errorMessage(record.errorMessage())
+                .latencyMs(record.latencyMs())
+                .tokenCost(record.tokenCost())
+                .startedAt(record.startedAt())
+                .endedAt(record.endedAt())
+                .metadata(metadata)
+                .build();
+    }
+
+    private void mergeRuntimeMetadata(Map<String, Object> metadata, GraphRuntimeContext runtimeContext) {
+        if (metadata == null || runtimeContext == null) {
+            return;
+        }
+        putIfPresent(metadata, "sourceType", runtimeContext.getSourceType());
+        putIfPresent(metadata, "sourceId", runtimeContext.getSourceId());
+        if (isWorkflowSourceType(runtimeContext.getSourceType())) {
+            putIfPresent(metadata, "workflowId", runtimeContext.getSourceId());
+            putIfPresent(metadata, "workflowKeySlug", runtimeContext.getSourceKeySlug());
+            putIfPresent(metadata, "workflowVersion", runtimeContext.getSourceVersion());
+            putIfPresent(metadata, "workflowVersionId", runtimeContext.getSourceVersionId());
+        }
+        putIfPresent(metadata, "runtimeType", runtimeContext.getRuntimeType());
+        putIfPresent(metadata, "runtimePlacement", runtimeContext.getRuntimePlacement());
+        putIfPresent(metadata, "intentType", runtimeContext.getIntentType());
+        putIfPresent(metadata, "agentName", runtimeContext.getName());
+        Map<String, Object> extra = runtimeContext.getExtra();
+        if (extra != null) {
+            putIfPresent(metadata, "workflowId", extra.get("workflowId"));
+            putIfPresent(metadata, "workflowKeySlug", extra.get("workflowKeySlug"));
+            putIfPresent(metadata, "workflowVersion", extra.get("workflowVersion"));
+            putIfPresent(metadata, "workflowVersionId", extra.get("workflowVersionId"));
+            putIfPresent(metadata, "entryAgentId", extra.get("entryAgentId"));
+            putIfPresent(metadata, "entryAgentKeySlug", extra.get("entryAgentKeySlug"));
+            putIfPresent(metadata, "bindingId", extra.get("bindingId"));
+            putIfPresent(metadata, "bindingType", extra.get("bindingType"));
         }
     }
 

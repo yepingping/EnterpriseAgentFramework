@@ -374,6 +374,7 @@ class WorkflowAiCodingServiceTest {
                 mock(WorkflowReleaseValidationService.class),
                 mock(AgentWorkflowBindingService.class),
                 null);
+        AiCodingKeyContext.clear();
         when(workflowService.findById("wf-1")).thenReturn(Optional.of(sampleWorkflow()));
 
         assertThrows(WorkflowAiCodingUnauthorizedException.class, () -> service.getContext("wf-1"));
@@ -494,6 +495,61 @@ class WorkflowAiCodingServiceTest {
         assertEquals("DRY_RUN", response.getStatus());
         assertTrue(response.getWarnings().stream().anyMatch(item -> item.contains("dryRun=true")));
         verify(runtimeAdapter, never()).debugRun(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void runAuditUsesReturnedTraceIdForRunOpsLookup() throws Exception {
+        WorkflowDefinitionService workflowService = mock(WorkflowDefinitionService.class);
+        LangGraph4jRuntimeAdapter runtimeAdapter = mock(LangGraph4jRuntimeAdapter.class);
+        GuardDecisionLogService guardDecisionLogService = mock(GuardDecisionLogService.class);
+        ScanProjectService scanProjectService = mock(ScanProjectService.class);
+        when(scanProjectService.matchesAiCodingAccessKey(7L, TEST_AI_CODING_KEY)).thenReturn(true);
+        ScanProjectEntity project = new ScanProjectEntity();
+        project.setId(7L);
+        project.setProjectCode("orders");
+        when(scanProjectService.getById(7L)).thenReturn(project);
+        AiCodingKeyContext.set(TEST_AI_CODING_KEY);
+        WorkflowAiCodingService service = new WorkflowAiCodingService(
+                workflowService,
+                mock(WorkflowVersionService.class),
+                mock(WorkflowReleaseValidationService.class),
+                new WorkflowGraphPatchService(objectMapper),
+                new WorkflowRuntimeGraphAdapter(objectMapper),
+                runtimeAdapter,
+                mock(AgentWorkflowBindingService.class),
+                mock(PageActionRegistryMapper.class),
+                new WorkflowAiCodingAuthService(scanProjectService),
+                mock(RunOpsService.class),
+                mock(ModelServiceClient.class),
+                mock(ToolDefinitionService.class),
+                guardDecisionLogService,
+                objectMapper);
+
+        WorkflowDefinitionEntity workflow = sampleWorkflow();
+        when(workflowService.findById("wf-1")).thenReturn(Optional.of(workflow));
+        when(runtimeAdapter.debugRun(any(), any(), any(), any(), any()))
+                .thenReturn(LangGraph4jRuntimeAdapter.WorkflowDebugRunResult.builder()
+                        .traceId("trace-run")
+                        .runId("run-1")
+                        .status("SUCCESS")
+                        .success(true)
+                        .answer("ok")
+                        .steps(List.of())
+                        .build());
+
+        WorkflowAiCodingRunResponse response = service.run("wf-1", WorkflowAiCodingRunRequest.builder()
+                .message("hello")
+                .build());
+
+        assertEquals("SUCCESS", response.getStatus());
+        verify(guardDecisionLogService).record(
+                eq("trace-run"),
+                eq("WORKFLOW_AI_CODING"),
+                eq("WORKFLOW"),
+                eq("wf-1"),
+                eq("DEBUG_RUN"),
+                eq(null),
+                any());
     }
 
     @Test
@@ -728,7 +784,7 @@ class WorkflowAiCodingServiceTest {
     }
 
     @Test
-    void getRunDetailRejectsTraceFromOtherWorkflow() {
+    void getRunDetailRejectsTraceFromOtherWorkflow() throws Exception {
         WorkflowDefinitionService workflowService = mock(WorkflowDefinitionService.class);
         RunOpsService runOpsService = mock(RunOpsService.class);
         WorkflowAiCodingService service = newService(

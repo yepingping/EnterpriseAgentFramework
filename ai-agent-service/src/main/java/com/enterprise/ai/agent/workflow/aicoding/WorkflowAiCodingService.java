@@ -628,7 +628,7 @@ public class WorkflowAiCodingService {
             metadata.put("authSource", aiCodingAuthService.auditActorLabel(workflow.getProjectId()));
         }
         guardDecisionLogService.record(
-                null,
+                StringUtils.hasText(traceId) ? traceId.trim() : null,
                 "WORKFLOW_AI_CODING",
                 "WORKFLOW",
                 workflow.getId(),

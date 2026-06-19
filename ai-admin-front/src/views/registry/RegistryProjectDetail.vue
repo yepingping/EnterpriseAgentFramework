@@ -77,7 +77,15 @@
 
     <el-card class="detail-card health-card" shadow="never">
       <div class="health-summary">
-        <div v-for="item in healthMetrics" :key="item.label" class="health-item" :class="item.tone">
+        <button
+          v-for="item in healthMetrics"
+          :key="item.label"
+          class="health-item"
+          :class="[item.tone, { 'is-clickable': item.clickable }]"
+          type="button"
+          :disabled="!item.clickable"
+          @click="item.action?.()"
+        >
           <div class="health-icon">
             <el-icon><component :is="item.icon" /></el-icon>
           </div>
@@ -86,35 +94,7 @@
             <strong>{{ item.value }}</strong>
             <small>{{ item.desc }}</small>
           </div>
-        </div>
-      </div>
-    </el-card>
-
-    <el-card class="detail-card ai-coding-key-card" shadow="never">
-      <template #header>
-        <div class="section-title">
-          <span class="title-mark" />
-          <span>AI Coding 接入秘钥</span>
-        </div>
-      </template>
-      <div class="ai-coding-key-panel">
-        <div class="ai-coding-key-head">
-          <div>
-            <strong>项目级统一秘钥</strong>
-            <span>启用后供 Cursor、Claude Code、Codex 免登录接入本项目的页面助手与 Workflow AI Coding。</span>
-          </div>
-          <el-switch v-model="aiCodingAccessEnabled" active-text="启用" inactive-text="关闭" />
-        </div>
-        <div class="ai-coding-key-form">
-          <el-input
-            v-model="aiCodingAccessKey"
-            :disabled="!aiCodingAccessEnabled"
-            show-password
-            placeholder="保存时为空会自动生成；清空并关闭后 AI 工具无法连接"
-          />
-          <el-button :loading="aiCodingAccessSaving" type="primary" @click="saveAiCodingAccess">保存</el-button>
-          <el-button @click="clearAiCodingAccess">清空并关闭</el-button>
-        </div>
+        </button>
       </div>
     </el-card>
 
@@ -251,6 +231,60 @@
       </div>
     </el-card>
 
+    <el-dialog
+      v-model="aiCodingDialogVisible"
+      title="AI Coding 接入信息"
+      width="720px"
+      class="ai-coding-dialog"
+      destroy-on-close
+    >
+      <el-alert
+        type="info"
+        show-icon
+        :closable="false"
+        title="供 Cursor、Claude Code、Codex 接入本项目的页面助手与 Workflow AI Coding。"
+        description="下方信息可逐项复制，也可一键复制全部；秘钥请勿提交到 Git 或聊天上下文。"
+      />
+      <section class="ai-coding-dialog-manage">
+        <div class="ai-coding-key-head">
+          <div>
+            <strong>项目级统一秘钥</strong>
+            <span>启用后外部 AI 工具可免平台登录访问本项目 AI Coding 接口。</span>
+          </div>
+          <el-switch v-model="aiCodingAccessEnabled" active-text="启用" inactive-text="关闭" />
+        </div>
+        <div class="ai-coding-key-form">
+          <el-input
+            v-model="aiCodingAccessKey"
+            :disabled="!aiCodingAccessEnabled"
+            show-password
+            placeholder="保存时为空会自动生成；清空并关闭后 AI 工具无法连接"
+          />
+          <el-button :loading="aiCodingAccessSaving" type="primary" @click="saveAiCodingAccess">保存</el-button>
+          <el-button @click="clearAiCodingAccess">清空并关闭</el-button>
+        </div>
+      </section>
+      <section class="ai-coding-info-list">
+        <div v-for="row in aiCodingInfoRows" :key="row.label" class="ai-coding-info-row">
+          <span class="ai-coding-info-label">{{ row.label }}</span>
+          <code class="ai-coding-info-value">{{ row.displayValue }}</code>
+          <el-button
+            link
+            type="primary"
+            :icon="DocumentCopy"
+            :disabled="!row.copyValue"
+            @click="copyText(row.copyValue, row.label)"
+          >
+            复制
+          </el-button>
+        </div>
+      </section>
+      <template #footer>
+        <el-button @click="aiCodingDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :icon="DocumentCopy" @click="copyAiCodingBundle">复制全部接入信息</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="editDialogVisible" title="编辑项目" width="720px" destroy-on-close>
       <el-form label-width="120px">
         <el-form-item label="项目名称" required>
@@ -349,8 +383,10 @@ import {
   Clock,
   Collection,
   Delete,
+  DocumentCopy,
   EditPen,
   Grid,
+  Key,
   Link,
   Lock,
   Monitor,
@@ -422,6 +458,60 @@ const editAccessLockedToSdk = ref(false)
 const aiCodingAccessSaving = ref(false)
 const aiCodingAccessEnabled = ref(false)
 const aiCodingAccessKey = ref('')
+const aiCodingDialogVisible = ref(false)
+
+const reachAiPlatformUrl = computed(
+  () => import.meta.env.VITE_AI_AGENT_SERVICE_URL?.trim() || window.location.origin,
+)
+
+const aiCodingKeyDisplay = computed(() => {
+  if (!aiCodingAccessEnabled.value) return '未启用'
+  const key = aiCodingAccessKey.value.trim()
+  return key || '已启用（保存后显示）'
+})
+
+const aiCodingInfoRows = computed(() => {
+  const p = project.value
+  return [
+    {
+      label: 'ReachAI 平台地址',
+      displayValue: reachAiPlatformUrl.value,
+      copyValue: reachAiPlatformUrl.value,
+    },
+    {
+      label: '项目 ID',
+      displayValue: p?.id ? String(p.id) : '-',
+      copyValue: p?.id ? String(p.id) : '',
+    },
+    {
+      label: '项目编码',
+      displayValue: p?.projectCode || projectCode.value || '-',
+      copyValue: p?.projectCode || projectCode.value || '',
+    },
+    {
+      label: '项目名称',
+      displayValue: p?.name || '-',
+      copyValue: p?.name || '',
+    },
+    {
+      label: 'App Key',
+      displayValue: p?.registryAppKey || '未配置',
+      copyValue: p?.registryAppKey || '',
+    },
+    {
+      label: 'AI Coding 接入秘钥',
+      displayValue: aiCodingKeyDisplay.value,
+      copyValue: aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim() ? aiCodingAccessKey.value.trim() : '',
+    },
+  ]
+})
+
+const aiCodingBundleText = computed(() =>
+  aiCodingInfoRows.value
+    .filter((row) => row.copyValue)
+    .map((row) => `${row.label}：${row.copyValue}`)
+    .join('\n'),
+)
 
 const projectKindOptions: { value: ProjectKind; label: string }[] = [
   { value: 'SCAN', label: '扫描接入' },
@@ -504,6 +594,7 @@ const healthMetrics = computed(() => [
     desc: `最近心跳 ${latestHeartbeat.value}`,
     icon: Monitor,
     tone: instances.value.some((item) => item.status === 'ONLINE') ? 'good' : 'attention',
+    clickable: false,
   },
   {
     label: '能力资产',
@@ -511,6 +602,7 @@ const healthMetrics = computed(() => [
     desc: (project.value?.toolCount ?? 0) > 0 ? '项目能力资产已形成目录' : '建议检查后端接口管理或能力上报',
     icon: Collection,
     tone: (project.value?.toolCount ?? 0) > 0 ? 'good' : 'attention',
+    clickable: false,
   },
   {
     label: '前端页面管理',
@@ -518,6 +610,7 @@ const healthMetrics = computed(() => [
     desc: `${activePageActionCount.value} ACTIVE / ${removedPageActionCount.value} REMOVED`,
     icon: Link,
     tone: activePageActionCount.value > 0 ? 'good' : 'neutral',
+    clickable: false,
   },
   {
     label: '最近上报',
@@ -525,6 +618,16 @@ const healthMetrics = computed(() => [
     desc: '页面、动作、实例的最近观测时间',
     icon: Clock,
     tone: lastPageActionSeenAt.value !== '-' ? 'good' : 'neutral',
+    clickable: false,
+  },
+  {
+    label: 'AI Coding 接入',
+    value: aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim() ? '已启用' : '未启用',
+    desc: '点击查看接入信息与复制',
+    icon: Key,
+    tone: aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim() ? 'good' : 'attention',
+    clickable: true,
+    action: openAiCodingDialog,
   },
 ])
 
@@ -668,6 +771,33 @@ async function clearAiCodingAccess() {
   aiCodingAccessEnabled.value = false
   aiCodingAccessKey.value = ''
   await saveAiCodingAccess()
+}
+
+function openAiCodingDialog() {
+  aiCodingDialogVisible.value = true
+}
+
+async function copyText(text: string, label?: string) {
+  const value = text.trim()
+  if (!value) {
+    ElMessage.warning(label ? `${label} 暂无可复制内容` : '暂无可复制内容')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(value)
+    ElMessage.success(label ? `已复制${label}` : '已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本')
+  }
+}
+
+async function copyAiCodingBundle() {
+  const text = aiCodingBundleText.value.trim()
+  if (!text) {
+    ElMessage.warning('请先启用并保存 AI Coding 接入秘钥')
+    return
+  }
+  await copyText(text, '全部接入信息')
 }
 
 async function loadInstances() {
@@ -1118,20 +1248,17 @@ function goSdkAccessWizard() {
 }
 
 .health-card,
-.ai-coding-key-card,
 .workbench-grid,
 .page-action-summary-card {
   margin-bottom: 14px;
 }
 
-.ai-coding-key-card :deep(.el-card__body) {
-  padding: 16px 20px 20px;
-}
-
-.ai-coding-key-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.ai-coding-dialog-manage {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid rgb(var(--brand-hover-rgb) / 0.2);
+  border-radius: 8px;
+  background: rgb(var(--brand-selected-rgb) / 0.18);
 }
 
 .ai-coding-key-head {
@@ -1159,10 +1286,42 @@ function goSdkAccessWizard() {
   grid-template-columns: minmax(240px, 1fr) auto auto;
   gap: 10px;
   align-items: center;
+  margin-top: 12px;
+}
+
+.ai-coding-info-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-coding-info-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e7ebf3;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.ai-coding-info-label {
+  color: #667085;
+  font-size: 13px;
+}
+
+.ai-coding-info-value {
+  min-width: 0;
+  color: #101828;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 @media (max-width: 960px) {
-  .ai-coding-key-form {
+  .ai-coding-key-form,
+  .ai-coding-info-row {
     grid-template-columns: 1fr;
   }
 }
@@ -1174,7 +1333,7 @@ function goSdkAccessWizard() {
 
 .health-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
 }
 
@@ -1185,11 +1344,26 @@ function goSdkAccessWizard() {
   gap: 10px;
   align-items: center;
   padding: 8px 14px;
+  border: 0;
   border-right: 1px solid rgb(var(--brand-hover-rgb) / 0.16);
   background: transparent;
+  text-align: left;
 
   &:last-child {
     border-right: 0;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &.is-clickable:not(:disabled) {
+    cursor: pointer;
+    transition: background-color 0.18s ease;
+
+    &:hover {
+      background: rgb(var(--brand-selected-rgb) / 0.34);
+    }
   }
 
   strong {
@@ -1859,7 +2033,7 @@ function goSdkAccessWizard() {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .health-item:nth-child(2) {
+  .health-item:nth-child(2n) {
     border-right: 0;
   }
 }

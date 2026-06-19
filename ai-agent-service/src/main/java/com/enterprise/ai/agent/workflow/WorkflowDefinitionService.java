@@ -19,6 +19,8 @@ public class WorkflowDefinitionService {
     private static final Pattern KEY_SLUG = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{1,127}");
 
     private final WorkflowDefinitionMapper mapper;
+    private final WorkflowVersionMapper versionMapper;
+    private final AgentWorkflowBindingService bindingService;
 
     public List<WorkflowDefinitionEntity> list(Long projectId, String projectCode, String workflowType, String status) {
         var query = Wrappers.<WorkflowDefinitionEntity>lambdaQuery()
@@ -35,7 +37,11 @@ public class WorkflowDefinitionService {
         if (StringUtils.hasText(status)) {
             query.eq(WorkflowDefinitionEntity::getStatus, status.trim());
         }
-        return mapper.selectList(query);
+        List<WorkflowDefinitionEntity> items = mapper.selectList(query);
+        for (WorkflowDefinitionEntity item : items) {
+            item.setDeletable(isDeletable(item));
+        }
+        return items;
     }
 
     public Optional<WorkflowDefinitionEntity> findById(String id) {
@@ -78,8 +84,41 @@ public class WorkflowDefinitionService {
     }
 
     @Transactional
-    public boolean delete(String id) {
-        return StringUtils.hasText(id) && mapper.deleteById(id) > 0;
+    public void delete(String id) {
+        if (!StringUtils.hasText(id)) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        WorkflowDefinitionEntity workflow = findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("workflow not found: " + id));
+        if (!"DRAFT".equalsIgnoreCase(workflow.getStatus())) {
+            throw new IllegalArgumentException("仅草稿状态的 Workflow 可删除");
+        }
+        List<AgentWorkflowBindingEntity> bindings = bindingService.listByWorkflowId(id);
+        if (!bindings.isEmpty()) {
+            throw new IllegalArgumentException("该 Workflow 仍被 Agent 绑定，请先解除绑定后再删除");
+        }
+        versionMapper.delete(Wrappers.<WorkflowVersionEntity>lambdaQuery()
+                .eq(WorkflowVersionEntity::getWorkflowId, id.trim()));
+        if (mapper.deleteById(id) <= 0) {
+            throw new IllegalArgumentException("workflow not found: " + id);
+        }
+    }
+
+    public boolean isDeletable(String id) {
+        if (!StringUtils.hasText(id)) {
+            return false;
+        }
+        return isDeletable(mapper.selectById(id));
+    }
+
+    private boolean isDeletable(WorkflowDefinitionEntity workflow) {
+        if (workflow == null || !StringUtils.hasText(workflow.getId())) {
+            return false;
+        }
+        if (!"DRAFT".equalsIgnoreCase(workflow.getStatus())) {
+            return false;
+        }
+        return bindingService.listByWorkflowId(workflow.getId()).isEmpty();
     }
 
     private void normalizeForCreate(WorkflowDefinitionEntity entity) {

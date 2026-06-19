@@ -384,14 +384,24 @@
               </div>
               <div class="node-label">{{ nodeProps.data.label || nodeProps.id }}</div>
               <div class="node-desc">{{ nodeProps.data.description || '按连线条件分流' }}</div>
-              <div v-if="conditionRoutePills(nodeProps.data).length" class="condition-routes">
-                <span
-                  v-for="route in conditionRoutePills(nodeProps.data)"
-                  :key="route"
-                  class="condition-route"
+              <div class="classifier-routes">
+                <div
+                  v-for="route in conditionRouteRows(nodeProps.data)"
+                  :key="route.id"
+                  class="classifier-route-row"
+                  :class="{ 'is-default': route.isDefault }"
                 >
-                  {{ route }}
-                </span>
+                  <div class="classifier-route-copy">
+                    <strong>{{ route.label }}</strong>
+                    <span>{{ route.meta }}</span>
+                  </div>
+                  <Handle
+                    type="source"
+                    :id="route.handleId"
+                    :position="Position.Right"
+                    class="classifier-route-handle"
+                  />
+                </div>
               </div>
               <div class="node-port-row">{{ portSummary(nodeProps.data.outputs, '分支') }}</div>
               <button v-if="nodeDebugState(nodeProps.id)" class="node-runtime" type="button" @click.stop="openNodeTrace(nodeProps.id)">
@@ -535,7 +545,6 @@
           <template #node-approval="nodeProps">
             <div class="studio-node approval-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed }]">
               <Handle type="target" :position="Position.Left" />
-              <Handle type="source" :position="Position.Right" />
               <div class="node-icon"><el-icon><Finished /></el-icon></div>
               <div class="node-head">
                 <span class="node-kind">人工</span>
@@ -543,6 +552,24 @@
               </div>
               <div class="node-label">{{ nodeProps.data.label || nodeProps.id }}</div>
               <div class="node-desc">{{ nodeProps.data.approvalConfig?.title || '人工确认' }}</div>
+              <div class="classifier-routes">
+                <div
+                  v-for="route in approvalRouteRows()"
+                  :key="route.id"
+                  class="classifier-route-row"
+                >
+                  <div class="classifier-route-copy">
+                    <strong>{{ route.label }}</strong>
+                    <span>{{ route.meta }}</span>
+                  </div>
+                  <Handle
+                    type="source"
+                    :id="route.handleId"
+                    :position="Position.Right"
+                    class="classifier-route-handle"
+                  />
+                </div>
+              </div>
               <div class="node-port-row">{{ portSummary(nodeProps.data.outputs, '分支') }}</div>
               <button v-if="nodeDebugState(nodeProps.id)" class="node-runtime" type="button" @click.stop="openNodeTrace(nodeProps.id)">
                 <span class="runtime-dot"></span>
@@ -553,7 +580,6 @@
           <template #node-loop="nodeProps">
             <div class="studio-node loop-node" :class="[nodeRunClass(nodeProps.id), { collapsed: nodeProps.data.collapsed }]">
               <Handle type="target" :position="Position.Left" />
-              <Handle type="source" :position="Position.Right" />
               <div class="node-icon"><el-icon><RefreshRight /></el-icon></div>
               <div class="node-head">
                 <span class="node-kind">循环</span>
@@ -561,6 +587,24 @@
               </div>
               <div class="node-label">{{ nodeProps.data.label || nodeProps.id }}</div>
               <div class="node-desc">键：{{ nodeProps.data.loopConfig?.loopKey || 'loop' }}</div>
+              <div class="classifier-routes">
+                <div
+                  v-for="route in loopRouteRows()"
+                  :key="route.id"
+                  class="classifier-route-row"
+                >
+                  <div class="classifier-route-copy">
+                    <strong>{{ route.label }}</strong>
+                    <span>{{ route.meta }}</span>
+                  </div>
+                  <Handle
+                    type="source"
+                    :id="route.handleId"
+                    :position="Position.Right"
+                    class="classifier-route-handle"
+                  />
+                </div>
+              </div>
               <div class="node-port-row">{{ portSummary(nodeProps.data.outputs, '分支') }}</div>
               <button v-if="nodeDebugState(nodeProps.id)" class="node-runtime" type="button" @click.stop="openNodeTrace(nodeProps.id)">
                 <span class="runtime-dot"></span>
@@ -4561,20 +4605,63 @@ function interactionTypeLabel(type?: string) {
   return labels[type || ''] || '交互'
 }
 
-function conditionRoutePills(data: CanvasNode['data']) {
-  const groups = data.conditionConfig?.groups || []
-  const labels = groups
-    .map((group) => group.label || group.id)
-    .filter((item): item is string => !!item)
-    .slice(0, 3)
-  if (labels.length) {
-    return labels
+function conditionRouteRows(data: CanvasNode['data']) {
+  const config = data.conditionConfig
+  const rows = (config?.groups || [])
+    .filter((group) => group.id?.trim())
+    .map((group) => ({
+      id: group.id.trim(),
+      handleId: group.id.trim(),
+      label: group.label || group.id,
+      meta: `${group.logic || 'AND'} · ${group.conditions?.length || 0} 条条件`,
+      isDefault: false,
+    }))
+  const defaultRoute = (config?.defaultRoute || 'else').trim()
+  if (defaultRoute && !rows.some((row) => row.handleId === defaultRoute)) {
+    rows.push({
+      id: `default-${defaultRoute}`,
+      handleId: defaultRoute,
+      label: defaultRoute === 'else' ? '默认分支' : defaultRoute,
+      meta: '未命中条件时进入',
+      isDefault: true,
+    })
   }
-  const outputNames = (data.outputs || [])
-    .map((port) => port.name || port.id)
-    .filter((item): item is string => !!item)
-    .slice(0, 3)
-  return outputNames.length ? outputNames : ['成功', '失败', '否则']
+  if (!rows.length) {
+    for (const port of data.outputs || []) {
+      const extended = port as { id?: string; name?: string; key?: string; label?: string }
+      const id = String(extended.id || extended.name || extended.key || '').trim()
+      if (!id) continue
+      rows.push({
+        id,
+        handleId: id,
+        label: String(extended.label || extended.name || id),
+        meta: '条件分支',
+        isDefault: id === 'else',
+      })
+    }
+  }
+  return rows.length ? rows : [{
+    id: 'default-else',
+    handleId: 'else',
+    label: '默认分支',
+    meta: '未命中条件时进入',
+    isDefault: true,
+  }]
+}
+
+function approvalRouteRows() {
+  return [
+    { id: 'approved', handleId: 'approved', label: '批准', meta: '审批通过' },
+    { id: 'rejected', handleId: 'rejected', label: '拒绝', meta: '审批驳回' },
+    { id: 'timeout', handleId: 'timeout', label: '超时', meta: '等待超时' },
+  ]
+}
+
+function loopRouteRows() {
+  return [
+    { id: 'continue', handleId: 'continue', label: '继续', meta: '进入下一轮' },
+    { id: 'done', handleId: 'done', label: '结束', meta: '循环完成' },
+  ]
 }
 
 function classifierRouteRows(data: CanvasNode['data']) {

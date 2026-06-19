@@ -525,6 +525,22 @@ public class AiAssistController {
         }
     }
 
+    @PostMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/workflow-ai-coding-result")
+    public ResponseEntity<?> reportPageAssistantWorkflowAiCodingResult(@PathVariable Long projectId,
+                                                                       @PathVariable String sessionId,
+                                                                       @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
+                                                                       @RequestBody(required = false)
+                                                                       AiAccessSessionService.WorkflowAiCodingResultRequest request) {
+        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+            return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
+        }
+        try {
+            return ResponseEntity.ok(accessSessionService.reportWorkflowAiCodingResult(projectId, sessionId, request));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
     @PutMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/target")
     public ResponseEntity<?> bindPageAssistantSessionTarget(@PathVariable Long projectId,
                                                             @PathVariable String sessionId,

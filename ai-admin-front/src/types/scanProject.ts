@@ -345,6 +345,31 @@ export interface PageAssistantSessionSummary {
   steps: AiAccessStep[]
 }
 
+export interface PageAssistantWorkflowAiCodingValidationSummary {
+  overallStatus?: AiAccessStepStatus | string | null
+  errors?: string[]
+  warnings?: string[]
+}
+
+export interface PageAssistantWorkflowAiCodingPageAssistantValidationSummary {
+  overallStatus?: AiAccessStepStatus | string | null
+  matchedActions?: string[]
+  missingActions?: string[]
+  warnings?: string[]
+}
+
+export interface PageAssistantWorkflowAiCodingResultRequest {
+  workflowId: string
+  keySlug?: string | null
+  workflowName?: string | null
+  status?: AiAccessStepStatus | null
+  message?: string | null
+  validation?: PageAssistantWorkflowAiCodingValidationSummary | null
+  pageAssistantValidation?: PageAssistantWorkflowAiCodingPageAssistantValidationSummary | null
+  runtimeVerification?: Record<string, unknown> | null
+  studioUrl?: string | null
+}
+
 export interface PageAssistantOnboardingManifest {
   schema: string
   project: AiOnboardingManifest['project']

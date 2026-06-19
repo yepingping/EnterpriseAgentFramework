@@ -61,7 +61,7 @@ Returns the same shape as `GET .../context`.
 - `graphSpec`, `canvas`
 - `validation`: current release validation errors/warnings
 - `nodeTypes`: supported node descriptors
-- `availableModels`: ACTIVE LLM instances
+- `availableModels`: ACTIVE LLM instances; this catalog does not prove provider credentials are currently valid
   - fields: `id`, `name`, `provider`, `modelName`, `modelType`, `status`
 - `availableTools`: project-scoped tools/capabilities
   - fields: `name`, `kind`, `title`, `description`, `enabled`, `qualifiedName`
@@ -70,6 +70,7 @@ Returns the same shape as `GET .../context`.
 Rules:
 
 - Pick LLM `modelInstanceId` only from `availableModels`
+- If `/run` returns a provider auth error, choose another listed model or ask the operator to repair that model instance credential
 - Pick TOOL names only from `availableTools`
 - If `availableModels` is empty, ask operator to configure model instances; do not guess ids
 

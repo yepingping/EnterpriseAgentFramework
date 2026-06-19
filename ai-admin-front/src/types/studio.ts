@@ -247,10 +247,16 @@ export interface IntentClassConfig {
   keywords: string[]
 }
 
+export type IntentClassifierStrategy = 'KEYWORD' | 'LLM' | 'HYBRID'
+
 export interface IntentClassifierNodeConfig {
   inputExpression: string
+  strategy?: IntentClassifierStrategy
   classes: IntentClassConfig[]
   defaultRoute?: string
+  modelInstanceId?: string
+  confidenceThreshold?: number
+  llmPrompt?: string
 }
 
 export interface VariableAggregateItem {

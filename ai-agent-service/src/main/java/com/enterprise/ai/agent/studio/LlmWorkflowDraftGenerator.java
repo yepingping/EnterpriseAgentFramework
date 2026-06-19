@@ -339,6 +339,9 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     private String canvasRenderableSourceHandle(DraftEdge edge, List<DraftNode> nodes) {
         String handle = blankToNull(edge.sourceHandle());
         if (!StringUtils.hasText(handle)) {
+            handle = canvasSourceHandleFromCondition(edge);
+        }
+        if (!StringUtils.hasText(handle)) {
             return null;
         }
         String sourceId = canvasEndpoint(edge.from());
@@ -349,10 +352,28 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 .filter(node -> node.id().equals(sourceId))
                 .findFirst()
                 .orElse(null);
-        if (source == null || !"classifier".equals(canvasNodeKind(source))) {
+        if (source == null) {
             return null;
         }
-        return handle;
+        return switch (canvasNodeKind(source)) {
+            case "classifier", "condition", "approval", "loop" -> handle;
+            default -> null;
+        };
+    }
+
+    private String canvasSourceHandleFromCondition(DraftEdge edge) {
+        String condition = firstText(edge.condition(), "");
+        if (!StringUtils.hasText(condition) || "always".equalsIgnoreCase(condition)) {
+            return null;
+        }
+        if ("else".equalsIgnoreCase(condition) || "default".equalsIgnoreCase(condition)) {
+            return "else";
+        }
+        String lower = condition.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("route:")) {
+            return condition.substring("route:".length()).trim();
+        }
+        return condition;
     }
 
     private String canvasNodeKind(DraftNode node) {
@@ -389,10 +410,17 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 data.put("template", firstText(text(config.get("template")), "{{ lastOutput }}"));
                 data.put("writeToAnswer", true);
             }
-            case "classifier" -> data.put("classifierConfig", Map.of(
-                    "inputExpression", firstText(text(config.get("inputExpression")), "input"),
-                    "classes", classes(config),
-                    "defaultRoute", firstText(text(config.get("defaultRoute")), "else")));
+            case "classifier" -> {
+                Map<String, Object> classifierConfig = new LinkedHashMap<>();
+                classifierConfig.put("inputExpression", firstText(text(config.get("inputExpression")), "input"));
+                classifierConfig.put("strategy", normalizeClassifierStrategy(text(config.get("strategy"))));
+                classifierConfig.put("classes", classes(config));
+                classifierConfig.put("defaultRoute", firstText(text(config.get("defaultRoute")), "else"));
+                classifierConfig.put("modelInstanceId", firstText(text(config.get("modelInstanceId")), ""));
+                classifierConfig.put("confidenceThreshold", doubleOr(config.get("confidenceThreshold"), 0.7D));
+                classifierConfig.put("llmPrompt", firstText(text(config.get("llmPrompt")), ""));
+                data.put("classifierConfig", classifierConfig);
+            }
             case "approval" -> data.put("approvalConfig", Map.of(
                     "title", firstText(text(config.get("title")), node.label()),
                     "prompt", firstText(text(config.get("prompt")), "{{ lastOutput }}"),
@@ -445,10 +473,22 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
 
     private void normalizeClassifierConfig(Map<String, Object> config) {
         config.put("inputExpression", firstText(text(config.get("inputExpression")), "input"));
+        config.put("strategy", normalizeClassifierStrategy(text(config.get("strategy"))));
         config.put("classes", classes(config).isEmpty()
                 ? List.of(Map.of("id", "matched", "label", "匹配", "keywords", List.of()))
                 : classes(config));
         config.put("defaultRoute", firstText(text(config.get("defaultRoute")), "else"));
+        config.put("modelInstanceId", firstText(text(config.get("modelInstanceId")), ""));
+        config.put("confidenceThreshold", doubleOr(config.get("confidenceThreshold"), 0.7D));
+        config.put("llmPrompt", firstText(text(config.get("llmPrompt")), ""));
+    }
+
+    private String normalizeClassifierStrategy(String raw) {
+        String strategy = firstText(raw).toUpperCase();
+        if ("LLM".equals(strategy) || "HYBRID".equals(strategy)) {
+            return strategy;
+        }
+        return "KEYWORD";
     }
 
     private void normalizeApprovalConfig(Map<String, Object> config) {
@@ -1015,6 +1055,10 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         if (hasPageAction) {
             return false;
         }
+        if ("INTENT_ROUTER".equals(pageAssistantFlowMode(request))) {
+            warnings.add("页面助手存在多个互斥意图，模型未生成 INTENT_CLASSIFIER 分支；请按 requirement 中的 intentClasses 手动补充分类节点");
+            return false;
+        }
 
         List<DraftNode> actionNodes = pageAssistantActionNodes(request);
         if (actionNodes.isEmpty()) {
@@ -1356,12 +1400,37 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                     PAGE_ASSISTANT draft rules (mandatory when pageActions are supplied):
                     - Never invent or assume pageAction actionKeys. Use only actionKeys present in pageActions/allowedActionKeys.
                     - Do not create setFilters unless pageActions contains setFilters. If setFilters is absent, skip the filter-setting step and use the supplied actions only.
-                    - Build a linear flow using the supplied pageActions in recommendedFlow order; omit any missing optional action.
-                    - When setFilters is available, add one LLM extract node before it with outputAlias=extracted_filters, outputFormat=json, structuredOutput=true.
+                    - First decide whether selected pageActions represent a single linear query flow or multiple mutually exclusive user intents.
+                    - flowMode=LINEAR_QUERY: build one linear flow using recommendedFlow order; do NOT create INTENT_CLASSIFIER.
+                    - flowMode=INTENT_ROUTER: create INTENT_CLASSIFIER with strategy=HYBRID, inputExpression=input, defaultRoute=else; route each intent branch with condition route:<classId>; connect route:else to ANSWER asking the user to clarify query/reset/page-state/operation intent.
+                    - Standard linear query chains (no classifier): setFilters->search->readTable, setFilters->search, search->readTable, or any subset containing only setFilters/search/readTable.
+                    - Use INTENT_CLASSIFIER when multiple terminal intents exist, such as search+reset, search+getPageState, query chain plus reset/getPageState/openRowAction/confirmRequired actions, or when uncertain.
+                    - Do not linearly chain mutually exclusive actions such as search then reset then getPageState.
+                    - When setFilters is available in a query branch, add one LLM extract node before it with outputAlias=extracted_filters, outputFormat=json, structuredOutput=true.
                     - setFilters pageAction config.args must map each inputSchema field to extracted_filters.<fieldName>; never leave args empty when setFilters is selected.
                     - search/readTable/reset/getPageState pageAction nodes usually use empty args unless the action schema requires parameters.
+                    - For confirmRequired or operational actions (openRowAction/delete/submit/approve), route branch should use INTERACTION confirm_action before PAGE_ACTION when requirement/safetyNotes says so.
                     - answer node must use a fixed Chinese status sentence, not {{ lastOutput }}, when the flow ends after page actions.
                     - Bind each pageAction config.ref to the exact actionKey from pageActions.
+
+                    Few-shot A (LINEAR_QUERY, no classifier):
+                    selectedActionKeys: setFilters, search, readTable
+                    USER_INPUT -> LLM(extracted_filters) -> PAGE_ACTION(setFilters) -> PAGE_ACTION(search) -> PAGE_ACTION(readTable) -> ANSWER
+
+                    Few-shot B (INTENT_ROUTER with HYBRID classifier):
+                    selectedActionKeys: search, reset, getPageState
+                    USER_INPUT -> INTENT_CLASSIFIER(strategy=HYBRID)
+                    route:search_intent -> PAGE_ACTION(search) -> ANSWER
+                    route:reset_intent -> PAGE_ACTION(reset) -> ANSWER
+                    route:page_state_intent -> PAGE_ACTION(getPageState) -> ANSWER
+                    route:else -> ANSWER(请说明要查询、重置还是读取页面状态)
+
+                    Few-shot C (INTENT_ROUTER with confirm before operational action):
+                    selectedActionKeys: readTable, openRowAction(confirmRequired=true)
+                    USER_INPUT -> INTENT_CLASSIFIER(strategy=HYBRID)
+                    route:read_table_intent -> PAGE_ACTION(readTable) -> ANSWER
+                    route:row_action_intent -> INTERACTION(confirm_action) -> PAGE_ACTION(openRowAction) -> ANSWER
+                    route:else -> ANSWER
                     """);
         }
         return prompt.toString();
@@ -1383,8 +1452,11 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         if (isPageAssistantDraft(request)) {
             Map<String, Object> template = new LinkedHashMap<>();
             template.put("entry", "user_input");
+            template.put("flowMode", pageAssistantFlowMode(request));
             template.put("allowedActionKeys", pageAssistantAllowedActionKeys(request));
             template.put("recommendedFlow", pageAssistantRecommendedFlow(request));
+            template.put("intentClasses", pageAssistantIntentClasses(request));
+            template.put("safetyNotes", pageAssistantSafetyNotes(request));
             if (hasPageAction(request, "setFilters")) {
                 template.put("extractNode", Map.of(
                         "id", "extract_filters",
@@ -1416,6 +1488,17 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     }
 
     private List<String> pageAssistantRecommendedFlow(WorkflowDraftGenerationRequest request) {
+        if ("INTENT_ROUTER".equals(pageAssistantFlowMode(request))) {
+            List<String> flow = new ArrayList<>();
+            flow.add("user_input");
+            flow.add("intent_router");
+            for (Map<String, Object> intentClass : pageAssistantIntentClasses(request)) {
+                flow.add("route:" + text(intentClass.get("id")));
+            }
+            flow.add("route:else");
+            flow.add("answer_else");
+            return flow;
+        }
         List<String> flow = new ArrayList<>();
         flow.add("user_input");
         if (hasPageAction(request, "setFilters")) {
@@ -1438,6 +1521,210 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         }
         flow.add("answer");
         return flow;
+    }
+
+    private String pageAssistantFlowMode(WorkflowDraftGenerationRequest request) {
+        List<String> actionKeys = pageAssistantAllowedActionKeys(request);
+        if (actionKeys.size() <= 1) {
+            return "LINEAR_QUERY";
+        }
+        Set<String> categories = new LinkedHashSet<>();
+        for (String actionKey : actionKeys) {
+            categories.add(pageAssistantActionCategory(request, actionKey));
+        }
+        if (categories.stream().allMatch("query_chain"::equals)) {
+            return "LINEAR_QUERY";
+        }
+        boolean hasQueryChain = categories.contains("query_chain");
+        boolean hasReset = categories.contains("reset");
+        boolean hasPageState = categories.contains("page_state");
+        boolean hasOperational = categories.contains("operational");
+        boolean hasOther = categories.contains("other");
+        if (hasQueryChain && (hasReset || hasPageState || hasOperational || hasOther)) {
+            return "INTENT_ROUTER";
+        }
+        int exclusiveGroups = 0;
+        if (hasReset) exclusiveGroups++;
+        if (hasPageState) exclusiveGroups++;
+        if (hasOperational) exclusiveGroups++;
+        if (hasOther) exclusiveGroups++;
+        if (exclusiveGroups >= 2) {
+            return "INTENT_ROUTER";
+        }
+        if (exclusiveGroups >= 1 && hasQueryChain) {
+            return "INTENT_ROUTER";
+        }
+        return "INTENT_ROUTER";
+    }
+
+    private String pageAssistantActionCategory(WorkflowDraftGenerationRequest request, String actionKey) {
+        String compact = compactToken(actionKey);
+        if (isSetFiltersAction(actionKey)) {
+            return "query_chain";
+        }
+        if ("search".equals(compact) || actionKey.toLowerCase(Locale.ROOT).contains("search")
+                || actionKey.toLowerCase(Locale.ROOT).contains("query")) {
+            return "query_chain";
+        }
+        if ("readtable".equals(compact) || compact.contains("readtable")) {
+            return "query_chain";
+        }
+        if ("reset".equals(compact) || compact.contains("reset")) {
+            return "reset";
+        }
+        if ("getpagestate".equals(compact) || compact.contains("pagestate")) {
+            return "page_state";
+        }
+        WorkflowDraftResource resource = findPageActionResource(request, actionKey);
+        if (resource != null && bool(mutableMap(resource.getMetadata()).get("confirmRequired"))) {
+            return "operational";
+        }
+        if (compact.contains("openrow") || compact.contains("delete") || compact.contains("submit")
+                || compact.contains("approve") || compact.contains("export")) {
+            return "operational";
+        }
+        return "other";
+    }
+
+    private List<Map<String, Object>> pageAssistantIntentClasses(WorkflowDraftGenerationRequest request) {
+        if (!"INTENT_ROUTER".equals(pageAssistantFlowMode(request))) {
+            return List.of();
+        }
+        List<Map<String, Object>> classes = new ArrayList<>();
+        List<String> queryActionKeys = pageAssistantAllowedActionKeys(request).stream()
+                .filter(actionKey -> "query_chain".equals(pageAssistantActionCategory(request, actionKey)))
+                .toList();
+        if (!queryActionKeys.isEmpty()) {
+            classes.add(pageAssistantIntentClass(
+                    "query_intent",
+                    "查询数据",
+                    "用户想按条件查询、搜索或读取表格结果",
+                    List.of("查询", "搜索", "筛选", "查找", "表格", "列表", "查一下"),
+                    queryActionKeys,
+                    false));
+        }
+        List<String> resetActionKeys = pageAssistantAllowedActionKeys(request).stream()
+                .filter(actionKey -> "reset".equals(pageAssistantActionCategory(request, actionKey)))
+                .toList();
+        if (!resetActionKeys.isEmpty()) {
+            classes.add(pageAssistantIntentClass(
+                    "reset_intent",
+                    resetActionKeys.size() == 1 ? pageAssistantActionLabel(request, resetActionKeys.get(0), "重置筛选") : "重置筛选",
+                    "用户想清空或重置页面筛选条件",
+                    List.of("重置", "清空", "恢复默认", "清除筛选"),
+                    resetActionKeys,
+                    false));
+        }
+        List<String> pageStateActionKeys = pageAssistantAllowedActionKeys(request).stream()
+                .filter(actionKey -> "page_state".equals(pageAssistantActionCategory(request, actionKey)))
+                .toList();
+        if (!pageStateActionKeys.isEmpty()) {
+            classes.add(pageAssistantIntentClass(
+                    "page_state_intent",
+                    pageStateActionKeys.size() == 1
+                            ? pageAssistantActionLabel(request, pageStateActionKeys.get(0), "读取页面状态")
+                            : "读取页面状态",
+                    "用户想查看当前筛选、分页或表格状态",
+                    List.of("当前状态", "页面状态", "现在筛选", "当前条件", "分页"),
+                    pageStateActionKeys,
+                    false));
+        }
+        List<String> openRowActionKeys = pageAssistantAllowedActionKeys(request).stream()
+                .filter(actionKey -> "operational".equals(pageAssistantActionCategory(request, actionKey)))
+                .filter(actionKey -> compactToken(actionKey).contains("openrow"))
+                .toList();
+        if (!openRowActionKeys.isEmpty()) {
+            classes.add(pageAssistantIntentClass(
+                    "row_action_intent",
+                    openRowActionKeys.size() == 1
+                            ? pageAssistantActionLabel(request, openRowActionKeys.get(0), "行内操作")
+                            : "行内操作",
+                    "用户想执行表格行内操作",
+                    List.of("打开", "行操作", "周期", "详情", "操作"),
+                    openRowActionKeys,
+                    openRowActionKeys.stream().anyMatch(actionKey -> pageAssistantActionConfirmRequired(request, actionKey))));
+        }
+        for (String actionKey : pageAssistantAllowedActionKeys(request)) {
+            String category = pageAssistantActionCategory(request, actionKey);
+            if (!"operational".equals(category) || compactToken(actionKey).contains("openrow")) {
+                continue;
+            }
+            String label = pageAssistantActionLabel(request, actionKey, actionKey);
+            classes.add(pageAssistantIntentClass(
+                    slug(actionKey) + "_intent",
+                    label,
+                    "用户想执行页面操作：" + label,
+                    List.of(label, "操作", "执行"),
+                    List.of(actionKey),
+                    pageAssistantActionConfirmRequired(request, actionKey)));
+        }
+        List<String> otherActionKeys = pageAssistantAllowedActionKeys(request).stream()
+                .filter(actionKey -> "other".equals(pageAssistantActionCategory(request, actionKey)))
+                .toList();
+        if (otherActionKeys.size() == 1) {
+            String actionKey = otherActionKeys.get(0);
+            String label = pageAssistantActionLabel(request, actionKey, actionKey);
+            classes.add(pageAssistantIntentClass(
+                    slug(actionKey) + "_intent",
+                    label,
+                    "用户想执行页面操作：" + label,
+                    List.of(label, "操作", "执行"),
+                    List.of(actionKey),
+                    false));
+        } else if (otherActionKeys.size() > 1) {
+            classes.add(pageAssistantIntentClass(
+                    "other_intent",
+                    "其他页面操作",
+                    "用户想执行其他已注册的页面动作",
+                    List.of("操作", "执行", "处理"),
+                    otherActionKeys,
+                    false));
+        }
+        return classes;
+    }
+
+    private String pageAssistantActionLabel(WorkflowDraftGenerationRequest request, String actionKey, String fallback) {
+        WorkflowDraftResource resource = findPageActionResource(request, actionKey);
+        return resource == null ? fallback : firstText(resource.getDescription(), actionKey, fallback);
+    }
+
+    private boolean pageAssistantActionConfirmRequired(WorkflowDraftGenerationRequest request, String actionKey) {
+        WorkflowDraftResource resource = findPageActionResource(request, actionKey);
+        return resource != null && bool(mutableMap(resource.getMetadata()).get("confirmRequired"));
+    }
+
+    private Map<String, Object> pageAssistantIntentClass(String id,
+                                                         String label,
+                                                         String description,
+                                                         List<String> keywords,
+                                                         List<String> actionKeys,
+                                                         boolean requiresConfirm) {
+        Map<String, Object> intentClass = new LinkedHashMap<>();
+        intentClass.put("id", id);
+        intentClass.put("label", label);
+        intentClass.put("description", description);
+        intentClass.put("keywords", keywords);
+        intentClass.put("actionKeys", actionKeys);
+        intentClass.put("requiresConfirm", requiresConfirm);
+        return intentClass;
+    }
+
+    private List<String> pageAssistantSafetyNotes(WorkflowDraftGenerationRequest request) {
+        if (request == null || request.getPageActions() == null) {
+            return List.of();
+        }
+        List<String> notes = new ArrayList<>();
+        for (WorkflowDraftResource resource : request.getPageActions()) {
+            if (resource == null) {
+                continue;
+            }
+            Map<String, Object> metadata = mutableMap(resource.getMetadata());
+            String actionKey = actionResourceKey(resource);
+            if (bool(metadata.get("confirmRequired"))) {
+                notes.add(actionKey + " 为需确认动作：route 分支中先 INTERACTION(confirm_action)，再 PAGE_ACTION(" + actionKey + ")。");
+            }
+        }
+        return notes;
     }
 
     private boolean hasPageAction(WorkflowDraftGenerationRequest request, String actionKey) {

@@ -63,6 +63,7 @@ export interface WorkflowDefinition {
   extraJson?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  deletable?: boolean | null
 }
 
 export interface WorkflowDefinitionDraft

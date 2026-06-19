@@ -13,9 +13,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.argThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -276,6 +280,57 @@ class LangGraph4jRuntimeAdapterTest {
         assertEquals(true, output.get("confirm"));
         assertEquals("TI_DEMO01", ((Map<String, Object>) output.get("args")).get("teamId"));
         assertEquals(output, result.getFinalState().get("page_action_result"));
+    }
+
+    @Test
+    void debugRunTraceSpansIncludeWorkflowMetadata() {
+        AgentTraceSpanService traceSpanService = mock(AgentTraceSpanService.class);
+        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(
+                successModelClient(),
+                mock(ToolDefinitionService.class),
+                null,
+                traceSpanService,
+                new ObjectMapper(),
+                null,
+                null,
+                null);
+
+        GraphSpec graphSpec = GraphSpec.builder()
+                .code("debug_graph")
+                .entry("start")
+                .node(GraphSpec.Node.builder()
+                        .id("start")
+                        .type("USER_INPUT")
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("answer")
+                        .type("ANSWER")
+                        .config(Map.of("template", "{{ input }}"))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("start").to("answer").condition("always").build())
+                .build();
+
+        LangGraph4jRuntimeAdapter.WorkflowDebugRunResult result = adapter.debugRun(
+                graphSpec,
+                GraphRuntimeContext.builder()
+                        .sourceType("WORKFLOW_DRAFT")
+                        .sourceId("wf-debug")
+                        .sourceKeySlug("debug-flow")
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .runtimePlacement("CENTRAL")
+                        .name("Debug Flow")
+                        .build(),
+                "hello",
+                Map.of(),
+                Map.of("traceId", "trace-debug"));
+
+        assertTrue(result.isSuccess());
+        verify(traceSpanService, atLeastOnce()).record(any(), any(), argThat(record ->
+                "trace-debug".equals(record.traceId())
+                        && record.metadata() != null
+                        && "WORKFLOW_DRAFT".equals(record.metadata().get("sourceType"))
+                        && "wf-debug".equals(record.metadata().get("workflowId"))
+                        && "debug-flow".equals(record.metadata().get("workflowKeySlug"))));
     }
 
     @Test
@@ -1423,6 +1478,115 @@ class LangGraph4jRuntimeAdapterTest {
     }
 
     @Test
+    void intentClassifierLlmStrategyUsesValidRoute() {
+        LangGraph4jRuntimeAdapter adapter = adapterWithModelClient(
+                jsonModelClient("{\"route\":\"search\",\"confidence\":0.92,\"reason\":\"用户要求查询\"}"),
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-classifier-llm")
+                .sessionId("session-classifier-llm")
+                .message("帮我查一下表格")
+                .graphSpec(llmClassifierGraph("LLM", List.of()))
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("search path", result.getAnswer());
+    }
+
+    @Test
+    void intentClassifierLlmStrategyFallsBackOnUnknownRoute() {
+        LangGraph4jRuntimeAdapter adapter = adapterWithModelClient(
+                jsonModelClient("{\"route\":\"unknown\",\"confidence\":0.95,\"reason\":\"unknown\"}"),
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-classifier-llm-unknown")
+                .sessionId("session-classifier-llm-unknown")
+                .message("随便说点什么")
+                .graphSpec(llmClassifierGraph("LLM", List.of()))
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("else path", result.getAnswer());
+    }
+
+    @Test
+    void intentClassifierLlmStrategyFallsBackOnLowConfidence() {
+        LangGraph4jRuntimeAdapter adapter = adapterWithModelClient(
+                jsonModelClient("{\"route\":\"search\",\"confidence\":0.2,\"reason\":\"uncertain\"}"),
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-classifier-llm-low-confidence")
+                .sessionId("session-classifier-llm-low-confidence")
+                .message("帮我查一下表格")
+                .graphSpec(llmClassifierGraph("LLM", List.of()))
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("else path", result.getAnswer());
+    }
+
+    @Test
+    void intentClassifierHybridSkipsLlmWhenKeywordMatches() {
+        AtomicInteger callCount = new AtomicInteger();
+        LangGraph4jRuntimeAdapter adapter = adapterWithModelClient(
+                countingJsonModelClient(callCount, "{\"route\":\"search\",\"confidence\":0.92,\"reason\":\"query\"}"),
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-classifier-hybrid-keyword")
+                .sessionId("session-classifier-hybrid-keyword")
+                .message("please refund order")
+                .graphSpec(llmClassifierGraph("HYBRID", List.of("refund")))
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("refund path", result.getAnswer());
+        assertEquals(0, callCount.get());
+    }
+
+    @Test
+    void intentClassifierHybridUsesLlmWhenKeywordMisses() {
+        AtomicInteger callCount = new AtomicInteger();
+        LangGraph4jRuntimeAdapter adapter = adapterWithModelClient(
+                countingJsonModelClient(callCount, "{\"route\":\"search\",\"confidence\":0.91,\"reason\":\"query\"}"),
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-classifier-hybrid-llm")
+                .sessionId("session-classifier-hybrid-llm")
+                .message("帮我查一下表格")
+                .graphSpec(llmClassifierGraph("HYBRID", List.of("refund")))
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        assertEquals("search path", result.getAnswer());
+        assertEquals(1, callCount.get());
+    }
+
+    @Test
     void executesApprovalLoopDocumentAndKnowledgeWriteNodes() {
         LangGraph4jRuntimeAdapter adapter = adapter(null);
 
@@ -1716,8 +1880,13 @@ class LangGraph4jRuntimeAdapterTest {
     }
 
     private LangGraph4jRuntimeAdapter adapter(ToolCallLogService logService) {
+        return adapterWithModelClient(successModelClient(), logService);
+    }
+
+    private LangGraph4jRuntimeAdapter adapterWithModelClient(ModelServiceClient modelServiceClient,
+                                                             ToolCallLogService logService) {
         return new LangGraph4jRuntimeAdapter(
-                successModelClient(),
+                modelServiceClient,
                 mock(ToolDefinitionService.class),
                 logService,
                 mock(AgentTraceSpanService.class),
@@ -1725,6 +1894,61 @@ class LangGraph4jRuntimeAdapterTest {
                 null,
                 null,
                 null);
+    }
+
+    private GraphSpec llmClassifierGraph(String strategy, List<String> keywords) {
+        List<Map<String, Object>> classes = new ArrayList<>();
+        classes.add(Map.of(
+                "id", "search",
+                "label", "查询",
+                "description", "用户想查询或搜索",
+                "keywords", List.of("查询", "搜索")));
+        classes.add(Map.of(
+                "id", "refund",
+                "label", "退款",
+                "description", "用户想退款",
+                "keywords", keywords));
+        Map<String, Object> classifierConfig = new LinkedHashMap<>();
+        classifierConfig.put("strategy", strategy);
+        classifierConfig.put("inputExpression", "input");
+        classifierConfig.put("modelInstanceId", "llm-1");
+        classifierConfig.put("confidenceThreshold", 0.7D);
+        classifierConfig.put("classes", classes);
+        classifierConfig.put("defaultRoute", "else");
+        return GraphSpec.builder()
+                .code("classifier_graph")
+                .entry("classify")
+                .finishNode("answer_search")
+                .finishNode("answer_refund")
+                .finishNode("answer_else")
+                .node(GraphSpec.Node.builder()
+                        .id("classify")
+                        .type("INTENT_CLASSIFIER")
+                        .config(classifierConfig)
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("answer_search")
+                        .type("ANSWER")
+                        .config(Map.of("template", "search path"))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("answer_refund")
+                        .type("ANSWER")
+                        .config(Map.of("template", "refund path"))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("answer_else")
+                        .type("ANSWER")
+                        .config(Map.of("template", "else path"))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("classify").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("classify").to("answer_search").condition("route:search").build())
+                .edge(GraphSpec.Edge.builder().from("classify").to("answer_refund").condition("route:refund").build())
+                .edge(GraphSpec.Edge.builder().from("classify").to("answer_else").condition("route:else").build())
+                .edge(GraphSpec.Edge.builder().from("answer_search").to("END").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("answer_refund").to("END").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("answer_else").to("END").condition("always").build())
+                .build();
     }
 
     private GraphSpec singleLlmGraph(String nodeId) {
@@ -1884,6 +2108,11 @@ class LangGraph4jRuntimeAdapterTest {
                         "ACTIVE",
                         null));
             }
+
+            @Override
+            public ModelInstanceListResult listModelInstances(String modelType, String provider, String workspaceId) {
+                return new ModelInstanceListResult(200, "ok", List.of());
+            }
         };
     }
 
@@ -1920,6 +2149,37 @@ class LangGraph4jRuntimeAdapterTest {
                         null,
                         "ACTIVE",
                         null));
+            }
+
+            @Override
+            public ModelInstanceListResult listModelInstances(String modelType, String provider, String workspaceId) {
+                return new ModelInstanceListResult(200, "ok", List.of());
+            }
+        };
+    }
+
+    private ModelServiceClient countingJsonModelClient(AtomicInteger callCount, String content) {
+        ModelServiceClient delegate = jsonModelClient(content);
+        return new ModelServiceClient() {
+            @Override
+            public ModelChatResult chat(ModelChatRequest request) {
+                callCount.incrementAndGet();
+                return delegate.chat(request);
+            }
+
+            @Override
+            public ModelEmbeddingResult embed(ModelEmbeddingRequest request) {
+                return delegate.embed(request);
+            }
+
+            @Override
+            public ModelInstanceResult getModelInstance(String id) {
+                return delegate.getModelInstance(id);
+            }
+
+            @Override
+            public ModelInstanceListResult listModelInstances(String modelType, String provider, String workspaceId) {
+                return delegate.listModelInstances(modelType, provider, workspaceId);
             }
         };
     }

@@ -129,6 +129,7 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
                 || ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/sessions/latest"))
                 || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/pages/register"))
                 || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"))
+                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/workflow-ai-coding-result"))
                 || ("PUT".equalsIgnoreCase(request.getMethod()) && path.endsWith("/target"))
                 || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/catalog/sync"))
                 || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/checks/run"));

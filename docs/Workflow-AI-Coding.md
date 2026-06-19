@@ -210,6 +210,9 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 - `errors`、`warnings`
 - `metadata`：workflow / runtime 上下文说明
 
+执行成功后可用 `GET /api/workflows/{workflowId}/ai-coding/runs?limit=20&days=7` 查看近期 debug run，
+或用 `GET /api/workflows/{workflowId}/ai-coding/runs/{traceId}` 查看单次轨迹详情。
+
 ## PAGE_ASSISTANT 扩展 API
 
 当 `workflowType=PAGE_ASSISTANT` 时，Workflow AI Coding 提供 **workflow-scoped** 的 Page Assistant 子资源。这些接口复用同一套项目权限（`WorkflowProjectAccessService`），不复制 `/api/ai-assist/.../page-assistant/*` 的 onboarding session 逻辑。

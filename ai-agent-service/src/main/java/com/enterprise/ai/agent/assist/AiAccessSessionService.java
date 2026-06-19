@@ -44,6 +44,9 @@ public class AiAccessSessionService {
             new StepDefinition("handoff-summary", "提交验证结果和待办")
     );
 
+    public static final String WORKFLOW_AI_CODING_DRAFT_STEP_KEY = "workflow-ai-coding-draft";
+    private static final String WORKFLOW_AI_CODING_DRAFT_STEP_TITLE = "Workflow AI Coding 生成草稿";
+
     private static final List<StepDefinition> PAGE_ASSISTANT_STEPS = List.of(
             new StepDefinition("page-manifest", "读取页面助手接入清单"),
             new StepDefinition("route-detection", "确认业务前端路由"),
@@ -178,6 +181,63 @@ public class AiAccessSessionService {
         applyReport(step, request);
         applyPageAssistantTargetFromReport(session, request);
         stepMapper.updateById(step);
+        return persistProgress(session, loadStepsFromKnown(steps, step));
+    }
+
+    public AccessSessionView reportWorkflowAiCodingResult(Long projectId,
+                                                          String sessionId,
+                                                          WorkflowAiCodingResultRequest request) {
+        AiAccessSessionEntity session = requireSession(projectId, sessionId);
+        if (!"PAGE_ASSISTANT".equalsIgnoreCase(normalizeScenario(session.getScenario()))) {
+            throw new IllegalArgumentException("access session is not a page assistant session");
+        }
+        if (request == null || !StringUtils.hasText(request.workflowId())) {
+            throw new IllegalArgumentException("workflowId is required");
+        }
+        List<AiAccessStepEntity> steps = ensureDefaultSteps(session, loadSteps(sessionId));
+        Map<String, AiAccessStepEntity> byKey = steps.stream()
+                .collect(Collectors.toMap(AiAccessStepEntity::getStepKey, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        AiAccessStepEntity step = byKey.computeIfAbsent(WORKFLOW_AI_CODING_DRAFT_STEP_KEY, key -> {
+            AiAccessStepEntity created = newStep(
+                    projectId,
+                    sessionId,
+                    new StepDefinition(key, WORKFLOW_AI_CODING_DRAFT_STEP_TITLE),
+                    LocalDateTime.now());
+            stepMapper.insert(created);
+            steps.add(created);
+            return created;
+        });
+        String workflowId = request.workflowId().trim();
+        String studioUrl = trimToNull(request.studioUrl());
+        if (!StringUtils.hasText(studioUrl)) {
+            studioUrl = "/workflows/" + workflowId + "/studio";
+        }
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("workflowId", workflowId);
+        evidence.put("keySlug", valueOrEmpty(request.keySlug()));
+        evidence.put("workflowName", valueOrEmpty(request.workflowName()));
+        evidence.put("studioUrl", studioUrl);
+        if (request.validation() != null && !request.validation().isEmpty()) {
+            evidence.put("validation", request.validation());
+        }
+        if (request.pageAssistantValidation() != null && !request.pageAssistantValidation().isEmpty()) {
+            evidence.put("pageAssistantValidation", request.pageAssistantValidation());
+        }
+        if (request.runtimeVerification() != null && !request.runtimeVerification().isEmpty()) {
+            evidence.put("runtimeVerification", request.runtimeVerification());
+        }
+        String message = trimToNull(request.message());
+        if (!StringUtils.hasText(message)) {
+            message = "已生成 PAGE_ASSISTANT Workflow 草稿";
+        }
+        applyReport(step, new StepReportRequest(
+                request.status(),
+                message,
+                List.of(),
+                evidence,
+                "workflow-ai-coding"));
+        stepMapper.updateById(step);
+        session.setLastMessage(message);
         return persistProgress(session, loadStepsFromKnown(steps, step));
     }
 
@@ -1174,6 +1234,19 @@ public class AiAccessSessionService {
     }
 
     private record StepDefinition(String key, String title) {
+    }
+
+    public record WorkflowAiCodingResultRequest(
+            String workflowId,
+            String keySlug,
+            String workflowName,
+            String status,
+            String message,
+            Map<String, Object> validation,
+            Map<String, Object> pageAssistantValidation,
+            Map<String, Object> runtimeVerification,
+            String studioUrl
+    ) {
     }
 
     public record StepReportRequest(

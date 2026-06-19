@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -156,6 +157,89 @@ class AiAccessSessionServiceTest {
         assertEquals(2, view.completedSteps());
         verify(stepMapper).updateById(any(AiAccessStepEntity.class));
         verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
+    }
+
+    @Test
+    void reportWorkflowAiCodingResultStoresDraftStepEvidence() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(stepMapper.selectList(any())).thenReturn(List.of(
+                step("session-page", "page-manifest", "TODO"),
+                step("session-page", "route-detection", "TODO"),
+                step("session-page", "page-structure", "TODO"),
+                step("session-page", "action-design", "TODO"),
+                step("session-page", "frontend-handler", "TODO"),
+                step("session-page", "page-registry", "TODO"),
+                step("session-page", "browser-verify", "TODO"),
+                step("session-page", "handoff-summary", "TODO")
+        ));
+
+        Map<String, Object> validation = Map.of(
+                "overallStatus", "PASS",
+                "errors", List.of(),
+                "warnings", List.of());
+        Map<String, Object> pageAssistantValidation = Map.of(
+                "overallStatus", "WARN",
+                "matchedActions", List.of("search"),
+                "missingActions", List.of(),
+                "warnings", List.of("placeholder model"));
+        Map<String, Object> runtimeVerification = Map.of(
+                "browserRuntime", Map.of(
+                        "status", "WARN",
+                        "message", "business frontend not reachable",
+                        "checkedActions", List.of("search")));
+
+        AiAccessSessionService.AccessSessionView view = service.reportWorkflowAiCodingResult(
+                1L,
+                "session-page",
+                new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                        "wf-123",
+                        "demo-page-assistant",
+                        "Demo Page Assistant",
+                        "WARN",
+                        "Workflow draft created via AI Coding",
+                        validation,
+                        pageAssistantValidation,
+                        runtimeVerification,
+                        "/workflows/wf-123/studio"));
+
+        AiAccessSessionService.AccessStepView draftStep = view.steps().stream()
+                .filter(step -> AiAccessSessionService.WORKFLOW_AI_CODING_DRAFT_STEP_KEY.equals(step.stepKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("WARN", draftStep.status());
+        assertEquals("Workflow draft created via AI Coding", draftStep.message());
+        assertEquals("wf-123", draftStep.evidence().get("workflowId"));
+        assertEquals("demo-page-assistant", draftStep.evidence().get("keySlug"));
+        assertEquals("/workflows/wf-123/studio", draftStep.evidence().get("studioUrl"));
+        assertEquals(runtimeVerification, draftStep.evidence().get("runtimeVerification"));
+        verify(stepMapper).insert(any(AiAccessStepEntity.class));
+        verify(stepMapper).updateById(any(AiAccessStepEntity.class));
+        verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
+    }
+
+    @Test
+    void reportWorkflowAiCodingResultRejectsMissingSession() {
+        when(sessionMapper.selectList(any())).thenReturn(List.of());
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.reportWorkflowAiCodingResult(
+                        1L,
+                        "missing-session",
+                        new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                                "wf-123",
+                                "demo-page-assistant",
+                                "Demo Page Assistant",
+                                "PASS",
+                                "done",
+                                Map.of(),
+                                Map.of(),
+                                Map.of(),
+                                null)));
+
+        assertTrue(error.getMessage().contains("access session not found"));
     }
 
     @Test

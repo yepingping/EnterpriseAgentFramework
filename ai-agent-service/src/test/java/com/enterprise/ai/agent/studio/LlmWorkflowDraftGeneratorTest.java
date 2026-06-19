@@ -443,8 +443,220 @@ class LlmWorkflowDraftGeneratorTest {
         verify(llmService).chat(systemPrompt.capture(), userPrompt.capture(), anyString());
         assertTrue(systemPrompt.getValue().contains("Never invent or assume pageAction actionKeys"));
         assertTrue(systemPrompt.getValue().contains("Do not create setFilters unless pageActions contains setFilters"));
+        assertTrue(systemPrompt.getValue().contains("linear query flow or multiple mutually exclusive user intents"));
+        assertTrue(systemPrompt.getValue().contains("INTENT_CLASSIFIER(strategy=HYBRID)"));
         assertTrue(userPrompt.getValue().contains("\"allowedActionKeys\" : [ \"search\" ]"));
+        assertTrue(userPrompt.getValue().contains("\"flowMode\" : \"LINEAR_QUERY\""));
         assertFalse(userPrompt.getValue().contains("\"set_filters\""));
+    }
+
+    @Test
+    void pageAssistantPromptUsesIntentRouterForMultipleExclusiveActions() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "answer", "kind": "answer", "label": "回复", "config": { "template": "完成" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "answer" },
+                    { "from": "answer", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("按意图分流")
+                .draftScenario("PAGE_ASSISTANT")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(
+                        pageActionResource("search", "执行查询"),
+                        pageActionResource("reset", "重置筛选"),
+                        pageActionResource("getPageState", "读取页面状态")))
+                .build());
+
+        ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+        verify(llmService).chat(systemPrompt.capture(), userPrompt.capture(), anyString());
+        assertTrue(systemPrompt.getValue().contains("Few-shot B"));
+        assertTrue(userPrompt.getValue().contains("\"flowMode\" : \"INTENT_ROUTER\""));
+        assertTrue(userPrompt.getValue().contains("\"intentClasses\""));
+        assertTrue(userPrompt.getValue().contains("reset_intent"));
+        assertTrue(userPrompt.getValue().contains("page_state_intent"));
+    }
+
+    @Test
+    void pageAssistantIntentClassesMergeSameCategoryActions() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "answer", "kind": "answer", "label": "回复", "config": { "template": "完成" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "answer" },
+                    { "from": "answer", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("按意图分流")
+                .draftScenario("PAGE_ASSISTANT")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(
+                        pageActionResource("resetTable", "重置表格"),
+                        pageActionResource("resetAll", "重置全部"),
+                        pageActionResource("openRowAction", "打开周期", Map.of(), true),
+                        pageActionResource("openRowDetail", "打开详情")))
+                .build());
+
+        ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+        verify(llmService).chat(anyString(), userPrompt.capture(), anyString());
+        String prompt = userPrompt.getValue();
+        assertEquals(1, countOccurrences(prompt, "\"id\" : \"reset_intent\""));
+        assertEquals(1, countOccurrences(prompt, "\"id\" : \"row_action_intent\""));
+        assertTrue(prompt.contains("\"resetTable\""));
+        assertTrue(prompt.contains("\"resetAll\""));
+        assertTrue(prompt.contains("\"openRowAction\""));
+        assertTrue(prompt.contains("\"openRowDetail\""));
+    }
+
+    private static int countOccurrences(String text, String token) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(token, index)) >= 0) {
+            count++;
+            index += token.length();
+        }
+        return count;
+    }
+
+    @Test
+    void pageAssistantLinearQueryPromptDoesNotRequireClassifier() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "页面查询助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    { "id": "set_filters", "kind": "pageAction", "label": "设置筛选", "config": { "actionKey": "setFilters" } },
+                    { "id": "search", "kind": "pageAction", "label": "执行查询", "config": { "actionKey": "search" } },
+                    { "id": "read_table", "kind": "pageAction", "label": "读取表格", "config": { "actionKey": "readTable" } },
+                    { "id": "answer", "kind": "answer", "label": "回复", "config": { "template": "完成" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input" },
+                    { "from": "user_input", "to": "set_filters" },
+                    { "from": "set_filters", "to": "search" },
+                    { "from": "search", "to": "read_table" },
+                    { "from": "read_table", "to": "answer" },
+                    { "from": "answer", "to": "END" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("标准查询链路")
+                .draftScenario("PAGE_ASSISTANT")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(
+                        pageActionResource("setFilters", "设置筛选", Map.of("managerName", "张三")),
+                        pageActionResource("search", "执行查询"),
+                        pageActionResource("readTable", "读取表格")))
+                .build());
+
+        ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+        verify(llmService).chat(anyString(), userPrompt.capture(), anyString());
+        assertTrue(userPrompt.getValue().contains("\"flowMode\" : \"LINEAR_QUERY\""));
+        assertFalse(result.graphSpec().getNodes().stream().anyMatch(node -> "INTENT_CLASSIFIER".equals(node.getType())));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pageAssistantIntentRouterDraftPreservesClassifierConfig() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "多意图页面助手",
+                  "nodes": [
+                    { "id": "user_input", "kind": "userInput", "label": "用户输入", "config": { "fields": [{ "name": "question", "type": "string" }] } },
+                    {
+                      "id": "intent_router",
+                      "kind": "classifier",
+                      "label": "意图分流",
+                      "config": {
+                        "strategy": "HYBRID",
+                        "inputExpression": "input",
+                        "defaultRoute": "else",
+                        "classes": [
+                          { "id": "search_intent", "label": "查询", "description": "查询表格", "keywords": ["查询"] },
+                          { "id": "reset_intent", "label": "重置", "description": "重置筛选", "keywords": ["重置"] }
+                        ]
+                      }
+                    },
+                    { "id": "search", "kind": "pageAction", "label": "执行查询", "config": { "actionKey": "search" } },
+                    { "id": "reset", "kind": "pageAction", "label": "重置筛选", "config": { "actionKey": "reset" } },
+                    { "id": "answer_search", "kind": "answer", "label": "查询回复", "config": { "template": "已查询" } },
+                    { "id": "answer_reset", "kind": "answer", "label": "重置回复", "config": { "template": "已重置" } },
+                    { "id": "answer_else", "kind": "answer", "label": "澄清回复", "config": { "template": "请说明要查询还是重置" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "user_input", "condition": "always" },
+                    { "from": "user_input", "to": "intent_router", "condition": "always" },
+                    { "from": "intent_router", "to": "search", "condition": "route:search_intent", "sourceHandle": "route:search_intent" },
+                    { "from": "search", "to": "answer_search", "condition": "always" },
+                    { "from": "intent_router", "to": "reset", "condition": "route:reset_intent", "sourceHandle": "route:reset_intent" },
+                    { "from": "reset", "to": "answer_reset", "condition": "always" },
+                    { "from": "intent_router", "to": "answer_else", "condition": "route:else", "sourceHandle": "route:else" },
+                    { "from": "answer_search", "to": "END", "condition": "always" },
+                    { "from": "answer_reset", "to": "END", "condition": "always" },
+                    { "from": "answer_else", "to": "END", "condition": "always" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("页面助手")
+                .requirement("按意图分流")
+                .draftScenario("PAGE_ASSISTANT")
+                .modelInstanceId("model-1")
+                .pageActions(List.of(
+                        pageActionResource("search", "执行查询"),
+                        pageActionResource("reset", "重置筛选")))
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        GraphSpec.Node classifierNode = result.graphSpec().getNodes().stream()
+                .filter(node -> "intent_router".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("HYBRID", classifierNode.getConfig().get("strategy"));
+        assertEquals("else", classifierNode.getConfig().get("defaultRoute"));
+
+        Map<String, Object> canvasNode = ((List<Map<String, Object>>) result.canvasSnapshot().get("nodes")).stream()
+                .filter(node -> "intent_router".equals(node.get("id")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> data = (Map<String, Object>) canvasNode.get("data");
+        Map<String, Object> classifierConfig = (Map<String, Object>) data.get("classifierConfig");
+        assertEquals("HYBRID", classifierConfig.get("strategy"));
+        assertEquals("else", classifierConfig.get("defaultRoute"));
+        assertTrue(result.graphSpec().getEdges().stream().anyMatch(edge ->
+                "intent_router".equals(edge.getFrom()) && "route:search_intent".equals(edge.getCondition())));
     }
 
     @Test
@@ -645,11 +857,85 @@ class LlmWorkflowDraftGeneratorTest {
         assertFalse(pageActionEdge.containsKey("targetHandle"));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void preservesClassifierStrategyInGraphSpecAndCanvas() {
+        LlmService llmService = mock(LlmService.class);
+        when(llmService.chat(anyString(), anyString(), anyString())).thenReturn("""
+                {
+                  "summary": "多意图分流",
+                  "nodes": [
+                    {
+                      "id": "intent_router",
+                      "kind": "classifier",
+                      "label": "意图分流",
+                      "config": {
+                        "strategy": "HYBRID",
+                        "inputExpression": "input",
+                        "modelInstanceId": "model-1",
+                        "confidenceThreshold": 0.75,
+                        "llmPrompt": "Classify: {{ input }}",
+                        "classes": [
+                          { "id": "search", "label": "查询", "description": "查询表格", "keywords": ["查询"] },
+                          { "id": "else", "label": "其他", "keywords": [] }
+                        ],
+                        "defaultRoute": "else"
+                      }
+                    },
+                    { "id": "search_answer", "kind": "answer", "label": "查询回复", "config": { "template": "ok" } },
+                    { "id": "else_answer", "kind": "answer", "label": "默认回复", "config": { "template": "fallback" } }
+                  ],
+                  "edges": [
+                    { "from": "START", "to": "intent_router", "condition": "always" },
+                    { "from": "intent_router", "to": "search_answer", "condition": "route:search", "sourceHandle": "route:search" },
+                    { "from": "intent_router", "to": "else_answer", "condition": "route:else", "sourceHandle": "route:else" },
+                    { "from": "search_answer", "to": "END", "condition": "always" },
+                    { "from": "else_answer", "to": "END", "condition": "always" }
+                  ]
+                }
+                """);
+        LlmWorkflowDraftGenerator generator = new LlmWorkflowDraftGenerator(objectMapper, llmService);
+
+        WorkflowDraftGenerationResult result = generator.generate(WorkflowDraftGenerationRequest.builder()
+                .agentName("分流助手")
+                .requirement("按意图分流到不同回复")
+                .modelInstanceId("model-1")
+                .build());
+
+        assertEquals(List.of(), result.validationErrors());
+        GraphSpec.Node classifierNode = result.graphSpec().getNodes().stream()
+                .filter(node -> "intent_router".equals(node.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("HYBRID", classifierNode.getConfig().get("strategy"));
+        assertEquals("model-1", classifierNode.getConfig().get("modelInstanceId"));
+        assertEquals(0.75D, ((Number) classifierNode.getConfig().get("confidenceThreshold")).doubleValue());
+        assertEquals("Classify: {{ input }}", classifierNode.getConfig().get("llmPrompt"));
+
+        Map<String, Object> canvasNode = ((List<Map<String, Object>>) result.canvasSnapshot().get("nodes")).stream()
+                .filter(node -> "intent_router".equals(node.get("id")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> data = (Map<String, Object>) canvasNode.get("data");
+        Map<String, Object> classifierConfig = (Map<String, Object>) data.get("classifierConfig");
+        assertEquals("HYBRID", classifierConfig.get("strategy"));
+        assertEquals("model-1", classifierConfig.get("modelInstanceId"));
+        assertEquals(0.75D, ((Number) classifierConfig.get("confidenceThreshold")).doubleValue());
+        assertEquals("Classify: {{ input }}", classifierConfig.get("llmPrompt"));
+    }
+
     private WorkflowDraftResource pageActionResource(String actionKey, String title) {
         return pageActionResource(actionKey, title, Map.of());
     }
 
     private WorkflowDraftResource pageActionResource(String actionKey, String title, Map<String, Object> sampleArgs) {
+        return pageActionResource(actionKey, title, sampleArgs, false);
+    }
+
+    private WorkflowDraftResource pageActionResource(String actionKey,
+                                                     String title,
+                                                     Map<String, Object> sampleArgs,
+                                                     boolean confirmRequired) {
         return WorkflowDraftResource.builder()
                 .kind("PAGE_ACTION")
                 .name(actionKey)
@@ -660,7 +946,7 @@ class LlmWorkflowDraftGeneratorTest {
                         "pageKey", "teamArchive.list",
                         "routePattern", "/teams/archive",
                         "actionKey", actionKey,
-                        "confirmRequired", false,
+                        "confirmRequired", confirmRequired,
                         "sampleArgs", sampleArgs,
                         "inputSchema", Map.of(
                                 "type", "object",

@@ -253,7 +253,10 @@
               <span class="step-kicker">步骤 4</span>
               <h2>配置并生成草稿</h2>
             </div>
-            <el-tag effect="plain">{{ selectedApiAssets.length }} 个 API 资产</el-tag>
+            <div class="panel-actions">
+              <el-tag effect="plain">{{ selectedApiAssets.length }} 个 API 资产</el-tag>
+              <el-button :icon="DocumentCopy" @click="openWorkflowAiCodingPromptDialog">使用 AI Coding 生成</el-button>
+            </div>
           </div>
 
           <div class="draft-summary-strip" aria-label="生成草稿摘要">
@@ -261,6 +264,41 @@
             <span>动作：{{ selectedActions.length }} 个已选</span>
             <span>模型：{{ modelInstanceId ? '已选择' : '未选择' }}</span>
             <span>API：{{ selectedApiAssets.length }} 个</span>
+          </div>
+
+          <div v-if="workflowAiCodingDraftStep" class="workflow-ai-coding-result-card">
+            <div class="workflow-ai-coding-result-head">
+              <el-tag :type="stepStatusTagType(workflowAiCodingDraftStep.status)" effect="plain">
+                AI Coding {{ workflowAiCodingDraftStep.status }}
+              </el-tag>
+              <strong>{{ workflowAiCodingDraftStep.message || 'Workflow AI Coding 草稿已回传' }}</strong>
+            </div>
+            <div class="studio-ready-metrics compact">
+              <div>
+                <span>workflowId</span>
+                <strong>{{ workflowAiCodingDraftEvidence.workflowId || '—' }}</strong>
+              </div>
+              <div>
+                <span>keySlug</span>
+                <strong>{{ workflowAiCodingDraftEvidence.keySlug || '—' }}</strong>
+              </div>
+              <div>
+                <span>validate</span>
+                <strong>{{ workflowAiCodingValidationSummary || '—' }}</strong>
+              </div>
+              <div>
+                <span>page-assistant validate</span>
+                <strong>{{ workflowAiCodingPageAssistantValidationSummary || '—' }}</strong>
+              </div>
+              <div>
+                <span>browser runtime</span>
+                <strong>{{ workflowAiCodingRuntimeVerificationSummary || '—' }}</strong>
+              </div>
+            </div>
+            <div class="workflow-ai-coding-result-actions">
+              <el-button size="small" @click="openAiCodingWorkflowStudio">打开 Studio</el-button>
+              <el-button size="small" type="primary" @click="useAiCodingWorkflowDraft">使用该 Workflow 继续</el-button>
+            </div>
           </div>
 
           <el-form label-position="top" class="draft-form draft-console">
@@ -743,6 +781,90 @@
         />
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="workflowAiCodingPromptDialogVisible"
+      title="使用 AI Coding 生成页面助手 Workflow"
+      width="860px"
+      destroy-on-close
+    >
+      <div class="ai-prompt-dialog">
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          title="复制给 Cursor / Codex / Claude Code"
+          description="让外部 AI 工具通过 Workflow AI Coding REST API 创建 PAGE_ASSISTANT 草稿；本阶段只复制提示词，不在向导内自动调用 API。生成完成后 AI 工具应回传 workflow-ai-coding-result，向导将展示结果。"
+        />
+        <div v-if="workflowAiCodingDraftStep" class="workflow-ai-coding-result-card dialog">
+          <div class="workflow-ai-coding-result-head">
+            <el-tag :type="stepStatusTagType(workflowAiCodingDraftStep.status)" effect="plain">
+              已回传 {{ workflowAiCodingDraftStep.status }}
+            </el-tag>
+            <strong>{{ workflowAiCodingDraftStep.message || 'Workflow AI Coding 草稿已回传' }}</strong>
+            <el-button size="small" link :loading="pageAssistantManifestLoading" @click="refreshWorkflowAiCodingDraftStatus">
+              刷新状态
+            </el-button>
+          </div>
+          <div class="studio-ready-metrics compact">
+            <div>
+              <span>workflowId</span>
+              <strong>{{ workflowAiCodingDraftEvidence.workflowId || '—' }}</strong>
+            </div>
+            <div>
+              <span>keySlug</span>
+              <strong>{{ workflowAiCodingDraftEvidence.keySlug || '—' }}</strong>
+            </div>
+            <div>
+              <span>workflowName</span>
+              <strong>{{ workflowAiCodingDraftEvidence.workflowName || '—' }}</strong>
+            </div>
+            <div>
+              <span>validate</span>
+              <strong>{{ workflowAiCodingValidationSummary || '—' }}</strong>
+            </div>
+            <div>
+              <span>page-assistant validate</span>
+              <strong>{{ workflowAiCodingPageAssistantValidationSummary || '—' }}</strong>
+            </div>
+            <div>
+              <span>browser runtime</span>
+              <strong>{{ workflowAiCodingRuntimeVerificationSummary || '—' }}</strong>
+            </div>
+          </div>
+          <div class="workflow-ai-coding-result-actions">
+            <el-button size="small" @click="openAiCodingWorkflowStudio">打开 Studio</el-button>
+            <el-button size="small" type="primary" @click="useAiCodingWorkflowDraft">使用该 Workflow 继续</el-button>
+          </div>
+        </div>
+        <div v-else class="workflow-ai-coding-result-empty">
+          <span>外部 AI 完成创建/validate 并回传后，这里会显示 workflowId 与校验摘要。</span>
+          <el-button size="small" link :loading="pageAssistantManifestLoading" @click="refreshWorkflowAiCodingDraftStatus">
+            刷新回传状态
+          </el-button>
+        </div>
+        <div class="ai-prompt-toolbar">
+          <el-radio-group v-model="workflowAiCodingPromptTool" size="small">
+            <el-radio-button label="Cursor" />
+            <el-radio-button label="Codex" />
+            <el-radio-button label="Claude Code" />
+          </el-radio-group>
+        </div>
+        <el-input
+          class="ai-prompt-editor"
+          :model-value="workflowAiCodingPrompt"
+          type="textarea"
+          :rows="22"
+          readonly
+        />
+      </div>
+      <template #footer>
+        <el-button @click="workflowAiCodingPromptDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :icon="DocumentCopy" @click="copyWorkflowAiCodingPrompt">
+          {{ workflowAiCodingPromptCopied ? '已复制' : '复制提示词' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -763,6 +885,7 @@ import {
   type PageRegistryView,
 } from '@/api/embedOps'
 import { getModelInstances } from '@/api/model'
+import type { ModelInstance } from '@/types/model'
 import {
   getPageAssistantAccessSessions,
   getLatestPageAssistantAccessSession,
@@ -772,12 +895,15 @@ import {
 } from '@/api/scanProject'
 import type { AgentEntry, WorkflowDefinitionDraft, WorkflowDraftGenerationResult, WorkflowDraftResource, PageAssistantWorkflowBindingResult } from '@/types/workflow'
 import type { ApiAssetItem } from '@/types/apiAsset'
-import type { ModelInstance } from '@/types/model'
+import { buildPageAssistantDraftRequirement, type PageAssistantGoal } from './pageAssistantDraftRequirement'
+import { buildPageAssistantWorkflowAiCodingPrompt } from './pageAssistantWorkflowAiCodingPrompt'
 import type { AiAccessSession, PageAssistantOnboardingManifest, PageAssistantSessionRequest, PageAssistantSessionSummary, ScanProject } from '@/types/scanProject'
 import { buildPageAssistantOnboardingPrompt } from './pageAssistantOnboardingPrompt'
 
 type WizardStepKey = 'connect' | 'page' | 'action' | 'draft' | 'confirm' | 'bind' | 'studio'
 type AssistantGoal = 'query' | 'operate' | 'queryThenAction'
+
+const WORKFLOW_AI_CODING_DRAFT_STEP_KEY = 'workflow-ai-coding-draft'
 
 const route = useRoute()
 const router = useRouter()
@@ -813,6 +939,9 @@ const manualSubmitting = ref(false)
 const aiPromptDialogVisible = ref(false)
 const aiPromptCopied = ref(false)
 const aiPromptTool = ref<'Cursor' | 'Codex' | 'Claude Code'>('Cursor')
+const workflowAiCodingPromptDialogVisible = ref(false)
+const workflowAiCodingPromptCopied = ref(false)
+const workflowAiCodingPromptTool = ref<'Cursor' | 'Codex' | 'Claude Code'>('Cursor')
 const pageAssistantManifest = ref<PageAssistantOnboardingManifest | null>(null)
 const pageAssistantSession = ref<AiAccessSession | null>(null)
 const pageAssistantSessions = ref<PageAssistantSessionSummary[]>([])
@@ -827,6 +956,7 @@ let cardAnimationTimer: ReturnType<typeof setTimeout> | undefined
 let cardAttentionTimer: ReturnType<typeof setTimeout> | undefined
 let sdkCopyTimer: ReturnType<typeof setTimeout> | undefined
 let aiPromptCopyTimer: ReturnType<typeof setTimeout> | undefined
+let workflowAiCodingPromptCopyTimer: ReturnType<typeof setTimeout> | undefined
 const manualForm = reactive({
   pageKey: '',
   pageName: '',
@@ -994,6 +1124,115 @@ const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardin
     bridgeApiGlobal: pageAssistantManifest.value?.pageActionContract?.bridgeApi?.global
       || `window.${pageAssistantManifest.value?.pageActionContract?.bridgeGlobal || '__REACHAI_PAGE_BRIDGE__'}`,
   },
+}))
+
+const workflowAiCodingReportUrl = computed(() => {
+  const sessionId = pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId
+  if (!project.value?.id || !sessionId) return ''
+  const base = `${window.location.origin}/api/ai-assist/projects/${project.value.id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`
+  return withAiCodingKey(base) || base
+})
+
+const workflowAiCodingDraftStep = computed(() =>
+  pageAssistantSession.value?.steps?.find((step) => step.stepKey === WORKFLOW_AI_CODING_DRAFT_STEP_KEY) || null,
+)
+
+const workflowAiCodingDraftEvidence = computed(() => {
+  const evidence = workflowAiCodingDraftStep.value?.evidence || {}
+  return {
+    workflowId: typeof evidence.workflowId === 'string' ? evidence.workflowId : '',
+    keySlug: typeof evidence.keySlug === 'string' ? evidence.keySlug : '',
+    workflowName: typeof evidence.workflowName === 'string' ? evidence.workflowName : '',
+    studioUrl: typeof evidence.studioUrl === 'string' ? evidence.studioUrl : '',
+    validation: (evidence.validation && typeof evidence.validation === 'object'
+      ? evidence.validation
+      : {}) as Record<string, unknown>,
+    pageAssistantValidation: (evidence.pageAssistantValidation && typeof evidence.pageAssistantValidation === 'object'
+      ? evidence.pageAssistantValidation
+      : {}) as Record<string, unknown>,
+    runtimeVerification: (evidence.runtimeVerification && typeof evidence.runtimeVerification === 'object'
+      ? evidence.runtimeVerification
+      : {}) as Record<string, unknown>,
+  }
+})
+
+function formatValidationOverallStatus(summary: Record<string, unknown>) {
+  const status = String(summary.overallStatus || '').trim()
+  const errors = Array.isArray(summary.errors) ? summary.errors.filter(Boolean) : []
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings.filter(Boolean) : []
+  if (!status && !errors.length && !warnings.length) return ''
+  const parts = [status || 'UNKNOWN']
+  if (errors.length) parts.push(`${errors.length} errors`)
+  if (warnings.length) parts.push(`${warnings.length} warnings`)
+  return parts.join(' · ')
+}
+
+const workflowAiCodingValidationSummary = computed(() =>
+  formatValidationOverallStatus(workflowAiCodingDraftEvidence.value.validation),
+)
+
+const workflowAiCodingPageAssistantValidationSummary = computed(() => {
+  const summary = workflowAiCodingDraftEvidence.value.pageAssistantValidation
+  const base = formatValidationOverallStatus(summary)
+  const matched = Array.isArray(summary.matchedActions) ? summary.matchedActions.filter(Boolean) : []
+  const missing = Array.isArray(summary.missingActions) ? summary.missingActions.filter(Boolean) : []
+  if (!base && !matched.length && !missing.length) return ''
+  const parts = [base || 'UNKNOWN']
+  if (matched.length) parts.push(`matched ${matched.length}`)
+  if (missing.length) parts.push(`missing ${missing.length}`)
+  return parts.join(' · ')
+})
+
+const workflowAiCodingRuntimeVerificationSummary = computed(() => {
+  const verification = workflowAiCodingDraftEvidence.value.runtimeVerification
+  const browserRuntime = verification.browserRuntime && typeof verification.browserRuntime === 'object'
+    ? verification.browserRuntime as Record<string, unknown>
+    : verification
+  const status = String(browserRuntime.status || '').trim()
+  const checkedActions = Array.isArray(browserRuntime.checkedActions)
+    ? browserRuntime.checkedActions.filter(Boolean)
+    : Array.isArray(browserRuntime.invokedActions)
+      ? browserRuntime.invokedActions.filter(Boolean)
+      : []
+  const parts = [status || 'UNKNOWN']
+  if (checkedActions.length) parts.push(`${checkedActions.length} actions`)
+  const message = String(browserRuntime.message || '').trim()
+  if (message) parts.push(message)
+  return Object.keys(browserRuntime).length ? parts.join(' · ') : ''
+})
+
+const workflowAiCodingPrompt = computed(() => buildPageAssistantWorkflowAiCodingPrompt({
+  toolName: workflowAiCodingPromptTool.value,
+  platformUrl: window.location.origin,
+  project: {
+    id: project.value?.id,
+    projectCode: project.value?.projectCode || projectCode.value,
+    name: project.value?.name || projectCode.value,
+    registryAppKey: pageAssistantManifest.value?.project.registryAppKey || project.value?.registryAppKey,
+  },
+  aiCodingAccess: {
+    enabled: pageAssistantManifest.value?.aiCodingAccess?.enabled,
+    accessKey: pageAssistantManifest.value?.aiCodingAccess?.accessKey,
+    stateLabel: aiCodingAccessState.value,
+  },
+  sessionId: pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId,
+  reportUrl: workflowAiCodingReportUrl.value,
+  page: {
+    pageKey: selectedPage.value?.pageKey || selectedPageKey.value,
+    pageName: selectedPage.value?.name || selectedPageKey.value,
+    routePattern: selectedPage.value?.routePattern || '',
+  },
+  actions: selectedActions.value.map((action) => ({
+    actionKey: action.actionKey,
+    title: action.title,
+    description: action.description,
+    confirmRequired: Boolean(action.confirmRequired),
+  })),
+  requirement: requirement.value || defaultRequirement(),
+  workflowName: pageAssistantWorkflowName(),
+  workflowKeySlug: pageAssistantWorkflowKeySlug(),
+  modelInstanceId: modelInstanceId.value,
+  skillPackageUrl: `${window.location.origin}/api/ai-assist/skills/workflow-ai-coding/latest.zip`,
 }))
 
 function escapeHtml(value: string) {
@@ -1227,34 +1466,15 @@ async function loadAll() {
 }
 
 function defaultRequirement() {
-  const pageName = selectedPage.value?.name || selectedPageKey.value || '当前业务页面'
-  const actionNames = selectedActions.value.map((item) => item.title || item.actionKey).join('、') || '已选择的页面动作'
-  const actionKeys = selectedActions.value.map((item) => item.actionKey).filter(Boolean)
-  const hasSetFilters = actionKeys.some((key) => /set_?filters?/i.test(key))
-  const hasSearch = actionKeys.some((key) => key === 'search' || /search|query/i.test(key))
-  const hasReadTable = actionKeys.some((key) => key === 'readTable' || /read.*table|table.*read/i.test(key))
-  const flowParts = ['USER_INPUT']
-  if (hasSetFilters) {
-    flowParts.push('LLM筛选提取(extracted_filters)', 'setFilters')
-  }
-  if (hasSearch) flowParts.push('search')
-  if (hasReadTable) flowParts.push('readTable')
-  flowParts.push('ANSWER')
-  const filterInstruction = hasSetFilters
-    ? `LLM 提取节点需 outputAlias=extracted_filters、outputFormat=json，并从用户问题提取 setFilters 的 inputSchema 字段。
-setFilters 节点 args 必须映射为 extracted_filters.<字段名>，不可留空。`
-    : '本次已选动作不包含 setFilters，不要生成 setFilters/设置筛选节点；只能使用已选页面动作完成流程，无法执行的筛选能力要在草稿问题中提示。'
-  const goalText = {
-    query: '根据用户自然语言提取查询条件，并触发页面查询/筛选动作。',
-    operate: '根据用户确认后的意图触发页面动作，必要时先让用户确认。',
-    queryThenAction: '先理解用户查询意图，必要时调用后端资产补充信息，再联动页面动作。',
-  }[assistantGoal.value]
-  return `为${pageName}创建 PAGE_ASSISTANT 页面助手。${goalText}可用页面动作：${actionNames}。
-必须生成可发布草稿，只能使用已选择的 actionKeys：${actionKeys.join('、') || '无'}。
-推荐节点顺序：${flowParts.join(' -> ')}。
-${filterInstruction}
-search/readTable/getPageState 等触发类动作 args 可为空，除非动作 schema 明确要求参数。
-ANSWER 节点使用固定中文状态文案，不要使用 {{ lastOutput }}。`
+  return buildPageAssistantDraftRequirement({
+    pageName: selectedPage.value?.name || selectedPageKey.value || '当前业务页面',
+    assistantGoal: assistantGoal.value as PageAssistantGoal,
+    actions: selectedActions.value.map((item) => ({
+      actionKey: item.actionKey,
+      title: item.title,
+      confirmRequired: Boolean(item.confirmRequired),
+    })),
+  })
 }
 
 function workflowKeyPart(value: unknown, fallback: string) {
@@ -1455,6 +1675,64 @@ function openAiPromptDialog() {
     return
   }
   aiPromptDialogVisible.value = true
+}
+
+function openWorkflowAiCodingPromptDialog() {
+  if (!selectedPageKey.value && !selectedPage.value) {
+    ElMessage.warning('请先选择页面')
+    return
+  }
+  if (!selectedActions.value.length) {
+    ElMessage.warning('请先选择至少一个页面动作')
+    return
+  }
+  workflowAiCodingPromptDialogVisible.value = true
+  void loadPageAssistantManifest({ silent: true }).then(() => refreshWorkflowAiCodingDraftStatus())
+}
+
+async function refreshWorkflowAiCodingDraftStatus() {
+  await refreshPageAssistantSession()
+}
+
+function openAiCodingWorkflowStudio() {
+  const workflowId = workflowAiCodingDraftEvidence.value.workflowId
+  if (!workflowId) {
+    ElMessage.warning('尚未收到 AI Coding 回传的 workflowId')
+    return
+  }
+  const studioUrl = workflowAiCodingDraftEvidence.value.studioUrl || `/workflows/${workflowId}/studio`
+  router.push(studioUrl.startsWith('/') ? studioUrl : `/${studioUrl}`)
+}
+
+async function useAiCodingWorkflowDraft() {
+  const workflowId = workflowAiCodingDraftEvidence.value.workflowId
+  if (!workflowId) {
+    ElMessage.warning('尚未收到 AI Coding 回传的 workflowId')
+    return
+  }
+  createdWorkflowId.value = workflowId
+  bindingResult.value = null
+  workflowAiCodingPromptDialogVisible.value = false
+  await loadPageCopilotAgent()
+  ElMessage.success('已选用 AI Coding 生成的 Workflow，请继续挂载智能体')
+  selectStep('bind')
+}
+
+async function copyWorkflowAiCodingPrompt() {
+  try {
+    await navigator.clipboard.writeText(workflowAiCodingPrompt.value)
+    workflowAiCodingPromptCopied.value = true
+    if (workflowAiCodingPromptCopyTimer) {
+      clearTimeout(workflowAiCodingPromptCopyTimer)
+    }
+    workflowAiCodingPromptCopyTimer = setTimeout(() => {
+      workflowAiCodingPromptCopied.value = false
+      workflowAiCodingPromptCopyTimer = undefined
+    }, 1600)
+    ElMessage.success('Workflow AI Coding 提示词已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择提示词')
+  }
 }
 
 async function loadPageAssistantSessions(options: { silent?: boolean } = {}) {
@@ -3476,6 +3754,53 @@ onMounted(loadAll)
 .ai-prompt-dialog {
   display: grid;
   gap: 14px;
+}
+
+.workflow-ai-coding-result-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(167, 190, 230, 0.42);
+  border-radius: 10px;
+  background: rgba(248, 251, 255, 0.82);
+}
+
+.workflow-ai-coding-result-card.dialog {
+  margin-top: 2px;
+}
+
+.workflow-ai-coding-result-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workflow-ai-coding-result-head strong {
+  flex: 1 1 auto;
+  font-size: 14px;
+}
+
+.workflow-ai-coding-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-ai-coding-result-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(247, 250, 252, 0.9);
+  color: #718096;
+  font-size: 13px;
+}
+
+.studio-ready-metrics.compact {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .ai-prompt-toolbar {

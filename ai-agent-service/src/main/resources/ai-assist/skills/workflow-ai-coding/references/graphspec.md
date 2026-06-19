@@ -66,7 +66,7 @@ Use a real model instance from `context.availableModels`:
     "config": {
       "modelInstanceId": "<availableModels[0].id>",
       "prompt": "You are a helpful assistant. Answer the user clearly.",
-      "userPrompt": "{{ message }}"
+      "userPrompt": "{{ input }}"
     }
   }
 }
@@ -75,7 +75,7 @@ Use a real model instance from `context.availableModels`:
 Notes:
 
 - `modelInstanceId` is required unless workflow `defaultModelInstanceId` is already set.
-- `prompt` acts as system prompt; `userPrompt` renders from runtime state (`message`, `lastOutput`, etc.).
+- `prompt` acts as system prompt; `userPrompt` renders templates from runtime state (`input`, `message`, `lastOutput`, etc.).
 
 ### IF_ELSE
 
@@ -95,7 +95,7 @@ Route by structured condition groups. Edge `condition` must match the selected g
           "logic": "AND",
           "conditions": [
             {
-              "left": "{{ message }}",
+              "left": "input",
               "operator": "contains",
               "right": "地铁"
             }
@@ -116,6 +116,9 @@ Matching edges:
 ```
 
 Supported operators include: `contains`, `not_contains`, `eq`, `neq`, `empty`, `not_empty`, `gt`, `gte`, `lt`, `lte`.
+
+Condition operands use runtime expressions such as `input`, `params.message`, `lastOutput`, or `nodeOutput.answer`.
+Do not wrap condition operands in `{{ }}`; template rendering is for fields such as LLM `userPrompt` or ANSWER `template`.
 
 ### ANSWER
 
@@ -246,7 +249,7 @@ Patch preview example:
               "id": "metro",
               "logic": "AND",
               "conditions": [
-                { "left": "{{ message }}", "operator": "contains", "right": "地铁" }
+                { "left": "input", "operator": "contains", "right": "地铁" }
               ]
             }
           ],
@@ -263,7 +266,7 @@ Patch preview example:
         "config": {
           "modelInstanceId": "<availableModels[0].id>",
           "prompt": "你是地铁问答助手，只回答与中国城市地铁相关的问题。",
-          "userPrompt": "{{ message }}"
+          "userPrompt": "{{ input }}"
         }
       }
     },

@@ -94,10 +94,20 @@
           {{ formatWorkflowManagedByLabel(row.managedBy) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="openStudio(row.id)">编排</el-button>
           <el-button size="small" @click="openVersions(row.id)">版本</el-button>
+          <el-button
+            v-if="canDeleteWorkflow(row)"
+            size="small"
+            type="danger"
+            plain
+            :loading="deletingId === row.id"
+            @click="confirmDeleteWorkflow(row)"
+          >
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -174,9 +184,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
-import { createWorkflow, listWorkflows } from '@/api/workflow'
+import { createWorkflow, deleteWorkflow, listWorkflows } from '@/api/workflow'
 import type { WorkflowDefinition } from '@/types/workflow'
 import { formatRuntimeTypeLabel } from '@/utils/registryLabels'
 import {
@@ -193,6 +203,7 @@ const router = useRouter()
 
 const loading = ref(false)
 const creating = ref(false)
+const deletingId = ref('')
 const createDialogVisible = ref(false)
 const workflows = ref<WorkflowDefinition[]>([])
 const filters = reactive({
@@ -248,6 +259,32 @@ function openStudio(id: string) {
 
 function openVersions(id: string) {
   router.push(`/workflows/${id}/versions`)
+}
+
+function canDeleteWorkflow(row: WorkflowDefinition) {
+  return row.deletable === true
+}
+
+async function confirmDeleteWorkflow(row: WorkflowDefinition) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除草稿 Workflow「${row.name}」吗？删除后不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deletingId.value = row.id
+  try {
+    await deleteWorkflow(row.id)
+    ElMessage.success('Workflow 已删除')
+    await loadWorkflows()
+  } catch {
+    // 错误提示由 request 拦截器处理
+  } finally {
+    deletingId.value = ''
+  }
 }
 
 function backToProject() {

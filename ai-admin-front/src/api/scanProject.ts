@@ -20,6 +20,7 @@ import type {
   PageAssistantSessionRequest,
   PageAssistantSessionSummary,
   PageAssistantTargetRequest,
+  PageAssistantWorkflowAiCodingResultRequest,
   ScanProjectBlockers,
   ScanProjectRegistryCredentialSaveRequest,
   SdkAccessCheckRequest,
@@ -187,6 +188,19 @@ export function registerPageAssistantPage(
 ) {
   return agentRequest.post<PageAssistantPageRegisterResponse>(
     `/api/ai-assist/projects/${id}/page-assistant/pages/register`,
+    data,
+    { params: aiCodingKey ? { aiCodingKey } : {} },
+  )
+}
+
+export function reportPageAssistantWorkflowAiCodingResult(
+  id: number,
+  sessionId: string,
+  data: PageAssistantWorkflowAiCodingResultRequest,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.post<AiAccessSession>(
+    `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`,
     data,
     { params: aiCodingKey ? { aiCodingKey } : {} },
   )

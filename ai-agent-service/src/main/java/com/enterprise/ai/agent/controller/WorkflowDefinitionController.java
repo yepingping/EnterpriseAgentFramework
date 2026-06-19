@@ -84,8 +84,17 @@ public class WorkflowDefinitionController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable String id) {
-        return service.delete(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    public ResponseEntity<?> delete(@PathVariable String id) {
+        try {
+            service.delete(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException ex) {
+            String message = ex.getMessage();
+            if (message != null && message.startsWith("workflow not found")) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.badRequest().body(Map.of("message", message != null ? message : "delete rejected"));
+        }
     }
 
     @PostMapping("/{id}/page-assistant/bind")

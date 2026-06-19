@@ -493,6 +493,77 @@ class AiAssistControllerTest {
     }
 
     @Test
+    void pageAssistantWorkflowAiCodingResultRejectsInvalidAiCodingAccessKey() {
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "wrong-key")).thenReturn(false);
+
+        ResponseEntity<?> response = controller.reportPageAssistantWorkflowAiCodingResult(
+                1L,
+                "rai_page",
+                "wrong-key",
+                new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                        "wf-123",
+                        "demo-page-assistant",
+                        "Demo Page Assistant",
+                        "PASS",
+                        "done",
+                        Map.of("overallStatus", "PASS"),
+                        Map.of("overallStatus", "PASS"),
+                        Map.of(),
+                        "/workflows/wf-123/studio"));
+
+        assertEquals(403, response.getStatusCode().value());
+    }
+
+    @Test
+    void pageAssistantWorkflowAiCodingResultAcceptsValidAiCodingAccessKey() {
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
+        when(accessSessionService.reportWorkflowAiCodingResult(
+                1L,
+                "rai_page",
+                new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                        "wf-123",
+                        "demo-page-assistant",
+                        "Demo Page Assistant",
+                        "PASS",
+                        "done",
+                        Map.of("overallStatus", "PASS"),
+                        Map.of("overallStatus", "PASS"),
+                        Map.of(),
+                        "/workflows/wf-123/studio")))
+                .thenReturn(pageAssistantSession());
+
+        ResponseEntity<?> response = controller.reportPageAssistantWorkflowAiCodingResult(
+                1L,
+                "rai_page",
+                "rac_valid",
+                new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                        "wf-123",
+                        "demo-page-assistant",
+                        "Demo Page Assistant",
+                        "PASS",
+                        "done",
+                        Map.of("overallStatus", "PASS"),
+                        Map.of("overallStatus", "PASS"),
+                        Map.of(),
+                        "/workflows/wf-123/studio"));
+
+        assertEquals(200, response.getStatusCode().value());
+        verify(accessSessionService).reportWorkflowAiCodingResult(
+                1L,
+                "rai_page",
+                new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                        "wf-123",
+                        "demo-page-assistant",
+                        "Demo Page Assistant",
+                        "PASS",
+                        "done",
+                        Map.of("overallStatus", "PASS"),
+                        Map.of("overallStatus", "PASS"),
+                        Map.of(),
+                        "/workflows/wf-123/studio"));
+    }
+
+    @Test
     void pageAssistantChecksAcceptValidAiCodingAccessKey() {
         AiAccessSessionService.PageAssistantCheckRunResponse runResponse =
                 new AiAccessSessionService.PageAssistantCheckRunResponse(

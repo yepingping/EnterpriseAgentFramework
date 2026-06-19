@@ -80,7 +80,7 @@ Returns workflow metadata, `graphSpec`, `canvas`, release validation, node type 
 
 Use `workflow.updatedAt` as patch `baseRevision`.
 
-When building LLM nodes, pick `modelInstanceId` from `availableModels[].id`. When building TOOL/CAPABILITY nodes, pick tool names from `availableTools[].name` or `qualifiedName`. If `availableModels` is empty, ask the human operator to configure model instances first; do not invent ids.
+When building LLM nodes, pick `modelInstanceId` from `availableModels[].id`. When building TOOL/CAPABILITY nodes, pick tool names from `availableTools[].name` or `qualifiedName`. If `availableModels` is empty, ask the human operator to configure model instances first; do not invent ids. `availableModels` lists ACTIVE registry instances; it is not a live credential probe, so provider auth errors during `/run` mean the operator should fix credentials or choose another listed model.
 
 ### Validate
 
@@ -217,6 +217,7 @@ AI must stop at readiness reporting. Do not call legacy publish endpoints.
 `GET /api/workflows/{workflowId}/ai-coding/runs/{traceId}`
 
 Use these after debug runs to inspect node outputs, spans, tool calls, guard decisions, workflow path, and repair hints.
+If a freshly returned `traceId` is not visible, first rely on `/run.nodeOutputs` for immediate debugging and report the trace lookup gap with the exact `traceId`.
 
 ## PAGE_ASSISTANT Extensions
 

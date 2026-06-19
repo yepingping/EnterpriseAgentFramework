@@ -324,8 +324,12 @@ function canvasNodeToGraphNode(node: CanvasNode, base: AgentForm): AgentGraphNod
       config: {
         ...common,
         inputExpression: classifier.inputExpression || 'input',
+        strategy: classifier.strategy || 'KEYWORD',
         classes: classifier.classes || [],
         defaultRoute: classifier.defaultRoute || 'else',
+        modelInstanceId: classifier.modelInstanceId || '',
+        confidenceThreshold: classifier.confidenceThreshold ?? 0.7,
+        llmPrompt: classifier.llmPrompt || '',
         classifierConfig: classifier,
       },
     }
@@ -740,10 +744,15 @@ function graphConfigToNodeData(
     }
   }
   if (kind === 'classifier') {
+    const nested = objectRecordValue(config.classifierConfig)
     const classifierConfig = {
-      inputExpression: stringValue(config.inputExpression) || 'input',
-      classes: classifierClassesValue(config.classes),
-      defaultRoute: stringValue(config.defaultRoute) || 'else',
+      inputExpression: stringValue(nested.inputExpression || config.inputExpression) || 'input',
+      strategy: classifierStrategyValue(nested.strategy ?? config.strategy),
+      classes: classifierClassesValue(nested.classes || config.classes),
+      defaultRoute: stringValue(nested.defaultRoute || config.defaultRoute) || 'else',
+      modelInstanceId: stringValue(nested.modelInstanceId || config.modelInstanceId),
+      confidenceThreshold: numberValue(nested.confidenceThreshold ?? config.confidenceThreshold, 0.7),
+      llmPrompt: stringValue(nested.llmPrompt || config.llmPrompt),
     } satisfies IntentClassifierNodeConfig
     return {
       ...common,
@@ -1054,10 +1063,14 @@ function defaultCodeConfig() {
 function defaultClassifierConfig(): IntentClassifierNodeConfig {
   return {
     inputExpression: 'input',
+    strategy: 'KEYWORD',
     classes: [
       { id: 'matched', label: 'Matched', keywords: [] },
     ],
     defaultRoute: 'else',
+    modelInstanceId: '',
+    confidenceThreshold: 0.7,
+    llmPrompt: '',
   }
 }
 
@@ -1213,7 +1226,7 @@ function emptyCanvas(): CanvasSnapshot {
   }
 }
 
-const CANVAS_BRANCH_SOURCE_NODE_KINDS = new Set<CanvasNodeKind>(['classifier'])
+const CANVAS_BRANCH_SOURCE_NODE_KINDS = new Set<CanvasNodeKind>(['classifier', 'condition', 'approval', 'loop'])
 
 export function normalizeCanvasEdgeHandles(
   edge: CanvasEdge,
@@ -1221,12 +1234,12 @@ export function normalizeCanvasEdgeHandles(
 ): CanvasEdge {
   const source = nodesById.get(edge.source)
   const sourceKind = source?.data?.kind
-  let sourceHandle = edge.sourceHandle
+  let sourceHandle = edge.sourceHandle || resolveCanvasSourceHandle(edge, source)
   let targetHandle = edge.targetHandle
 
   if (!sourceKind || !CANVAS_BRANCH_SOURCE_NODE_KINDS.has(sourceKind)) {
     sourceHandle = undefined
-  } else if (sourceHandle && source && !isValidClassifierSourceHandle(source, sourceHandle)) {
+  } else if (sourceHandle && source && !isValidBranchSourceHandle(source, sourceHandle)) {
     sourceHandle = undefined
   }
 
@@ -1249,6 +1262,56 @@ export function normalizeCanvasSnapshot(snapshot: CanvasSnapshot): CanvasSnapsho
       decorateSerializableEdge(normalizeCanvasEdgeHandles(edge, nodesById)),
     ),
   }
+}
+
+function isValidBranchSourceHandle(node: CanvasNode, handle: string): boolean {
+  if (node.data.kind === 'classifier') {
+    return isValidClassifierSourceHandle(node, handle)
+  }
+  if (node.data.kind === 'condition') {
+    return conditionSourceHandleIds(node).has(handle)
+  }
+  if (node.data.kind === 'approval') {
+    return ['approved', 'rejected', 'timeout'].includes(handle)
+  }
+  if (node.data.kind === 'loop') {
+    return ['continue', 'done'].includes(handle)
+  }
+  return false
+}
+
+function conditionSourceHandleIds(node: CanvasNode): Set<string> {
+  const ids = new Set<string>()
+  for (const group of node.data.conditionConfig?.groups || []) {
+    const id = group.id?.trim()
+    if (id) ids.add(id)
+  }
+  const defaultRoute = (node.data.conditionConfig?.defaultRoute || 'else').trim()
+  if (defaultRoute) ids.add(defaultRoute)
+  if (!ids.size) {
+    for (const port of node.data.outputs || []) {
+      const extended = port as { id?: string; name?: string; key?: string }
+      const id = String(extended.id || extended.name || extended.key || '').trim()
+      if (id) ids.add(id)
+    }
+  }
+  if (!ids.size) ids.add('else')
+  return ids
+}
+
+function resolveCanvasSourceHandle(edge: CanvasEdge, source?: CanvasNode): string | undefined {
+  if (!source) return undefined
+  const kind = source.data.kind
+  if (!CANVAS_BRANCH_SOURCE_NODE_KINDS.has(kind)) return undefined
+  const condition = (edge.condition || edge.label || '').trim()
+  if (!condition || condition === 'always') return undefined
+  if (condition === 'else' || condition === 'default') return 'else'
+  if (condition.startsWith('route:')) {
+    const route = condition.slice('route:'.length).trim()
+    return route || undefined
+  }
+  if (isValidBranchSourceHandle(source, condition)) return condition
+  return undefined
 }
 
 function isValidClassifierSourceHandle(node: CanvasNode, handle: string): boolean {
@@ -1643,6 +1706,12 @@ function llmMessagesValue(value: unknown, systemPrompt: string, userPrompt: stri
     })
     .filter((item) => !!item.content || item.role === 'system')
   return messages.length ? messages : defaultLlmMessages(systemPrompt, userPrompt)
+}
+
+function classifierStrategyValue(value: unknown): IntentClassifierNodeConfig['strategy'] {
+  const strategy = stringValue(value).toUpperCase()
+  if (strategy === 'LLM' || strategy === 'HYBRID') return strategy
+  return 'KEYWORD'
 }
 
 function classifierClassesValue(value: unknown): IntentClassifierNodeConfig['classes'] {

@@ -11,9 +11,25 @@ const require = createRequire(import.meta.url)
 const ts = require('typescript')
 
 const modulePath = join(process.cwd(), 'src/views/registry/pageAssistantOnboardingPrompt.ts')
+const draftRequirementPath = join(process.cwd(), 'src/views/registry/pageAssistantDraftRequirement.ts')
+const workflowAiCodingPromptPath = join(process.cwd(), 'src/views/registry/pageAssistantWorkflowAiCodingPrompt.ts')
 const source = readFileSync(modulePath, 'utf8')
+const draftRequirementSource = readFileSync(draftRequirementPath, 'utf8')
+const workflowAiCodingPromptSource = readFileSync(workflowAiCodingPromptPath, 'utf8')
 const wizardSource = readFileSync(join(process.cwd(), 'src/views/registry/PageAssistantWizard.vue'), 'utf8')
 const compiled = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+  },
+})
+const compiledDraftRequirement = ts.transpileModule(draftRequirementSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+  },
+})
+const compiledWorkflowAiCodingPrompt = ts.transpileModule(workflowAiCodingPromptSource, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
     target: ts.ScriptTarget.ES2020,
@@ -28,8 +44,177 @@ const sandbox = {
 
 vm.runInNewContext(compiled.outputText, sandbox, { filename: modulePath })
 
+const draftSandbox = {
+  exports: {},
+  require,
+  console,
+}
+vm.runInNewContext(compiledDraftRequirement.outputText, draftSandbox, { filename: draftRequirementPath })
+
+const workflowAiCodingSandbox = {
+  exports: {},
+  require: (id) => {
+    if (id === './pageAssistantDraftRequirement') {
+      return draftSandbox.exports
+    }
+    return require(id)
+  },
+  console,
+}
+vm.runInNewContext(compiledWorkflowAiCodingPrompt.outputText, workflowAiCodingSandbox, {
+  filename: workflowAiCodingPromptPath,
+})
+
 const { buildPageAssistantOnboardingPrompt } = sandbox.exports
+const { buildPageAssistantDraftRequirement, decidePageAssistantFlowMode, buildIntentClasses } = draftSandbox.exports
+const { buildPageAssistantWorkflowAiCodingPrompt } = workflowAiCodingSandbox.exports
 assert.equal(typeof buildPageAssistantOnboardingPrompt, 'function')
+assert.equal(typeof buildPageAssistantDraftRequirement, 'function')
+assert.equal(typeof decidePageAssistantFlowMode, 'function')
+assert.equal(typeof buildIntentClasses, 'function')
+assert.equal(typeof buildPageAssistantWorkflowAiCodingPrompt, 'function')
+
+assert.match(wizardSource, /使用 AI Coding 生成/)
+assert.match(wizardSource, /buildPageAssistantWorkflowAiCodingPrompt/)
+assert.match(wizardSource, /workflowAiCodingPromptDialogVisible/)
+assert.match(wizardSource, /pageAssistantDraftRequirement/)
+
+const linearRequirement = buildPageAssistantDraftRequirement({
+  pageName: '班组档案',
+  assistantGoal: 'query',
+  actions: [
+    { actionKey: 'setFilters', title: '设置筛选' },
+    { actionKey: 'search', title: '执行查询' },
+    { actionKey: 'readTable', title: '读取表格' },
+  ],
+})
+assert.match(linearRequirement, /flowMode=LINEAR_QUERY/)
+assert.match(linearRequirement, /setFilters/)
+assert.match(linearRequirement, /search/)
+assert.match(linearRequirement, /readTable/)
+assert.doesNotMatch(linearRequirement, /flowMode=INTENT_ROUTER/)
+assert.doesNotMatch(linearRequirement, /INTENT_CLASSIFIER\(strategy=HYBRID/)
+
+const routerRequirement = buildPageAssistantDraftRequirement({
+  pageName: '班组档案',
+  assistantGoal: 'query',
+  actions: [
+    { actionKey: 'search', title: '执行查询' },
+    { actionKey: 'reset', title: '重置筛选' },
+    { actionKey: 'getPageState', title: '读取页面状态' },
+  ],
+})
+assert.match(routerRequirement, /flowMode=INTENT_ROUTER/)
+assert.match(routerRequirement, /INTENT_CLASSIFIER\(strategy=HYBRID/)
+assert.match(routerRequirement, /reset_intent/)
+assert.match(routerRequirement, /page_state_intent/)
+assert.equal(
+  decidePageAssistantFlowMode([
+    { actionKey: 'setFilters' },
+    { actionKey: 'search' },
+    { actionKey: 'readTable' },
+  ]),
+  'LINEAR_QUERY',
+)
+assert.equal(
+  decidePageAssistantFlowMode([
+    { actionKey: 'search' },
+    { actionKey: 'reset' },
+    { actionKey: 'getPageState' },
+  ]),
+  'INTENT_ROUTER',
+)
+
+const mergedResetClasses = buildIntentClasses([
+  { actionKey: 'resetTable', title: '重置表格' },
+  { actionKey: 'resetAll', title: '重置全部' },
+])
+const resetIntent = mergedResetClasses.find((item) => item.id === 'reset_intent')
+assert.ok(resetIntent)
+assert.equal(resetIntent.actionKeys.length, 2)
+assert.ok(resetIntent.actionKeys.includes('resetTable'))
+assert.ok(resetIntent.actionKeys.includes('resetAll'))
+
+const mergedOpenRowClasses = buildIntentClasses([
+  { actionKey: 'openRowAction', title: '打开A', confirmRequired: true },
+  { actionKey: 'openRowDetail', title: '打开B' },
+])
+assert.equal(mergedOpenRowClasses.filter((item) => item.id === 'row_action_intent').length, 1)
+const rowIntent = mergedOpenRowClasses.find((item) => item.id === 'row_action_intent')
+assert.ok(rowIntent)
+assert.equal(rowIntent.actionKeys.length, 2)
+assert.ok(rowIntent.actionKeys.includes('openRowAction'))
+assert.ok(rowIntent.actionKeys.includes('openRowDetail'))
+
+const workflowAiCodingPrompt = buildPageAssistantWorkflowAiCodingPrompt({
+  toolName: 'Cursor',
+  platformUrl: 'http://localhost:18603',
+  project: {
+    id: 7,
+    projectCode: 'bzjs3',
+    name: '班组系统',
+    registryAppKey: 'bzjs3',
+  },
+  aiCodingAccess: {
+    enabled: true,
+    accessKey: 'rac_test_key',
+    stateLabel: '已启用',
+  },
+  sessionId: 'rai_page_123',
+  reportUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/workflow-ai-coding-result?aiCodingKey=rac_test_key',
+  page: {
+    pageKey: 'teamArchive.list',
+    pageName: '班组档案',
+    routePattern: '/teams/archive',
+  },
+  actions: [
+    { actionKey: 'search', title: '执行查询' },
+    { actionKey: 'reset', title: '重置筛选' },
+    { actionKey: 'getPageState', title: '读取页面状态' },
+  ],
+  requirement: routerRequirement,
+  workflowName: '班组档案页面助手',
+  workflowKeySlug: 'bzjs3-teamarchive-list-page-assistant',
+  modelInstanceId: 'model-1',
+  skillPackageUrl: 'http://localhost:18603/api/ai-assist/skills/workflow-ai-coding/latest.zip',
+})
+assert.match(workflowAiCodingPrompt, /\/api\/workflows\/ai-coding\/workflows/)
+assert.match(workflowAiCodingPrompt, /workflowType:\s*PAGE_ASSISTANT|"workflowType": "PAGE_ASSISTANT"/)
+assert.match(workflowAiCodingPrompt, /INTENT_CLASSIFIER/)
+assert.match(workflowAiCodingPrompt, /strategy=HYBRID/)
+assert.match(workflowAiCodingPrompt, /LINEAR_QUERY/)
+assert.match(workflowAiCodingPrompt, /INTENT_ROUTER/)
+assert.match(workflowAiCodingPrompt, /page-assistant\/validate/)
+assert.match(workflowAiCodingPrompt, /Workflow AI Coding 不允许 publish/)
+assert.match(workflowAiCodingPrompt, /不要.*SDK 快速接入/)
+assert.match(workflowAiCodingPrompt, /不要.*registerPage/)
+assert.match(workflowAiCodingPrompt, /\/api\/ai-assist\/skills\/workflow-ai-coding\/latest\.zip/)
+assert.match(workflowAiCodingPrompt, /workflow-ai-coding-result/)
+assert.match(workflowAiCodingPrompt, /回传.*workflowId|workflowId.*回传/)
+assert.match(workflowAiCodingPrompt, /是否已成功回传/)
+assert.match(workflowAiCodingPrompt, /runtimeVerification/)
+assert.match(workflowAiCodingPrompt, /browserRuntime/)
+assert.match(workflowAiCodingPrompt, /browserRuntime\.status=WARN|real page PASS|真实页面执行/)
+assert.doesNotMatch(workflowAiCodingPrompt, /reachai-page-assistant-onboarding\/latest\.zip/)
+
+assert.match(wizardSource, /WORKFLOW_AI_CODING_DRAFT_STEP_KEY|workflow-ai-coding-draft/)
+assert.match(wizardSource, /打开 Studio/)
+assert.match(wizardSource, /使用该 Workflow 继续/)
+assert.match(wizardSource, /useAiCodingWorkflowDraft/)
+assert.match(wizardSource, /openAiCodingWorkflowStudio/)
+
+const workflowAiCodingPromptBlock = wizardSource.match(
+  /const workflowAiCodingPrompt = computed\([\s\S]*?\n\}\)\)/,
+)?.[0] || ''
+assert.ok(workflowAiCodingPromptBlock, 'workflowAiCodingPrompt computed block not found')
+assert.match(
+  workflowAiCodingPromptBlock,
+  /skillPackageUrl:\s*`\$\{window\.location\.origin\}\/api\/ai-assist\/skills\/workflow-ai-coding\/latest\.zip`/,
+)
+assert.doesNotMatch(
+  workflowAiCodingPromptBlock,
+  /pageAssistantManifest\.value\?\.(?:endpoints|scaffold)\.skillPackageUrl/,
+)
 
 const prompt = buildPageAssistantOnboardingPrompt({
   toolName: 'Cursor',

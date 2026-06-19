@@ -111,6 +111,26 @@ class PlatformAuthInterceptorAuditTest {
     }
 
     @Test
+    void aiCodingPageAssistantWorkflowAiCodingResultWithKeyBypassesPlatformLogin() throws Exception {
+        PlatformAuthInterceptor interceptor = new PlatformAuthInterceptor(
+                mock(PlatformAuthService.class),
+                new PlatformAuthorizationService(),
+                mock(GuardDecisionLogService.class),
+                new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/ai-assist/projects/1/page-assistant/sessions/rai_page/workflow-ai-coding-result");
+        request.setParameter("aiCodingKey", "rac_valid");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(request, response, new Object()));
+        assertEquals("rac_valid", AiCodingKeyContext.get());
+        interceptor.afterCompletion(request, response, new Object(), null);
+        assertNull(AiCodingKeyContext.get());
+    }
+
+    @Test
     void aiCodingAgentProvisionWithKeyBypassesPlatformLogin() throws Exception {
         PlatformAuthInterceptor interceptor = new PlatformAuthInterceptor(
                 mock(PlatformAuthService.class),

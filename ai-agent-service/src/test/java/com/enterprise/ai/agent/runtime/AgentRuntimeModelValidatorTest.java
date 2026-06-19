@@ -121,6 +121,11 @@ class AgentRuntimeModelValidatorTest {
             public ModelInstanceResult getModelInstance(String id) {
                 return result;
             }
+
+            @Override
+            public ModelInstanceListResult listModelInstances(String modelType, String provider, String workspaceId) {
+                return new ModelInstanceListResult(200, "success", java.util.List.of());
+            }
         };
     }
 
@@ -138,6 +143,11 @@ class AgentRuntimeModelValidatorTest {
 
             @Override
             public ModelInstanceResult getModelInstance(String id) {
+                throw new AssertionError("model service should not be called for model-free graph");
+            }
+
+            @Override
+            public ModelInstanceListResult listModelInstances(String modelType, String provider, String workspaceId) {
                 throw new AssertionError("model service should not be called for model-free graph");
             }
         };

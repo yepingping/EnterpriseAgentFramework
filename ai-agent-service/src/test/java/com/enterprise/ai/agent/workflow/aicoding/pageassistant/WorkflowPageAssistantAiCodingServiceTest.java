@@ -255,6 +255,7 @@ class WorkflowPageAssistantAiCodingServiceTest {
     void missingAiCodingKeyIsUnauthorized() throws Exception {
         WorkflowDefinitionService workflowService = mock(WorkflowDefinitionService.class);
         WorkflowPageAssistantAiCodingService service = newService(workflowService, mock(PageActionRegistryMapper.class));
+        AiCodingKeyContext.clear();
         when(workflowService.findById("wf-page")).thenReturn(Optional.of(pageAssistantWorkflow()));
 
         assertThrows(WorkflowAiCodingUnauthorizedException.class, () -> service.getCatalog("wf-page"));
