@@ -127,6 +127,8 @@ Token boundary note: the business login token and the ReachAI embed token are di
 
 Gateway authentication note: `/api/reachai/embed-token` should use the business login token, but `/api/reachai/embed/**` must forward the ReachAI embed token unchanged. Do not let business OAuth/JWT filters validate `/api/reachai/embed/**` as a business login request. Also check whitelist filters that remove login JWTs, such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, `RemoveRequestHeader=Authorization`, or code that calls `mutate().header("Authorization", "")`; those filters must not clear the embed-token `Authorization` header on `/api/reachai/embed/**`.
 
+Spring Security WebFlux note: `.pathMatchers("/api/reachai/embed/**").permitAll()` alone may still fail when OAuth2 Resource Server is enabled, because the authentication layer can parse `Authorization: Bearer <embedToken>` before authorization and return 401 for an invalid business JWT. Add a higher-priority security matcher / `SecurityWebFilterChain` for `/api/reachai/embed/**` that permits all and does not enable business `oauth2ResourceServer()` for that path.
+
 Gateway CORS note: when Spring Cloud Gateway proxies `/api/reachai/embed/**` to ReachAI `/api/embed/**`, both the gateway and ReachAI may add CORS headers. Duplicate `Access-Control-Allow-Origin` or `Access-Control-Allow-Credentials` values can make browsers hide the real response as `status 0 Unknown Error`. Add a route-level dedupe filter such as:
 
 ```yaml

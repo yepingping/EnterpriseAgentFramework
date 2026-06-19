@@ -114,6 +114,21 @@ Add the gateway authentication whitelist required by embed chat:
 - Route `/api/reachai/embed/**` to ReachAI `/api/embed/**` as an anonymous proxy or with a dedicated security chain. Browser calls to this path use `Authorization: Bearer <embedToken>`, and business OAuth/JWT filters must not parse or reject that token.
 - If the gateway has a global authentication filter, add an explicit skip for `/api/reachai/embed/**` while preserving the `Authorization`, `Origin`, and `Content-Type` headers.
 - Inspect any existing whitelist or anonymous-path filter that removes JWT headers, including names such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, `RemoveRequestHeader=Authorization`, or code that calls `mutate().header("Authorization", "")`. Do not let those filters clear `Authorization` on `/api/reachai/embed/**`; the path is anonymous only with respect to business login validation, not with respect to ReachAI embed-token forwarding.
+- In Spring Security WebFlux / OAuth2 Resource Server, do not rely only on `.pathMatchers("/api/reachai/embed/**").permitAll()`. Resource Server authentication can still consume the `Authorization: Bearer <embedToken>` header before authorization rules and reject it as an invalid business JWT. Add a higher-priority security chain dedicated to the proxy path, and do not enable business `oauth2ResourceServer()` on that chain, for example:
+
+```java
+@Bean
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+SecurityWebFilterChain reachAiEmbedProxySecurity(ServerHttpSecurity http) {
+    return http.securityMatcher(ServerWebExchangeMatchers.pathMatchers("/api/reachai/embed/**"))
+            .authorizeExchange()
+            .anyExchange().permitAll()
+            .and()
+            .csrf().disable()
+            .build();
+}
+```
+
 - In Spring Cloud Gateway this usually means both a route rewrite and a gateway authentication whitelist/security matcher. If both the gateway and ReachAI add CORS response headers, add route-level dedupe such as `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST` so the browser does not hide the real 401/500 response as `status 0 Unknown Error`.
 - In Nginx or a BFF, apply the same auth bypass and CORS de-duplication rule at the real authentication/proxy boundary.
 

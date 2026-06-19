@@ -757,13 +757,14 @@ ${installHint}
 9. 在业务前端接入 ReachAI Chat Embed：增加配置、组件或页面入口；必须先 POST Agent provisioning API，并将返回的 response.agent.keySlug 保存为 provisionedAgentKeySlug，agentId 使用 provisionedAgentKeySlug（不是让用户手工填写 Agent）。让前端通过业务网关 token broker 获取 embed token，再用 token 调用 ReachAI /api/embed/chat/sessions 与消息接口。前端不得保存 appSecret，不得使用 pageRegistry.appSecret 自动上报密钥。
 10. 明确区分两类 Authorization：请求 ${embedTokenPath.value || '/api/reachai/embed-token'} 时使用业务系统登录 token；请求 /api/reachai/embed/**、/api/embed/chat/sessions 或消息接口时只能使用 ReachAI 返回的短期 embed token。不要把业务登录 token 当作 embed token 传给 ReachAI Chat API。
 11. 修改业务网关白名单 / 安全链：${embedTokenPath.value || '/api/reachai/embed-token'} 继续使用业务登录 token；但 /api/reachai/embed/** 是 ReachAI embed token 代理流量，必须绕过业务 OAuth/JWT 认证并原样透传 Authorization: Bearer <embedToken> 给 ReachAI。
-12. 专门检查现有白名单/匿名路径过滤器是否会清空 JWT 请求头，例如 IgnoreUrlsRemoveJwtFilter、RemoveJwtFilter、RemoveRequestHeader=Authorization，或 mutate().header("Authorization", "") 这类代码。/api/reachai/embed/** 对业务登录认证是匿名，但对 ReachAI 来说必须保留 Authorization: Bearer <embedToken>，禁止在该路径清空、改写或消费 Authorization。
-13. 如果业务系统用 Spring Cloud Gateway 代理 /api/reachai/embed/** 到 ReachAI /api/embed/**，检查是否会同时由网关和 ReachAI 返回 CORS 头；若会重复，请在该路由增加类似 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST 的响应头去重配置，避免浏览器把真实 401/500 遮蔽成 status 0 Unknown Error。
-14. 业务前端缓存 embed token 时必须按 expiresIn 提前失效；如果创建 session 或发送消息返回 embed token is expired，应清空缓存、重新调用 token broker 获取新 embed token 并重试一次。
-15. 保证网关转发时透传 X-ReachAI-Invocation-Token、X-ReachAI-Trace-Id、X-ReachAI-Run-Id，以及业务身份所需的 Authorization / 用户上下文头；业务接口不能只凭普通 X-ReachAI-* 上下文头放行。
-16. 分别运行业务后端、网关和业务前端的最小可行编译/构建/测试。
-17. 如果业务系统、网关和 ReachAI 服务可访问，调用 manifest 中的 sdkAccessCheckUrl 做接入自检，body 中带 gatewayBaseUrl=${gatewayBaseUrl.value || 'http://localhost:8080'} 与 embedTokenPath=${embedTokenPath.value || '/api/reachai/embed-token'}；否则说明缺少的本地前置条件。
-18. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
+12. 如果业务网关使用 Spring Security WebFlux / OAuth2 Resource Server，不能只写 .pathMatchers("/api/reachai/embed/**").permitAll()；Resource Server 仍可能先解析 Authorization: Bearer <embedToken> 并按业务 JWT 失败返回 401。必须为 /api/reachai/embed/** 添加更高优先级的独立 SecurityWebFilterChain / securityMatcher，并且该链不要启用业务 oauth2ResourceServer()。
+13. 专门检查现有白名单/匿名路径过滤器是否会清空 JWT 请求头，例如 IgnoreUrlsRemoveJwtFilter、RemoveJwtFilter、RemoveRequestHeader=Authorization，或 mutate().header("Authorization", "") 这类代码。/api/reachai/embed/** 对业务登录认证是匿名，但对 ReachAI 来说必须保留 Authorization: Bearer <embedToken>，禁止在该路径清空、改写或消费 Authorization。
+14. 如果业务系统用 Spring Cloud Gateway 代理 /api/reachai/embed/** 到 ReachAI /api/embed/**，检查是否会同时由网关和 ReachAI 返回 CORS 头；若会重复，请在该路由增加类似 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST 的响应头去重配置，避免浏览器把真实 401/500 遮蔽成 status 0 Unknown Error。
+15. 业务前端缓存 embed token 时必须按 expiresIn 提前失效；如果创建 session 或发送消息返回 embed token is expired，应清空缓存、重新调用 token broker 获取新 embed token 并重试一次。
+16. 保证网关转发时透传 X-ReachAI-Invocation-Token、X-ReachAI-Trace-Id、X-ReachAI-Run-Id，以及业务身份所需的 Authorization / 用户上下文头；业务接口不能只凭普通 X-ReachAI-* 上下文头放行。
+17. 分别运行业务后端、网关和业务前端的最小可行编译/构建/测试。
+18. 如果业务系统、网关和 ReachAI 服务可访问，调用 manifest 中的 sdkAccessCheckUrl 做接入自检，body 中带 gatewayBaseUrl=${gatewayBaseUrl.value || 'http://localhost:8080'} 与 embedTokenPath=${embedTokenPath.value || '/api/reachai/embed-token'}；否则说明缺少的本地前置条件。
+19. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
 
 进度回传要求：
 - 每完成或卡住一个关键步骤，请 POST 到“步骤进度回传 URL”，把 {stepKey} 替换为下列 key 之一：project-manifest、backend-sdk、reachai-config、capability-scan、gateway-route、embed-token-broker、gateway-whitelist、frontend-embed、connectivity-check、handoff-summary。
@@ -775,6 +776,7 @@ ${installHint}
 - 网关需要暴露前端可调用的 embed token broker，例如 GET ${manifest?.embed?.tokenPath || embedTokenPath.value || '/api/reachai/embed-token'}?projectCode=${code}&agentId=<provisionedAgentKeySlug>&pageInstanceId=...&route=...&origin=...。
 - token broker 服务端再调用 ReachAI POST /api/embed/token/exchange，请求体至少包含 projectCode、agentId、pageInstanceId、route、origin、principal.externalUserId。
 - 网关需要把 /api/reachai/embed/** 配成匿名代理或独立安全链，不能用业务 OAuth/JWT 校验 ReachAI embed token；如果有全局认证过滤器，也要跳过该路径。
+- 如果是 Spring Security WebFlux / OAuth2 Resource Server，permitAll 不是充分条件；必须给 /api/reachai/embed/** 单独配置高优先级 SecurityWebFilterChain / securityMatcher，且不要在这条链上启用业务 oauth2ResourceServer()，否则 embed token 会被当作业务 JWT 提前 401。
 - 必须检查白名单/匿名路径过滤器是否会删除 Authorization，例如 IgnoreUrlsRemoveJwtFilter、RemoveJwtFilter、RemoveRequestHeader=Authorization 或 mutate().header("Authorization", "")。这些清头逻辑不能作用于 /api/reachai/embed/**，否则 ReachAI 会收到空 Authorization 并返回 Authorization Bearer embed token is required。
 - Spring Cloud Gateway 代理 /api/reachai/embed/** 时，若网关和 ReachAI 都会写 CORS 响应头，请在该路由配置 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST，避免重复 CORS 头导致浏览器显示 status 0 Unknown Error。
 - 如果项目已有 Spring Cloud Gateway 路由，请补充到对应 application.yml / bootstrap.yml / 配置中心文件；如果是 Nginx 或前端代理，请补充到实际使用的网关配置。
