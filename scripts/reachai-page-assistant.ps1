@@ -64,6 +64,70 @@ function Test-CommandExists([string] $name) {
   return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
+function Invoke-FrontendStaticProbe {
+  param(
+    [string] $TargetUrl,
+    [string] $BridgeGlobal,
+    [int] $TimeoutSec
+  )
+
+  $bridgeKey = $BridgeGlobal
+  if ($bridgeKey.StartsWith("window.")) {
+    $bridgeKey = $bridgeKey.Substring(7)
+  }
+  $checkedUrls = @()
+  $statusCode = $null
+  $found = $false
+  $message = ""
+
+  try {
+    $response = Invoke-WebRequest -Method Get -Uri $TargetUrl -UseBasicParsing -TimeoutSec ([Math]::Max(1, $TimeoutSec))
+    $statusCode = [int]$response.StatusCode
+    $content = [string]$response.Content
+    $checkedUrls += $TargetUrl
+    $found = $content.Contains($bridgeKey) -or $content.Contains("__REACHAI_PAGE_BRIDGE__")
+
+    if (-not $found) {
+      $scriptMatches = [regex]::Matches($content, '<script[^>]+src=["'']([^"'']+\.js[^"'']*)["'']', 'IgnoreCase')
+      $baseUri = [System.Uri]::new($TargetUrl)
+      foreach ($match in @($scriptMatches | Select-Object -First 12)) {
+        $scriptUrl = ([System.Uri]::new($baseUri, $match.Groups[1].Value)).AbsoluteUri
+        $checkedUrls += $scriptUrl
+        try {
+          $scriptResponse = Invoke-WebRequest -Method Get -Uri $scriptUrl -UseBasicParsing -TimeoutSec ([Math]::Max(1, $TimeoutSec))
+          $scriptContent = [string]$scriptResponse.Content
+          if ($scriptContent.Contains($bridgeKey) -or $scriptContent.Contains("__REACHAI_PAGE_BRIDGE__")) {
+            $found = $true
+            break
+          }
+        } catch {
+          # Keep probing other assets; this is only a WARN-grade fallback.
+        }
+      }
+    }
+
+    $message = if ($found) {
+      "Fallback static frontend probe found the ReachAI bridge marker in HTML/JS. Runtime invoke still requires Playwright and login state."
+    } else {
+      "Fallback static frontend probe reached the route but did not find the ReachAI bridge marker in HTML/JS."
+    }
+  } catch {
+    $message = "Fallback static frontend probe failed: " + $_.Exception.Message
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+      $statusCode = [int]$_.Exception.Response.StatusCode
+    }
+  }
+
+  return [pscustomobject]@{
+    status = "WARN"
+    message = $message
+    bridgeMarkerFound = [bool]$found
+    checkedUrls = @($checkedUrls)
+    httpStatus = $statusCode
+    probeEngine = "webrequest-static"
+  }
+}
+
 function Get-TemplateContent([string] $name) {
   switch ($name) {
     "reachai-page-action.types.ts" {
@@ -382,7 +446,10 @@ function New-ActionDefinition([string] $actionKey) {
 function Get-RuntimeProbeNodeScript {
   @'
 const fs = require('fs');
-const args = JSON.parse(process.argv[2] || '{}');
+const argPath = process.argv[2] || '';
+const args = argPath && fs.existsSync(argPath)
+  ? JSON.parse(fs.readFileSync(argPath, 'utf8'))
+  : JSON.parse(argPath || '{}');
 
 function redactResult(actionKey, raw) {
   const data = raw && raw.data && typeof raw.data === 'object' ? raw.data : {};
@@ -571,14 +638,16 @@ function Invoke-RuntimeBridgeProbe {
   )
 
   if (-not (Test-CommandExists "node")) {
+    $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
     return [pscustomobject]@{
       status = "WARN"
-      message = "Node.js is not available; runtime bridge invoke skipped. Install Node.js + playwright for real runtime PASS."
+      message = "Node.js is not available; runtime bridge invoke skipped. Install Node.js + playwright for real runtime PASS. " + $fallback.message
       bridgeExists = $false
       listedActions = @()
       invokedActions = @()
       redactedResults = @()
-      probeEngine = "none"
+      probeEngine = $fallback.probeEngine
+      fallbackProbe = $fallback
     }
   }
 
@@ -598,20 +667,30 @@ function Invoke-RuntimeBridgeProbe {
   } | ConvertTo-Json -Compress
 
   $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("reachai-runtime-probe-" + [guid]::NewGuid().ToString("N") + ".cjs")
+  $tempArgs = Join-Path ([System.IO.Path]::GetTempPath()) ("reachai-runtime-probe-args-" + [guid]::NewGuid().ToString("N") + ".json")
   try {
     Set-Content -Path $tempScript -Value (Get-RuntimeProbeNodeScript) -Encoding UTF8
-    $output = & node $tempScript $probeArgs 2>&1 | Out-String
+    Set-Content -Path $tempArgs -Value $probeArgs -Encoding UTF8
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = "Continue"
+      $output = (& node $tempScript $tempArgs 2>&1 | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
     $parsed = $null
     try { $parsed = $output.Trim() | ConvertFrom-Json } catch { $parsed = $null }
     if ($null -eq $parsed) {
+      $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
       return [pscustomobject]@{
         status = "WARN"
-        message = "Runtime probe did not return JSON. Ensure playwright is installed and the dev server is reachable."
+        message = "Runtime probe did not return JSON. Ensure playwright is installed and the dev server is reachable. " + $fallback.message
         bridgeExists = $false
         listedActions = @()
         invokedActions = @()
         redactedResults = @()
-        probeEngine = "node"
+        probeEngine = $fallback.probeEngine
+        fallbackProbe = $fallback
         rawOutput = ($output | Select-Object -First 500)
       }
     }
@@ -619,9 +698,21 @@ function Invoke-RuntimeBridgeProbe {
     $successCount = @($parsed.redactedResults | Where-Object { $_.status -eq "SUCCESS" }).Count
     $status = "WARN"
     $message = [string]$parsed.message
-    if ($parsed.code -eq "PLAYWRIGHT_MISSING") {
-      $status = "WARN"
-      $message = [string]$parsed.message
+    if ($parsed.code -eq "PLAYWRIGHT_MISSING" -or $parsed.code -eq "PROBE_FAILED") {
+      $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
+      $playwrightStatus = if ($parsed.code) { [string]$parsed.code } else { "PROBE_FAILED" }
+      return [pscustomobject]@{
+        status = "WARN"
+        message = ([string]$parsed.message) + " " + $fallback.message
+        bridgeExists = $false
+        listedActions = @()
+        invokedActions = @()
+        redactedResults = @()
+        probeEngine = $fallback.probeEngine
+        loginLikelyRequired = $false
+        playwrightStatus = $playwrightStatus
+        fallbackProbe = $fallback
+      }
     } elseif ($successCount -gt 0) {
       $status = "PASS"
       $message = "Runtime bridge invoke succeeded for readonly actions (getPageState/readTable)."
@@ -649,6 +740,7 @@ function Invoke-RuntimeBridgeProbe {
     }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force $tempScript -ErrorAction SilentlyContinue }
+    if (Test-Path $tempArgs) { Remove-Item -Force $tempArgs -ErrorAction SilentlyContinue }
   }
 }
 
@@ -705,6 +797,10 @@ function Build-BrowserRuntimeVerification {
     redactedResults = @($probe.redactedResults)
     probeEngine = $probe.probeEngine
     loginLikelyRequired = [bool]$probe.loginLikelyRequired
+    bridgeMarkerFound = [bool]$probe.fallbackProbe.bridgeMarkerFound
+    fallbackCheckedUrls = @($probe.fallbackProbe.checkedUrls)
+    fallbackHttpStatus = $probe.fallbackProbe.httpStatus
+    playwrightStatus = $probe.playwrightStatus
     targetUrl = $targetUrl
   }
 }

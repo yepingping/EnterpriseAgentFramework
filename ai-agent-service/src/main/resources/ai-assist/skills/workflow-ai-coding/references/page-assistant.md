@@ -103,6 +103,8 @@ Important:
 
 - AI Coding smoke-test does not prove real browser execution unless runtime verification evidence is supplied.
 - Actions with `confirmRequired=true` cannot be treated as fully executed without explicit confirmation policy.
+- For query flows, real browser execution requires more than queued PAGE_ACTION success. Verify that extracted filter values appear in `PAGE_ACTION(setFilters).args`, are visible in current page filters/state after `setFilters`, are included in the real business query request triggered by `search`, and are reflected by the refreshed table read through `readTable`.
+- If Workflow extraction and `setFilters.args` are correct but the business query request is unfiltered, the defect is in the business page action handler/query-state binding, not in Workflow parameter extraction. Report it as runtime verification `FAIL`.
 
 ## PAGE_ACTION Node Config Shape
 

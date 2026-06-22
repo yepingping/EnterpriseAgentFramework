@@ -87,6 +87,12 @@ High-risk pending confirm:
 
 Allowed status values are `SUCCESS`, `WARN`, and `ERROR`.
 
+## Embed API Result Boundary
+
+When posting results to `POST /api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result`, the platform DTO (`EmbedChatController.PageActionResultRequest`) accepts `status` as a string and `error` as a **string**, not a structured object.
+
+Bridge handlers and Angular templates may use richer internal shapes such as `error: { code, message }`. Map those to string `error` (and an appropriate `status`) at the Embed API boundary. SDK internal statuses like `FAILED`, `CANCELLED`, or `TIMEOUT` should be mapped before posting; successful execution should use `status: SUCCESS`.
+
 ## Register Page files
 
 `endpoints.registerPageUrl` accepts:
@@ -112,6 +118,9 @@ Runtime PASS rules:
 - Requires invoke evidence: `invokedActions` plus `redactedResults` with at least one `SUCCESS`
 - `bridgeExists=true` or HTTP 200 alone is WARN, not PASS
 - Missing FrontendUrl/login/StorageState/Cookie => `SKIPPED` or `WARN`
+- For query flows, `status=SUCCESS` from `setFilters`, `search`, or `readTable` is not enough. Evidence must show that non-empty `setFilters` args were written into current page filters/state, that the following real business query request carried the corresponding query parameters, and that `readTable` read the refreshed visible table.
+- If `setFilters` receives a non-empty field but the next business query request is still unfiltered, mark runtime verification as `FAIL`; the likely issue is the business page handler writing only a template/default object instead of the current form/query model used by the page search flow.
+- For component libraries such as `@zhongruigroup/ngx-query` + `zr-table`, verify the handler writes the live query rules/model used by `executeQuery()` and the table data event. If the request payload still contains only pagination or null organization fields after a non-empty filter, the runtime check must fail even when the Page Action result says `SUCCESS`.
 
 Helper verify emits `verification.browserRuntime`:
 

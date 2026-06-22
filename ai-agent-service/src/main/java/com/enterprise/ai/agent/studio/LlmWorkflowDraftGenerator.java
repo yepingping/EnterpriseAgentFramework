@@ -1187,13 +1187,14 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         String extractAlias = extractNode == null
                 ? "extracted_filters"
                 : normalizePageAssistantExtractNode(extractNode, request, warnings);
+        String extractNodeId = extractNode == null ? "extract_filters" : extractNode.id();
         for (DraftNode node : nodes) {
             if (!"pageAction".equals(node.kind())) {
                 continue;
             }
             String actionKey = firstText(text(node.config().get("actionKey")), text(node.config().get("action")));
             if (isSetFiltersAction(actionKey)) {
-                ensureSetFiltersArgs(node, extractAlias, request, warnings);
+                ensureSetFiltersArgs(node, extractNodeId, extractAlias, request, warnings);
             }
         }
         normalizePageAssistantAnswerNodes(nodes);
@@ -1228,9 +1229,13 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         Map<String, Object> config = node.config();
         String alias = firstText(text(config.get("outputAlias")), "extracted_filters");
         config.put("outputAlias", alias);
-        String fieldGuide = buildFilterFieldGuide(filterFieldNames(request));
+        List<Map<String, Object>> filterFields = filterFieldDefinitions(request);
+        String fieldGuide = buildFilterFieldGuide(filterFields);
         String systemPrompt = buildPageAssistantExtractSystemPrompt(fieldGuide);
         config.put("systemPrompt", systemPrompt);
+        if (!filterFields.isEmpty()) {
+            config.put("fields", filterFields);
+        }
         config.put("userPrompt", "{{ params.question }}");
         config.put("outputFormat", "json");
         config.put("structuredOutput", true);
@@ -1245,13 +1250,14 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     }
 
     private void ensureSetFiltersArgs(DraftNode node,
+                                      String extractNodeId,
                                       String extractAlias,
                                       WorkflowDraftGenerationRequest request,
                                       List<String> warnings) {
         Map<String, Object> config = node.config();
         Map<String, Object> args = mutableMap(config.get("args"));
         if (!args.isEmpty() && args.values().stream().anyMatch(value -> StringUtils.hasText(text(value)))) {
-            rewriteSetFiltersArgAliases(args, extractAlias);
+            rewriteSetFiltersArgAliases(args, extractNodeId, extractAlias);
             config.put("args", args);
             return;
         }
@@ -1262,28 +1268,34 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
         }
         Map<String, Object> wired = new LinkedHashMap<>();
         for (String field : fields) {
-            wired.put(field, extractAlias + "." + field);
+            wired.put(field, "nodeOutput." + extractNodeId + "." + field);
         }
         config.put("args", wired);
         warnings.add(node.label() + "：已根据 setFilters inputSchema 自动生成 args 映射");
     }
 
-    private void rewriteSetFiltersArgAliases(Map<String, Object> args, String extractAlias) {
+    private void rewriteSetFiltersArgAliases(Map<String, Object> args, String extractNodeId, String extractAlias) {
         args.replaceAll((key, value) -> {
             String raw = text(value);
             if (!StringUtils.hasText(raw)) {
-                return extractAlias + "." + key;
+                return "nodeOutput." + extractNodeId + "." + key;
             }
             String normalized = raw.replace("{{", "").replace("}}", "").trim();
+            if (normalized.startsWith("nodeOutput.")) {
+                return normalized;
+            }
             int dot = normalized.indexOf('.');
             if (dot <= 0) {
-                return raw;
+                if (normalized.equals(extractAlias) || normalized.equals(extractNodeId)) {
+                    return "nodeOutput." + extractNodeId + "." + key;
+                }
+                return raw.contains("{{") ? "nodeOutput." + extractNodeId + "." + key : raw;
             }
             String suffix = normalized.substring(dot + 1);
             if (!StringUtils.hasText(suffix)) {
-                return raw;
+                return "nodeOutput." + extractNodeId + "." + key;
             }
-            return extractAlias + "." + suffix;
+            return "nodeOutput." + extractNodeId + "." + suffix;
         });
     }
 
@@ -1305,21 +1317,51 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
     }
 
     private List<String> filterFieldNames(WorkflowDraftGenerationRequest request) {
+        List<Map<String, Object>> definitions = filterFieldDefinitions(request);
+        if (!definitions.isEmpty()) {
+            return definitions.stream()
+                    .map(field -> text(field.get("name")))
+                    .filter(StringUtils::hasText)
+                    .sorted()
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<Map<String, Object>> filterFieldDefinitions(WorkflowDraftGenerationRequest request) {
         WorkflowDraftResource setFilters = findPageActionResource(request, "setFilters");
         if (setFilters == null) {
             return List.of();
         }
         Map<String, Object> metadata = mutableMap(setFilters.getMetadata());
-        Map<String, Object> sampleArgs = mutableMap(metadata.get("sampleArgs"));
-        if (!sampleArgs.isEmpty()) {
-            return sampleArgs.keySet().stream().sorted().toList();
-        }
         Map<String, Object> inputSchema = mutableMap(metadata.get("inputSchema"));
         Map<String, Object> properties = mutableMap(inputSchema.get("properties"));
+        Map<String, Object> sampleArgs = mutableMap(metadata.get("sampleArgs"));
+        Set<String> names = new java.util.TreeSet<>();
         if (!properties.isEmpty()) {
-            return properties.keySet().stream().sorted().toList();
+            names.addAll(properties.keySet());
         }
-        return List.of();
+        names.addAll(sampleArgs.keySet());
+        List<Map<String, Object>> fields = new ArrayList<>();
+        for (String name : names) {
+            if (!StringUtils.hasText(name)) {
+                continue;
+            }
+            Map<String, Object> property = mutableMap(properties.get(name));
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("name", name);
+            field.put("key", name);
+            field.put("type", firstText(text(property.get("type")), typeName(sampleArgs.get(name)), "string"));
+            putIfText(field, "label", firstText(text(property.get("label")), text(property.get("title"))));
+            putIfText(field, "title", text(property.get("title")));
+            putIfText(field, "description", text(property.get("description")));
+            Object aliases = firstPresent(property, "aliases", "synonyms");
+            if (aliases != null) {
+                field.put("aliases", aliases);
+            }
+            fields.add(field);
+        }
+        return fields;
     }
 
     private WorkflowDraftResource findPageActionResource(WorkflowDraftGenerationRequest request, String actionKey) {
@@ -1358,17 +1400,39 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                 || actionKey.toLowerCase(Locale.ROOT).contains("set_filter");
     }
 
-    private String buildFilterFieldGuide(List<String> fields) {
+    private String buildFilterFieldGuide(List<Map<String, Object>> fields) {
         if (fields.isEmpty()) {
             return "按页面 setFilters 动作可接受的筛选字段输出 JSON；字段名与页面动作 inputSchema 保持一致。";
         }
-        return "仅输出以下字段组成的 JSON 对象（键名必须完全一致）：" + String.join("、", fields)
-                + "。用户未提及的字段不要编造，可省略该键。";
+        StringBuilder guide = new StringBuilder("仅输出以下字段组成的 JSON 对象（键名必须完全一致）。")
+                .append("字段语义只能来自当前 setFilters inputSchema 的 title/label/description/aliases，不要套用其他页面的字段名：");
+        for (Map<String, Object> field : fields) {
+            String name = text(field.get("name"));
+            if (!StringUtils.hasText(name)) {
+                continue;
+            }
+            guide.append("\n- ").append(name);
+            String label = firstText(text(field.get("label")), text(field.get("title")));
+            if (StringUtils.hasText(label)) {
+                guide.append("：").append(label);
+            }
+            String description = text(field.get("description"));
+            if (StringUtils.hasText(description)) {
+                guide.append("；").append(description);
+            }
+            String aliases = aliasText(field.get("aliases"));
+            if (StringUtils.hasText(aliases)) {
+                guide.append("；别名：").append(aliases);
+            }
+        }
+        guide.append("。用户未提及的字段不要编造，可省略该键。");
+        return guide.toString();
     }
 
     private String buildPageAssistantExtractSystemPrompt(String fieldGuide) {
         return "你是页面助手工作流中的筛选条件提取节点。"
                 + fieldGuide
+                + " 只能根据当前页面字段定义做同义理解：如果某个页面把“负责人”声明为 owner，就输出 owner；如果声明为 principalUserName，就输出 principalUserName。"
                 + " 只输出 JSON 对象，不要输出解释、Markdown 或代码块。";
     }
 
@@ -1463,7 +1527,7 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
                         "outputAlias", "extracted_filters",
                         "outputFormat", "json",
                         "structuredOutput", true));
-                template.put("setFiltersArgsPattern", "extracted_filters.<fieldName>");
+                template.put("setFiltersArgsPattern", "nodeOutput.extract_filters.<fieldName>");
             }
             template.put("answerTemplate", "正在按你的条件查询页面数据，请稍候…");
             payload.put("pageAssistantTemplate", template);
@@ -1889,6 +1953,53 @@ public class LlmWorkflowDraftGenerator implements WorkflowDraftGenerator {
 
     private String firstString(List<String> values) {
         return values == null || values.isEmpty() ? "" : values.get(0);
+    }
+
+    private void putIfText(Map<String, Object> target, String key, String value) {
+        if (StringUtils.hasText(value)) {
+            target.put(key, value.trim());
+        }
+    }
+
+    private Object firstPresent(Map<String, Object> map, String... keys) {
+        if (map == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+        }
+        return null;
+    }
+
+    private String typeName(Object value) {
+        if (value instanceof Number) {
+            return "number";
+        }
+        if (value instanceof Boolean) {
+            return "boolean";
+        }
+        if (value instanceof List<?>) {
+            return "array";
+        }
+        if (value instanceof Map<?, ?>) {
+            return "object";
+        }
+        return "";
+    }
+
+    private String aliasText(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(this::text)
+                    .filter(StringUtils::hasText)
+                    .toList()
+                    .stream()
+                    .reduce((left, right) -> left + "/" + right)
+                    .orElse("");
+        }
+        return text(value);
     }
 
     private Map<String, Object> mutableMap(Object value) {

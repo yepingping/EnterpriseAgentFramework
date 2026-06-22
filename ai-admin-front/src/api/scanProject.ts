@@ -206,6 +206,23 @@ export function reportPageAssistantWorkflowAiCodingResult(
   )
 }
 
+export function resetPageAssistantWorkflowAiCodingResult(
+  id: number,
+  sessionId: string,
+  deleteWorkflow = true,
+  aiCodingKey?: string | null,
+) {
+  return agentRequest.delete<AiAccessSession>(
+    `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`,
+    {
+      params: {
+        deleteWorkflow,
+        aiCodingKey: aiCodingKey || undefined,
+      },
+    },
+  )
+}
+
 export function updateAiCodingAccess(id: number, data: AiCodingAccessUpdateRequest) {
   return agentRequest.patch<AiCodingAccessResponse>(`/api/ai-assist/projects/${id}/ai-coding-access`, data)
 }

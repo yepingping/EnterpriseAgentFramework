@@ -362,6 +362,44 @@ class AiAssistControllerTest {
     }
 
     @Test
+    void pageAssistantManifestCommandsUseEnabledProjectAiCodingKeyWhenRequestOmitsKey() {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_demo");
+        AiAccessSessionService.AccessSessionView session = pageAssistantSession();
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
+                .thenReturn(Optional.empty());
+        when(accessSessionService.getOrCreatePageAssistantLatest(
+                1L,
+                new AiAccessSessionService.PageAssistantSessionRequest(
+                        "Cursor",
+                        null,
+                        null,
+                        null)))
+                .thenReturn(session);
+
+        ResponseEntity<?> response = controller.pageAssistantManifest(
+                1L,
+                null,
+                null,
+                null,
+                "Cursor",
+                null,
+                request());
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> endpointsBody = objectMapper.convertValue(body.get("endpoints"), new TypeReference<>() {
+        });
+        Map<String, Object> scaffoldBody = objectMapper.convertValue(body.get("scaffold"), new TypeReference<>() {
+        });
+
+        assertTrue(endpointsBody.get("registerPageUrl").toString().contains("aiCodingKey=rac_demo"));
+        assertTrue(scaffoldBody.get("scaffoldCommand").toString().contains("aiCodingKey=rac_demo"));
+        assertTrue(scaffoldBody.get("verifyCommand").toString().contains("aiCodingKey=rac_demo"));
+    }
+
+    @Test
     void updateAiCodingAccessDelegatesAndReturnsSavedKey() {
         ScanProjectEntity updated = project();
         updated.setAiCodingAccessEnabled(true);

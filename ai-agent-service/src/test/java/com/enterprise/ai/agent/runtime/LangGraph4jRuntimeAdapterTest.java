@@ -389,6 +389,85 @@ class LangGraph4jRuntimeAdapterTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void parameterExtractSetFiltersPublishesManagerNameWithMustacheArgs() {
+        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(
+                jsonModelClient("{\"teamName\":null,\"memberName\":null,\"organCode\":null,\"managerName\":null}"),
+                mock(ToolDefinitionService.class),
+                null,
+                mock(AgentTraceSpanService.class),
+                new ObjectMapper(),
+                null,
+                null,
+                null);
+
+        AgentRuntimeResult result = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-parameter-extract-set-filters")
+                .sessionId("session-parameter-extract-set-filters")
+                .message("帮我查询一下负责人为靳圣辉的班组")
+                .metadata(Map.of("pageInstanceId", "page-team-archive"))
+                .graphSpec(parameterExtractSetFiltersGraph())
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+
+        assertTrue(result.isSuccess());
+        List<Map<String, Object>> queue = (List<Map<String, Object>>) result.getMetadata().get("pageActionQueue");
+        assertNotNull(queue);
+        assertEquals(3, queue.size());
+        assertEquals("setFilters", queue.get(0).get("actionKey"));
+        assertEquals("search", queue.get(1).get("actionKey"));
+        assertEquals("readTable", queue.get(2).get("actionKey"));
+        assertEquals("靳圣辉", ((Map<String, Object>) queue.get(0).get("args")).get("managerName"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void parameterExtractSetFiltersPublishesMemberAndTeamName() {
+        LangGraph4jRuntimeAdapter adapter = new LangGraph4jRuntimeAdapter(
+                jsonModelClient("{}"),
+                mock(ToolDefinitionService.class),
+                null,
+                mock(AgentTraceSpanService.class),
+                new ObjectMapper(),
+                null,
+                null,
+                null);
+
+        AgentRuntimeResult memberResult = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-parameter-extract-member")
+                .sessionId("session-parameter-extract-member")
+                .message("查一下成员为张三的班组")
+                .metadata(Map.of("pageInstanceId", "page-team-archive"))
+                .graphSpec(parameterExtractSetFiltersGraph())
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+        assertTrue(memberResult.isSuccess());
+        List<Map<String, Object>> memberQueue = (List<Map<String, Object>>) memberResult.getMetadata().get("pageActionQueue");
+        assertEquals("张三", ((Map<String, Object>) memberQueue.get(0).get("args")).get("memberName"));
+
+        AgentRuntimeResult teamResult = adapter.execute(AgentRuntimeRequest.builder()
+                .traceId("trace-parameter-extract-team")
+                .sessionId("session-parameter-extract-team")
+                .message("查一下班组名称包含检修的班组")
+                .metadata(Map.of("pageInstanceId", "page-team-archive"))
+                .graphSpec(parameterExtractSetFiltersGraph())
+                .graphRuntimeContext(GraphRuntimeContext.builder()
+                        .runtimeType(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                        .modelInstanceId("llm-1")
+                        .build())
+                .build());
+        assertTrue(teamResult.isSuccess());
+        List<Map<String, Object>> teamQueue = (List<Map<String, Object>>) teamResult.getMetadata().get("pageActionQueue");
+        assertEquals("检修", ((Map<String, Object>) teamQueue.get(0).get("args")).get("teamName"));
+    }
+
+    @Test
     void interactionCollectInputPublishesExplicitTargetArgs() {
         LangGraph4jRuntimeAdapter adapter = adapter(null);
 
@@ -2027,6 +2106,68 @@ class LangGraph4jRuntimeAdapterTest {
                 .edge(GraphSpec.Edge.builder().from("search").to("read_table").condition("always").build())
                 .edge(GraphSpec.Edge.builder().from("read_table").to("answer").condition("always").build())
                 .edge(GraphSpec.Edge.builder().from("answer").to("END").condition("always").build())
+                .build();
+    }
+
+    private GraphSpec parameterExtractSetFiltersGraph() {
+        List<Map<String, Object>> fields = List.of(
+                Map.of("name", "teamName", "type", "string", "description", "班组名称"),
+                Map.of("name", "memberName", "type", "string", "description", "班组成员/成员"),
+                Map.of("name", "organCode", "type", "array", "description", "关联组织/组织"),
+                Map.of("name", "managerName", "type", "string", "description", "负责人/班组负责人/负责人员"));
+        return GraphSpec.builder()
+                .code("parameter-extract-set-filters")
+                .name("参数抽取设置筛选")
+                .runtimeHint(AgentRuntimeAdapter.LANGGRAPH4J_RUNTIME_TYPE)
+                .entry("extract_filters")
+                .finishNode("answer_query")
+                .node(GraphSpec.Node.builder()
+                        .id("extract_filters")
+                        .type("PARAMETER_EXTRACT")
+                        .name("LLM筛选提取")
+                        .config(Map.of(
+                                "extractMode", "llm",
+                                "modelInstanceId", "llm-1",
+                                "outputAlias", "extracted_filters",
+                                "fields", fields))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("set_filters")
+                        .type("PAGE_ACTION")
+                        .name("设置筛选条件")
+                        .config(Map.of(
+                                "pageKey", "teamArchive.list",
+                                "actionKey", "setFilters",
+                                "args", Map.of(
+                                        "teamName", "{{ nodeOutput.extract_filters.teamName }}",
+                                        "memberName", "{{ nodeOutput.extract_filters.memberName }}",
+                                        "organCode", "{{ nodeOutput.extract_filters.organCode }}",
+                                        "managerName", "{{ nodeOutput.extract_filters.managerName }}")))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("search_action")
+                        .type("PAGE_ACTION")
+                        .name("执行查询")
+                        .config(Map.of("pageKey", "teamArchive.list", "actionKey", "search", "args", Map.of()))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("read_table")
+                        .type("PAGE_ACTION")
+                        .name("读取表格")
+                        .config(Map.of("pageKey", "teamArchive.list", "actionKey", "readTable", "args", Map.of()))
+                        .build())
+                .node(GraphSpec.Node.builder()
+                        .id("answer_query")
+                        .type("ANSWER")
+                        .name("查询完成回复")
+                        .config(Map.of("template", "已根据您的描述提取筛选条件并完成查询。"))
+                        .build())
+                .edge(GraphSpec.Edge.builder().from("START").to("extract_filters").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("extract_filters").to("set_filters").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("set_filters").to("search_action").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("search_action").to("read_table").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("read_table").to("answer_query").condition("always").build())
+                .edge(GraphSpec.Edge.builder().from("answer_query").to("END").condition("always").build())
                 .build();
     }
 

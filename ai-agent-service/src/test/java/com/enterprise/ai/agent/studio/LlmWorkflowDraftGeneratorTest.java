@@ -795,8 +795,8 @@ class LlmWorkflowDraftGeneratorTest {
                 .orElseThrow();
         @SuppressWarnings("unchecked")
         Map<String, Object> args = (Map<String, Object>) setFilters.getConfig().get("args");
-        assertEquals("extracted_filters.managerName", args.get("managerName"));
-        assertEquals("extracted_filters.deptName", args.get("deptName"));
+        assertEquals("nodeOutput.extract_filters.managerName", args.get("managerName"));
+        assertEquals("nodeOutput.extract_filters.deptName", args.get("deptName"));
 
         GraphSpec.Node answer = result.graphSpec().getNodes().stream()
                 .filter(node -> "answer".equals(node.getId()))

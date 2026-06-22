@@ -5066,10 +5066,7 @@ function collectPageActionMapping(parameter: ToolParameter, mapping: Record<stri
     for (const child of children) collectPageActionMapping(child, mapping, queryAlias, targetPath)
     return
   }
-  const pageField = pageFilterFieldName(rawName, parameter.description || '')
-  if (pageField) {
-    mapping[pageField] = `${queryAlias}.targetArgs.${targetPath}`
-  }
+  mapping[targetPath] = `${queryAlias}.targetArgs.${targetPath}`
 }
 
 function apiAssetInputMapping(asset: ApiAssetItem, queryAlias: string) {
@@ -5113,29 +5110,27 @@ function templateSlotFillingForField(name: string, description?: string | null):
   }
 }
 
-function pageFilterFieldName(name: string, description: string) {
-  const text = `${name} ${description}`.toLowerCase()
-  if (text.includes('managername') || text.includes('负责人')) return 'managerName'
-  if (text.includes('teamname') || text.includes('班组名称')) return 'teamName'
-  if (text.includes('membername') || text.includes('成员')) return 'memberName'
-  if (text.includes('organid') || text.includes('关联组织')) return 'organId'
-  if (text.includes('deptid') || text.includes('部门')) return 'deptId'
-  return name || ''
+function slotRulePatterns(name: string, description: string) {
+  const value = '([^，。,.\\s的]+)'
+  return fieldRuleAliases(name, description)
+    .map(alias => `${escapeRegex(alias)}(?:为|是|叫|包含|包括|有|=|：|:)?\\s*${value}`)
 }
 
-function slotRulePatterns(name: string, description: string) {
-  const field = pageFilterFieldName(name, description)
-  const person = '([\\u4e00-\\u9fa5A-Za-z0-9_·.-]{2,30})'
-  if (field === 'managerName') {
-    return [`负责人(?:为|是|叫|=|：|:)?\\s*${person}`, `${person}\\s*(?:负责|作为负责人)`]
+function fieldRuleAliases(name: string, description: string) {
+  const aliases = new Set<string>()
+  const add = (value?: string | null) => {
+    const alias = String(value || '').trim()
+    if (alias && alias.length <= 30) aliases.add(alias)
   }
-  if (field === 'teamName') {
-    return [`班组(?:名称|名)?(?:为|是|叫|=|：|:)?\\s*${person}`, `查询(?:一下)?\\s*${person}\\s*(?:班组|组)`]
+  add(name)
+  if (description && description.length <= 80) {
+    description.split(/[/、,，;；|\s]+/).forEach(add)
   }
-  if (field === 'memberName') {
-    return [`(?:班组)?成员(?:为|是|包含|有|=|：|:)?\\s*${person}`, `成员.*?${person}`]
-  }
-  return []
+  return Array.from(aliases)
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function apiFieldType(type?: string | null): StudioFieldSchema['type'] {

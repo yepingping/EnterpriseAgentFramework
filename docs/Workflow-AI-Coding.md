@@ -382,4 +382,4 @@ Page Assistant onboarding / catalog sync / embed session 注册仍走 `/api/ai-a
 - npm / PowerShell CLI 包（应复用本阶段 `/ai-coding/page-assistant/*` API）
 - Page Assistant Wizard UI「使用 AI Coding」入口（应复用本阶段 API，而非另建 onboarding 副本）
 - 真实浏览器 bridge 联调 verify
-- aiCodingKey 公开访问（当前 Workflow AI Coding 走平台登录态）
+- Workflow AI Coding 使用项目级 `aiCodingKey`（query 或 `X-ReachAI-AiCoding-Key`），不走平台登录 Cookie；`aiCodingKey` 只能给 AI 工具/本机脚本/服务端使用，不得进入浏览器运行时代码或业务前端配置

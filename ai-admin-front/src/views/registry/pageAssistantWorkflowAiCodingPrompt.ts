@@ -246,6 +246,10 @@ ${JSON.stringify(createBody, null, 2)}
 5. Business page runtime verification (required when the business frontend is reachable):
    - Platform validate / page-assistant validate passing does **not** prove real page execution.
    - If you can run the business frontend, open the target page with a browser or Playwright, verify the page bridge exists, and verify the selected actionKeys are registered.
+   - The runtime source of truth is the business page bridge session registeredActions/actionDefinitions, not only ReachAI catalog or workflow extra.actionKeys.
+   - Do not report PASS if any PAGE_ACTION actionKey in GraphSpec is absent from the current business page bridge registeredActions; this will fail in embed chat with "page action is not registered in current session".
+   - For query flows, do not treat PAGE_ACTION result status=SUCCESS as sufficient. Verify the full chain: setFilters args contain the extracted non-empty fields, page state/result filters contain those fields after setFilters, search triggers the real business query request with corresponding query parameters, and readTable reflects the refreshed visible table.
+   - If setFilters receives a non-empty field but the following business query request is still unfiltered, report FAIL and point to the business page handler/query-state binding as the likely fix; do not hide it with a Workflow-only patch.
    - For safe actions, invoke the handler and observe page state changes. For confirmRequired=true or high-risk actions, verify confirm/NEED_CONFIRM/action presence only; do not submit dangerous side effects.
    - If real browser verification is unavailable, report \`runtimeVerification.browserRuntime.status="WARN"\` with the reason. Do not claim real page PASS.
 
@@ -300,10 +304,22 @@ ${JSON.stringify(createBody, null, 2)}
 - 每个终态分支最后都必须连接到 END；也就是每条 route 最后一个 ANSWER/PAGE_ACTION/INTERACTION 后必须有 <lastNode> -> END 连线。
 - 不要创建普通 id=end/type=END 节点；结束只能通过虚拟端点 END 表达，Studio 会映射为结束节点。
 - 需要从自然语言提取筛选/查询参数时，使用 PARAMETER_EXTRACT，且 config.extractMode=llm，modelInstanceId 使用 defaultModelInstanceId 或 context.availableModels 中的 ACTIVE LLM。
+- PARAMETER_EXTRACT 输出必须使用目标 Page Action inputSchema 中的真实字段名；字段语义必须来自当前页面 action 的 title/label/description/aliases/sampleArgs，不要套用其他页面的固定字段名。
+- PARAMETER_EXTRACT fields 必须由 setFilters.inputSchema.properties 或 sampleArgs 派生，保留每个字段的真实 key/name、type、title/label、description、aliases；systemPrompt 只能描述这些当前页面字段的同义表达。
+- 示例仅用于说明机制：如果当前页面 schema 明确声明 { "owner": { "title": "负责人" } }，用户说“负责人为 X”就映射到 owner；如果另一个页面声明的是 principalUserName，就必须映射到该页面自己的字段名。
+- PAGE_ACTION(setFilters) 的 config.args 必须引用抽参节点输出，使用 GraphSpec 表达式语法：nodeOutput.<extractNodeId>.<fieldName>（例如 nodeOutput.extract_filters.<fieldName>）；不要使用 {{ }} 包裹，不要写死 null。
+- 调用 PAGE_ACTION(setFilters) 前必须丢弃空值字段；不要把全 null/空字符串对象当成有效筛选条件继续执行。
+- 如果用户表达了查询条件但 PARAMETER_EXTRACT 未提取出任何非空筛选字段，必须走 ANSWER 分支提示无法识别筛选条件，不能继续执行 setFilters/search/readTable。
+- 查询类 Workflow 的产品目标是操作当前业务页面：PAGE_ACTION(setFilters) 负责填充当前页面筛选控件，PAGE_ACTION(search) 负责触发原页面查询并刷新原表格，PAGE_ACTION(readTable) 只读取刷新后的当前表格快照。
+- 查询类 Workflow 的验收证据必须贯穿平台与业务页：PARAMETER_EXTRACT 输出、PAGE_ACTION(setFilters).args、setFilters result/getPageState.filters、search 的真实业务接口请求参数、readTable 当前表格摘要必须能相互印证。只看到 workflow run SUCCESS、page.action.result SUCCESS 或 pending 为空，不能判定查询已生效。
+- ANSWER 节点生成查询结果回复时，应引用 PAGE_ACTION(readTable) 的结构化 rows/pagination 做简短确认，例如“已设置筛选条件并完成查询，当前列表共 N 条”；不要只回复“正在查询”或页面动作执行状态。
+- 不要把 readTable 结果在聊天框里完整渲染成业务列表来替代页面表格；长列表应留在当前页面表格中展示，聊天框最多展示少量摘要和当前页面已刷新提示。
+- 不要设计绕过页面的后端 API Tool 查询链；PAGE_ASSISTANT Workflow 应优先通过 Page Action 操作页面已有控件、查询按钮和表格状态。
 - LINEAR_QUERY：不要创建 INTENT_CLASSIFIER。
 - INTENT_ROUTER：必须创建 INTENT_CLASSIFIER；strategy=HYBRID；classes 含 id/label/description/keywords；defaultRoute=else。
 - 连线使用 \`route:<classId>\` 或 \`route:else\`。
 - PAGE_ACTION config 必须绑定真实 actionKey（来自 pageActions / catalog）。
+- PAGE_ACTION actionKey 还必须已被业务前端当前页面 bridge 注册；如果真实页面没有注册 setFilters，就不要生成 PAGE_ACTION(setFilters)，即使平台 catalog 或 extra.actionKeys 中出现过 setFilters。
 
 ## 最终汇报
 

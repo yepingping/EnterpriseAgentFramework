@@ -10,6 +10,7 @@ import com.enterprise.ai.agent.identity.PageRegistryMapper;
 import com.enterprise.ai.agent.registry.SdkAccessCheckService;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
+import com.enterprise.ai.agent.workflow.WorkflowDefinitionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
@@ -45,6 +46,9 @@ public class AiAccessSessionService {
     );
 
     public static final String WORKFLOW_AI_CODING_DRAFT_STEP_KEY = "workflow-ai-coding-draft";
+    private static final String BROWSER_VERIFY_STEP_KEY = "browser-verify";
+    private static final String BROWSER_VERIFY_STATIC_STEP_KEY = "browser-verify-static";
+    private static final String BROWSER_VERIFY_RUNTIME_STEP_KEY = "browser-verify-runtime";
     private static final String WORKFLOW_AI_CODING_DRAFT_STEP_TITLE = "Workflow AI Coding 生成草稿";
 
     private static final List<StepDefinition> PAGE_ASSISTANT_STEPS = List.of(
@@ -74,6 +78,7 @@ public class AiAccessSessionService {
     private final SdkAccessCheckService sdkAccessCheckService;
     private final PageRegistryMapper pageRegistryMapper;
     private final PageActionRegistryMapper pageActionRegistryMapper;
+    private final WorkflowDefinitionService workflowDefinitionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AccessSessionView getOrCreateLatest(Long projectId, String toolName) {
@@ -177,7 +182,9 @@ public class AiAccessSessionService {
     public AccessSessionView reportStep(Long projectId, String sessionId, String stepKey, StepReportRequest request) {
         AiAccessSessionEntity session = requireSession(projectId, sessionId);
         List<AiAccessStepEntity> steps = ensureDefaultSteps(session, loadSteps(sessionId));
+        String requestedStepKey = requireStepKey(stepKey);
         AiAccessStepEntity step = findStep(steps, stepKey);
+        request = normalizeBrowserVerifyAliasReport(requestedStepKey, step, request);
         applyReport(step, request);
         applyPageAssistantTargetFromReport(session, request);
         stepMapper.updateById(step);
@@ -239,6 +246,42 @@ public class AiAccessSessionService {
         stepMapper.updateById(step);
         session.setLastMessage(message);
         return persistProgress(session, loadStepsFromKnown(steps, step));
+    }
+
+    public AccessSessionView resetWorkflowAiCodingResult(Long projectId, String sessionId, boolean deleteWorkflow) {
+        AiAccessSessionEntity session = requireSession(projectId, sessionId);
+        if (!"PAGE_ASSISTANT".equalsIgnoreCase(normalizeScenario(session.getScenario()))) {
+            throw new IllegalArgumentException("access session is not a page assistant session");
+        }
+        List<AiAccessStepEntity> steps = ensureDefaultSteps(session, loadSteps(sessionId));
+        AiAccessStepEntity step = steps.stream()
+                .filter(item -> WORKFLOW_AI_CODING_DRAFT_STEP_KEY.equals(item.getStepKey()))
+                .findFirst()
+                .orElse(null);
+        if (step == null) {
+            session.setLastMessage("Workflow AI Coding result reset.");
+            session.setUpdatedAt(LocalDateTime.now());
+            sessionMapper.updateById(session);
+            return toView(session, steps);
+        }
+        Map<String, Object> evidence = readMap(step.getEvidenceJson());
+        String workflowId = textValue(evidence.get("workflowId"));
+        if (deleteWorkflow && StringUtils.hasText(workflowId)) {
+            try {
+                workflowDefinitionService.delete(workflowId.trim());
+            } catch (IllegalArgumentException ex) {
+                String message = ex.getMessage();
+                if (message == null || !message.startsWith("workflow not found")) {
+                    throw ex;
+                }
+            }
+        }
+        stepMapper.deleteById(step.getId());
+        List<AiAccessStepEntity> remaining = steps.stream()
+                .filter(item -> !WORKFLOW_AI_CODING_DRAFT_STEP_KEY.equals(item.getStepKey()))
+                .toList();
+        session.setLastMessage("Workflow AI Coding result reset.");
+        return persistProgress(session, remaining);
     }
 
     public AccessSessionView bindPageAssistantTarget(Long projectId, String sessionId, PageAssistantTargetRequest request) {
@@ -566,6 +609,98 @@ public class AiAccessSessionService {
                 .orElseThrow(() -> new IllegalArgumentException("unknown access step: " + stepKey));
     }
 
+    private StepReportRequest normalizeBrowserVerifyAliasReport(String requestedStepKey,
+                                                                AiAccessStepEntity step,
+                                                                StepReportRequest request) {
+        if (!BROWSER_VERIFY_STATIC_STEP_KEY.equals(requestedStepKey)
+                && !BROWSER_VERIFY_RUNTIME_STEP_KEY.equals(requestedStepKey)) {
+            return request;
+        }
+        String status = normalizeStatus(request == null ? null : request.status());
+        String message = trimToNull(request == null ? null : request.message());
+        Map<String, Object> evidence = new LinkedHashMap<>(readMap(step.getEvidenceJson()));
+        String childKey = BROWSER_VERIFY_STATIC_STEP_KEY.equals(requestedStepKey) ? "browserStatic" : "browserRuntime";
+        Map<String, Object> childEvidence = readChildEvidence(evidence.get(childKey));
+        if (request != null && request.evidence() != null) {
+            childEvidence.putAll(request.evidence());
+        }
+        childEvidence.put("status", status);
+        if (StringUtils.hasText(message)) {
+            childEvidence.put("message", message);
+        }
+        childEvidence.put("reportedStepKey", requestedStepKey);
+        evidence.put(childKey, childEvidence);
+        evidence.put("reportedAlias", requestedStepKey);
+
+        String parentStatus = resolveBrowserVerifyAliasParentStatus(requestedStepKey, status, evidence);
+        String parentMessage = buildBrowserVerifyAliasMessage(requestedStepKey, status, message, evidence);
+        return new StepReportRequest(
+                parentStatus,
+                parentMessage,
+                request == null ? List.of() : request.files(),
+                evidence,
+                request == null ? null : request.reportedBy());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> readChildEvidence(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>((Map<String, Object>) map);
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private static String resolveBrowserVerifyAliasParentStatus(String requestedStepKey,
+                                                               String status,
+                                                               Map<String, Object> evidence) {
+        if ("FAIL".equals(status)) {
+            return "FAIL";
+        }
+        if (BROWSER_VERIFY_RUNTIME_STEP_KEY.equals(requestedStepKey) && "PASS".equals(status)) {
+            return "PASS";
+        }
+        String runtimeStatus = childStatus(evidence.get("browserRuntime"));
+        if ("FAIL".equals(runtimeStatus)) {
+            return "FAIL";
+        }
+        if ("PASS".equals(runtimeStatus)) {
+            return "PASS";
+        }
+        if ("RUNNING".equals(status)) {
+            return "RUNNING";
+        }
+        return "WARN";
+    }
+
+    private static String buildBrowserVerifyAliasMessage(String requestedStepKey,
+                                                        String status,
+                                                        String message,
+                                                        Map<String, Object> evidence) {
+        String staticStatus = childStatus(evidence.get("browserStatic"));
+        String runtimeStatus = childStatus(evidence.get("browserRuntime"));
+        String suffix = StringUtils.hasText(message) ? " (" + message + ")" : "";
+        if (BROWSER_VERIFY_STATIC_STEP_KEY.equals(requestedStepKey) && "PASS".equals(status)
+                && !"PASS".equals(runtimeStatus)) {
+            return "browser-verify-static=PASS" + suffix
+                    + "; browser-verify-runtime has not reported PASS, parent step remains WARN.";
+        }
+        return "browser-verify-static=" + valueOrUnknown(staticStatus)
+                + "; browser-verify-runtime=" + valueOrUnknown(runtimeStatus)
+                + "; latest=" + requestedStepKey + "=" + status + suffix;
+    }
+
+    private static String childStatus(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Object status = map.get("status");
+            return status == null ? null : String.valueOf(status);
+        }
+        return null;
+    }
+
+    private static String valueOrUnknown(String value) {
+        return StringUtils.hasText(value) ? value : "UNKNOWN";
+    }
+
     private void applyReport(AiAccessStepEntity step, StepReportRequest request) {
         LocalDateTime now = LocalDateTime.now();
         String status = normalizeStatus(request == null ? null : request.status());
@@ -728,7 +863,11 @@ public class AiAccessSessionService {
         if (runtime.isEmpty()) {
             return "SKIPPED";
         }
-        return resolveRuntimeStatusFromEvidence(runtime, StringUtils.hasText(extractFrontendUrl(request, runtime)));
+        String status = resolveRuntimeStatusFromEvidence(runtime, StringUtils.hasText(extractFrontendUrl(request, runtime)));
+        if ("PASS".equalsIgnoreCase(status) && hasMissingExpectedRegisteredActions(runtime, request == null ? List.of() : request.actionKeys())) {
+            return "FAIL";
+        }
+        return status;
     }
 
     private static String resolveRuntimeStatusFromEvidence(Map<String, Object> runtime, boolean frontendUrlProvided) {
@@ -757,6 +896,25 @@ public class AiAccessSessionService {
             return true;
         }
         return false;
+    }
+
+    private static boolean hasMissingExpectedRegisteredActions(Map<String, Object> runtime, List<String> expectedActions) {
+        List<String> expected = normalizeActionKeys(expectedActions);
+        if (expected.isEmpty()) {
+            return false;
+        }
+        List<String> registered = objectListToStrings(runtime.get("registeredActions"));
+        if (registered.isEmpty()) {
+            registered = objectListToStrings(runtime.get("listedActions"));
+        }
+        if (registered.isEmpty()) {
+            registered = objectListToStrings(runtime.get("actionKeys"));
+        }
+        if (registered.isEmpty()) {
+            return false;
+        }
+        List<String> normalizedRegistered = normalizeActionKeys(registered);
+        return expected.stream().anyMatch(action -> !normalizedRegistered.contains(action));
     }
 
     private static Map<String, Object> resolveRuntimeCheckEvidence(PageAssistantCheckRequest request) {
@@ -1160,6 +1318,15 @@ public class AiAccessSessionService {
     }
 
     private static String normalizeStepKey(String value) {
+        String normalized = requireStepKey(value);
+        if (BROWSER_VERIFY_STATIC_STEP_KEY.equals(normalized)
+                || BROWSER_VERIFY_RUNTIME_STEP_KEY.equals(normalized)) {
+            return BROWSER_VERIFY_STEP_KEY;
+        }
+        return normalized;
+    }
+
+    private static String requireStepKey(String value) {
         if (!StringUtils.hasText(value)) {
             throw new IllegalArgumentException("access step key is required");
         }

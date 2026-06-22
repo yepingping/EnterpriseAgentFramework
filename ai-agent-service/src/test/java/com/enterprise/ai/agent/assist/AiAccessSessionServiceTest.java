@@ -9,6 +9,7 @@ import com.enterprise.ai.agent.identity.PageActionCatalogContracts;
 import com.enterprise.ai.agent.identity.PageRegistryEntity;
 import com.enterprise.ai.agent.identity.PageRegistryMapper;
 import com.enterprise.ai.agent.identity.PageCatalogRegisterResult;
+import com.enterprise.ai.agent.workflow.WorkflowDefinitionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +45,8 @@ class AiAccessSessionServiceTest {
     private PageRegistryMapper pageRegistryMapper;
     @Mock
     private PageActionRegistryMapper pageActionRegistryMapper;
+    @Mock
+    private WorkflowDefinitionService workflowDefinitionService;
     @InjectMocks
     private AiAccessSessionService service;
 
@@ -240,6 +244,59 @@ class AiAccessSessionServiceTest {
                                 null)));
 
         assertTrue(error.getMessage().contains("access session not found"));
+    }
+
+    @Test
+    void resetWorkflowAiCodingResultDeletesDraftWorkflowAndStep() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        AiAccessStepEntity draftStep = step(
+                "session-page",
+                AiAccessSessionService.WORKFLOW_AI_CODING_DRAFT_STEP_KEY,
+                "PASS");
+        draftStep.setEvidenceJson("{\"workflowId\":\"wf-123\"}");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(stepMapper.selectList(any())).thenReturn(List.of(
+                step("session-page", "page-manifest", "PASS"),
+                draftStep
+        ));
+
+        AiAccessSessionService.AccessSessionView view = service.resetWorkflowAiCodingResult(
+                1L,
+                "session-page",
+                true);
+
+        assertTrue(view.steps().stream()
+                .noneMatch(step -> AiAccessSessionService.WORKFLOW_AI_CODING_DRAFT_STEP_KEY.equals(step.stepKey())));
+        verify(workflowDefinitionService).delete("wf-123");
+        verify(stepMapper).deleteById(draftStep.getId());
+        verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
+    }
+
+    @Test
+    void resetWorkflowAiCodingResultIgnoresAlreadyDeletedWorkflow() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        AiAccessStepEntity draftStep = step(
+                "session-page",
+                AiAccessSessionService.WORKFLOW_AI_CODING_DRAFT_STEP_KEY,
+                "PASS");
+        draftStep.setEvidenceJson("{\"workflowId\":\"wf-missing\"}");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(stepMapper.selectList(any())).thenReturn(List.of(draftStep));
+        doThrow(new IllegalArgumentException("workflow not found: wf-missing"))
+                .when(workflowDefinitionService)
+                .delete("wf-missing");
+
+        AiAccessSessionService.AccessSessionView view = service.resetWorkflowAiCodingResult(
+                1L,
+                "session-page",
+                true);
+
+        assertTrue(view.steps().stream()
+                .noneMatch(step -> AiAccessSessionService.WORKFLOW_AI_CODING_DRAFT_STEP_KEY.equals(step.stepKey())));
+        verify(stepMapper).deleteById(draftStep.getId());
+        verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
     }
 
     @Test
@@ -557,6 +614,40 @@ class AiAccessSessionServiceTest {
     }
 
     @Test
+    void runPageAssistantChecksFailsWhenExpectedActionIsNotRegisteredInRuntime() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(scanProjectService.getById(1L)).thenReturn(project());
+        when(stepMapper.selectList(any())).thenReturn(List.of(step("session-page", "browser-verify", "TODO")));
+        when(pageRegistryMapper.selectList(any())).thenReturn(List.of(page("teamArchive.list", "/teams/archive")));
+        when(pageActionRegistryMapper.selectList(any())).thenReturn(List.of(
+                action("teamArchive.list", "getPageState", false),
+                action("teamArchive.list", "setFilters", false)));
+
+        Map<String, Object> runtime = Map.of(
+                "status", "PASS",
+                "message", "readonly invoke ok but setFilters is missing",
+                "frontendUrl", "http://localhost:9200",
+                "bridgeExists", true,
+                "listedActions", List.of("getPageState"),
+                "invokedActions", List.of("getPageState"),
+                "redactedResults", List.of(Map.of("actionKey", "getPageState", "status", "SUCCESS")));
+        AiAccessSessionService.PageAssistantCheckRunResponse response = service.runPageAssistantChecks(
+                1L,
+                "session-page",
+                new AiAccessSessionService.PageAssistantCheckRequest(
+                        "teamArchive.list",
+                        "/teams/archive",
+                        List.of("getPageState", "setFilters"),
+                        "http://localhost:9200",
+                        runtime));
+
+        assertTrue(response.checkResult().checks().stream()
+                .anyMatch(check -> "browser-verify-runtime".equals(check.key()) && "FAIL".equals(check.status())));
+    }
+
+    @Test
     void runPageAssistantChecksPreservesAiEvidenceAfterPlatformCheck() {
         AiAccessSessionEntity session = session("session-page");
         session.setScenario("PAGE_ASSISTANT");
@@ -594,6 +685,36 @@ class AiAccessSessionServiceTest {
                 List.of(new AiAccessSessionService.PageAssistantFileEvidence("src/app/list.component.ts", "unknown", null, null)));
         assertEquals("HASH_MISSING", views.get(0).validationStatus());
         assertTrue(views.get(0).validationMessage().contains("hash missing"));
+    }
+
+    @Test
+    void reportStepAcceptsBrowserVerifyStaticAliasButKeepsParentWarn() {
+        AiAccessSessionEntity session = session("session-page");
+        session.setScenario("PAGE_ASSISTANT");
+        AiAccessStepEntity browser = step("session-page", "browser-verify", "TODO");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(stepMapper.selectList(any())).thenReturn(List.of(browser));
+
+        AiAccessSessionService.AccessSessionView view = service.reportStep(
+                1L,
+                "session-page",
+                "browser-verify-static",
+                new AiAccessSessionService.StepReportRequest(
+                        "PASS",
+                        "static only",
+                        List.of("src/app/shared/reachai/page-actions.ts"),
+                        Map.of("registeredActions", List.of("getPageState")),
+                        "cursor"));
+
+        AiAccessSessionService.AccessStepView browserStep = view.steps().stream()
+                .filter(step -> "browser-verify".equals(step.stepKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("WARN", browserStep.status());
+        assertTrue(browserStep.message().contains("parent step remains WARN"));
+        assertTrue(browserStep.evidence().containsKey("browserStatic"));
+        verify(stepMapper).updateById(any(AiAccessStepEntity.class));
+        verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
     }
 
     private static ScanProjectEntity project() {

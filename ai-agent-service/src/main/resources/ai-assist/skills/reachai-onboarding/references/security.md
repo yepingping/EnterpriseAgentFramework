@@ -2,12 +2,15 @@
 
 ## Secrets
 
-Never place `appSecret` in:
+Never place `appSecret` or project `aiCodingKey` in:
 - Chat prompts.
 - Generated source files.
+- Business front-end runtime code, `environment.ts`, `.env`, `window.__env`, or browser bundles.
 - `application.yml` committed to git.
 - Markdown reports.
 - Terminal output summaries.
+
+`aiCodingKey` and `provisionAgentUrl` belong to AI coding tools, local shell scripts, or server-side onboarding only. Browser runtime must not call `/api/ai-assist/**` provisioning or access-session endpoints.
 
 Use the manifest field `sdk.config.appSecretEnv` and write configuration like:
 

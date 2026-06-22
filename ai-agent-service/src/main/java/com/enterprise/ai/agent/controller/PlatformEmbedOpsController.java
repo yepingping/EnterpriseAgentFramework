@@ -15,6 +15,7 @@ import com.enterprise.ai.agent.identity.PageActionEventMapper;
 import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
 import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.identity.PageRegistryEntity;
+import com.enterprise.ai.agent.identity.PageRegistryManagementService;
 import com.enterprise.ai.agent.identity.PageRegistryMapper;
 import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
@@ -25,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -53,6 +55,7 @@ public class PlatformEmbedOpsController {
     private final RegistryCredentialMapper credentialMapper;
     private final PageRegistryMapper pageRegistryMapper;
     private final PageActionRegistryMapper pageActionRegistryMapper;
+    private final PageRegistryManagementService pageRegistryManagementService;
     private final WorkflowActionReferenceService workflowActionReferenceService;
     private final EmbedAuditEventService embedAuditEventService;
     private final ObjectMapper objectMapper;
@@ -96,6 +99,11 @@ public class PlatformEmbedOpsController {
         if (StringUtils.hasText(status)) query.eq(PageRegistryEntity::getStatus, status);
         query.orderByDesc(PageRegistryEntity::getLastSeenAt).orderByDesc(PageRegistryEntity::getId).last("LIMIT " + safeLimit(limit));
         return ApiResult.ok(pageRegistryMapper.selectList(query));
+    }
+
+    @DeleteMapping("/pages/{id}")
+    public ApiResult<PageRegistryManagementService.PageRegistryDeleteResult> deletePage(@PathVariable Long id) {
+        return ApiResult.ok(pageRegistryManagementService.deletePageAndRelations(id));
     }
 
     @GetMapping("/page-actions/catalog")

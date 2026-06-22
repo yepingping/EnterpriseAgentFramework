@@ -106,6 +106,12 @@ interface PageActionDispatchRequest {
   args?: Record<string, unknown>
   target?: Record<string, unknown>
   confirm?: boolean
+  metadata?: Record<string, unknown>
+}
+
+interface ReachAiWindowPageBridge {
+  execute?: (pageKey: string, actionKey: string, args?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown> | unknown
+  list?: (pageKey?: string) => unknown[]
 }
 
 export async function createEafChat(options: EafChatOptions): Promise<EafChatClient> {
@@ -121,6 +127,7 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
   let session = await createSession(apiBase, token, bridge, options.page)
   let context: Record<string, unknown> = { ...(options.context || {}) }
   const pendingPageActions = new Set<string>()
+  const handledPageActions = new Set<string>()
   let pendingPollInFlight = false
   let pageCatalogTimer: number | undefined
   let destroyed = false
@@ -227,6 +234,8 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
           active.sessionId,
           apiBase,
           () => token,
+          handledPageActions,
+          pageMetadata(options.page),
           options.onEvent,
         )
       } catch (error) {
@@ -242,6 +251,8 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
               active.sessionId,
               apiBase,
               () => token,
+              handledPageActions,
+              pageMetadata(options.page),
               options.onEvent,
             )
           } catch (retryError) {
@@ -256,6 +267,8 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
               refreshed.sessionId,
               apiBase,
               () => token,
+              handledPageActions,
+              pageMetadata(options.page),
               options.onEvent,
             )
           }
@@ -288,7 +301,7 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
       token,
     )
     appendMessage(messagesEl, 'assistant', response.answer || '')
-    await handleUiRequest(response.uiRequest, bridge, messagesEl, sessionId, apiBase, token, options.onEvent)
+    await handleResponsePageActions(response, bridge, messagesEl, sessionId, apiBase, token, handledPageActions, options.onEvent)
     return response
   }
 
@@ -317,9 +330,8 @@ export async function createEafChat(options: EafChatOptions): Promise<EafChatCli
         pendingPageActions.add(request.requestId)
         try {
           options.onEvent?.({ type: 'page.action.requested', data: request })
-          const result = await bridge.handleEvent(request)
+          const result = await executePageActionRequest(request, bridge, messagesEl, handledPageActions, context)
           if (result) {
-            appendActionResult(messagesEl, result)
             try {
               await postPageActionResult(apiBase, active.sessionId, token, result)
             } catch (error) {
@@ -523,6 +535,8 @@ async function postSseJson(
   sessionId: string,
   apiBase: string,
   tokenProvider: () => string,
+  handledPageActions: Set<string>,
+  pageMetadata: Record<string, unknown>,
   onEvent?: (event: EafChatEvent) => void,
 ): Promise<EafChatMessageResponse> {
   const response = await fetch(url, {
@@ -555,16 +569,15 @@ async function postSseJson(
     }
     if (event.type === 'page.action.requested') {
       onEvent?.(event)
-      const result = await bridge.handleEvent(event.data)
+      const result = await executePageActionRequest(event.data, bridge, messagesEl, handledPageActions, pageMetadata)
       if (result) {
-        appendActionResult(messagesEl, result)
         await postPageActionResult(apiBase, sessionId, tokenProvider(), result)
       }
       return
     }
     if (event.type === 'ui.requested') {
       onEvent?.(event)
-      await handleUiRequest(event.data, bridge, messagesEl, sessionId, apiBase, tokenProvider(), onEvent)
+      await handleUiRequest(event.data, bridge, messagesEl, sessionId, apiBase, tokenProvider(), handledPageActions, pageMetadata, onEvent)
       return
     }
     if (event.type === 'message.completed') {
@@ -574,6 +587,7 @@ async function postSseJson(
         if (!assistantEl) assistantEl = appendMessage(messagesEl, 'assistant', '')
         assistantEl.textContent = answer
       }
+      await handleResponsePageActions(state.completed, bridge, messagesEl, sessionId, apiBase, tokenProvider(), handledPageActions, onEvent)
       return
     }
     if (event.type === 'error') {
@@ -603,6 +617,28 @@ async function postSseJson(
   return state.completed ? { ...state.completed, answer: state.completed.answer || answer } : { answer }
 }
 
+async function handleResponsePageActions(
+  response: EafChatMessageResponse,
+  bridge: EafPageBridge,
+  messagesEl: HTMLElement,
+  sessionId: string,
+  apiBase: string,
+  token: string,
+  handledPageActions: Set<string>,
+  onEvent?: (event: EafChatEvent) => void,
+) {
+  const queue = pageActionQueueFromResponse(response)
+  if (queue.length > 0) {
+    for (const request of queue) {
+      onEvent?.({ type: 'page.action.requested', data: request })
+      const result = await executePageActionRequest(request, bridge, messagesEl, handledPageActions, response.metadata)
+      if (result) await postPageActionResult(apiBase, sessionId, token, result)
+    }
+    return
+  }
+  await handleUiRequest(response.uiRequest, bridge, messagesEl, sessionId, apiBase, token, handledPageActions, response.metadata, onEvent)
+}
+
 async function handleUiRequest(
   uiRequest: unknown,
   bridge: EafPageBridge,
@@ -610,6 +646,8 @@ async function handleUiRequest(
   sessionId: string,
   apiBase: string,
   token: string,
+  handledPageActions: Set<string>,
+  responseMetadata?: Record<string, unknown>,
   onEvent?: (event: EafChatEvent) => void,
 ) {
   const request = uiRequest as Record<string, unknown> | undefined
@@ -620,11 +658,136 @@ async function handleUiRequest(
     ? (request.extension as Record<string, unknown>).pageActionRequest
     : undefined
   if (pageAction) onEvent?.({ type: 'page.action.requested', data: pageAction })
-  const result = await bridge.handleEvent(pageAction)
+  const result = await executePageActionRequest(pageAction, bridge, messagesEl, handledPageActions, responseMetadata)
   if (result) {
-    appendActionResult(messagesEl, result)
     await postPageActionResult(apiBase, sessionId, token, result)
   }
+}
+
+async function executePageActionRequest(
+  request: unknown,
+  bridge: EafPageBridge,
+  messagesEl: HTMLElement,
+  handledPageActions: Set<string>,
+  responseMetadata?: Record<string, unknown>,
+): Promise<PageActionResult | null> {
+  const normalized = normalizePageActionRequest(request, pageKeyFromMetadata(responseMetadata))
+  if (!normalized?.requestId) return null
+  if (handledPageActions.has(normalized.requestId)) return null
+  const result = await bridge.handleEvent(normalized)
+  if (result && result.status !== 'ACTION_NOT_FOUND') {
+    handledPageActions.add(normalized.requestId)
+    appendActionResult(messagesEl, result)
+    return result
+  }
+  const fallback = await executeWindowPageBridgeAction(normalized, responseMetadata)
+  if (fallback) {
+    if (fallback.status !== 'ACTION_NOT_FOUND') handledPageActions.add(normalized.requestId)
+    appendActionResult(messagesEl, fallback)
+    return fallback
+  }
+  if (result) {
+    handledPageActions.add(normalized.requestId)
+    appendActionResult(messagesEl, result)
+  }
+  return result
+}
+
+function pageActionQueueFromResponse(response: EafChatMessageResponse): PageActionDispatchRequest[] {
+  const raw = response.metadata?.pageActionQueue
+  if (!Array.isArray(raw)) return []
+  const pageKey = pageKeyFromMetadata(response.metadata)
+  return raw
+    .map((item) => normalizePageActionRequest(item, pageKey))
+    .filter((item): item is PageActionDispatchRequest => !!item)
+}
+
+function normalizePageActionRequest(value: unknown, fallbackPageKey?: string): PageActionDispatchRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (record.type !== 'page.action.requested') return null
+  if (typeof record.requestId !== 'string' || typeof record.actionKey !== 'string') return null
+  const metadata = record.metadata && typeof record.metadata === 'object'
+    ? { ...record.metadata as Record<string, unknown> }
+    : {}
+  const pageKey = typeof record.pageKey === 'string' ? record.pageKey : fallbackPageKey
+  if (pageKey && !metadata.pageKey) metadata.pageKey = pageKey
+  return {
+    type: 'page.action.requested',
+    protocolVersion: typeof record.protocolVersion === 'string' ? record.protocolVersion : undefined,
+    requestId: record.requestId,
+    actionKey: record.actionKey,
+    title: typeof record.title === 'string' ? record.title : undefined,
+    args: record.args && typeof record.args === 'object' ? record.args as Record<string, unknown> : undefined,
+    target: record.target && typeof record.target === 'object' ? record.target as Record<string, unknown> : undefined,
+    confirm: record.confirm === true,
+    metadata,
+  }
+}
+
+async function executeWindowPageBridgeAction(
+  request: PageActionDispatchRequest,
+  responseMetadata?: Record<string, unknown>,
+): Promise<PageActionResult | null> {
+  const globalBridge = typeof window !== 'undefined'
+    ? (window as Window & { __REACHAI_PAGE_BRIDGE__?: ReachAiWindowPageBridge }).__REACHAI_PAGE_BRIDGE__
+    : undefined
+  if (!globalBridge || typeof globalBridge.execute !== 'function') return null
+  const pageKey = pageKeyFromRequest(request) || pageKeyFromMetadata(responseMetadata)
+  if (!pageKey) {
+    return {
+      protocolVersion: request.protocolVersion || '1.0',
+      type: 'page.action.result',
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      status: 'ACTION_NOT_FOUND',
+      error: 'Page action pageKey is missing for window.__REACHAI_PAGE_BRIDGE__ fallback',
+    }
+  }
+  try {
+    const raw = await globalBridge.execute(pageKey, request.actionKey, request.args || {}, {
+      confirmed: true,
+      requestId: request.requestId,
+    })
+    const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : { data: raw }
+    const rawStatus = String(record.status || 'SUCCESS').toUpperCase()
+    const success = rawStatus === 'SUCCESS'
+    const error = record.error && typeof record.error === 'object'
+      ? String((record.error as Record<string, unknown>).message || record.message || '')
+      : String(record.message || '')
+    return {
+      protocolVersion: request.protocolVersion || '1.0',
+      type: 'page.action.result',
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      status: success ? 'SUCCESS' : 'FAILED',
+      data: record.data ?? raw,
+      error: success ? undefined : error || `Page action returned ${rawStatus}`,
+    }
+  } catch (error) {
+    return {
+      protocolVersion: request.protocolVersion || '1.0',
+      type: 'page.action.result',
+      requestId: request.requestId,
+      actionKey: request.actionKey,
+      status: 'FAILED',
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+function pageKeyFromRequest(request: PageActionDispatchRequest): string | undefined {
+  const metadataPageKey = request.metadata?.pageKey
+  return typeof metadataPageKey === 'string' && metadataPageKey.trim() ? metadataPageKey.trim() : undefined
+}
+
+function pageKeyFromMetadata(metadata?: Record<string, unknown>): string | undefined {
+  const pageKey = metadata?.pageKey
+  return typeof pageKey === 'string' && pageKey.trim() ? pageKey.trim() : undefined
+}
+
+function pageMetadata(page?: EafPageDescriptor): Record<string, unknown> {
+  return page?.pageKey ? { pageKey: page.pageKey } : {}
 }
 
 function splitSseFrames(buffer: string): { complete: string[]; remainder: string } {

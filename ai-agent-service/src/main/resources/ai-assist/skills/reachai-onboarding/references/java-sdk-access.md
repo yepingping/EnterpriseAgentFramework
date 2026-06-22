@@ -2,6 +2,16 @@
 
 Use this reference after reading the onboarding manifest.
 
+## Platform Response Shapes
+
+| API family | `ApiResult`? | Read from |
+| --- | --- | --- |
+| Embed: token exchange, sessions, messages, page-actions | Yes | `data.xxx` |
+| Agent provisioning | No | `agent.keySlug` |
+| Access sessions, sdk-access-check, onboarding-manifest | No | top-level fields |
+
+Do not default every platform API to `data.` or to top-level fields. See `references/platform-apis.md` for details.
+
 ## Module Placement
 
 - Add `reachai-spring-boot2-starter` to the runnable Spring Boot application module.
@@ -108,8 +118,9 @@ For request DTOs, annotate important fields with `@ReachParam` so generated para
 SDK onboarding is not complete if the business gateway is untouched and the business front end has no safe token path.
 
 Before changing gateway or front-end code, read the manifest's `embed` section:
-- Call `agentProvisioning.provisionAgentUrl` when present. It creates or reuses the project `PAGE_COPILOT` Agent and default Workflow binding.
-- Use the response `agent.keySlug` as the front-end `agentId`. Store it in a local variable such as `provisionedAgentKeySlug` during the integration.
+- Call `agentProvisioning.provisionAgentUrl` from the AI coding tool, local shell, or server-side integration step when present. It creates or reuses the project `PAGE_COPILOT` Agent and default Workflow binding.
+- Use the response `agent.keySlug` as the front-end `agentId`. Store only that key slug in business front-end configuration after provisioning succeeds.
+- Do not call `agentProvisioning.provisionAgentUrl` from browser runtime code, and never put `aiCodingKey` in browser configuration or bundles.
 - If provisioning is unavailable, prefer `agentProvisioning.defaultKeySlug`, then `agentWorkflow.globalAgentKeySlug`, then `embed.defaultAgentKeySlug`.
 - Use `embed.defaultAgentId` only when no key slug is available.
 - Treat `embed.allowedAgents` as the platform-approved list. Do not invent a new `agentId` in the business repo.
@@ -161,6 +172,8 @@ The broker must:
 - Map the current user to ReachAI `principal`, with `principal.externalUserId` required.
 - Use the project `appKey/appSecret` server-side to sign a call to ReachAI `POST /api/embed/token/exchange`.
 - Forward `pageKey`, `pageInstanceId`, `route`, and `origin` into the token exchange body.
+- Parse the wrapped ReachAI `ApiResult` response and read `data.token` / `data.expiresIn`; a fallback for top-level `token` / `expiresIn` is fine, but do not only read top-level fields.
+- Add a mock test or local assertion for `{"code":200,"message":"success","data":{"token":"jwt","expiresIn":600}}` and verify the broker returns that token to the browser.
 - Cache only short-lived embed tokens when appropriate.
 - Return only the issued embed token and expiry metadata to the browser.
 
@@ -168,20 +181,21 @@ Never place `appSecret`, registry signatures, or project-level private keys in b
 Never use the business login token as the chat session token. The business login token is only for calling the broker; `/api/reachai/embed/**`, `/api/embed/chat/sessions`, and message APIs must receive the broker-returned ReachAI embed token.
 Chat message calls must use `POST /api/embed/chat/sessions/{sessionId}/messages` or the `/messages/stream` variant with body `{ "message": "..." }`.
 Do not send ReachAI chat requests as { "content": "..." }, { "text": "..." }, or { "question": "..." }; map any business UI field to `message` at the ReachAI API boundary.
+Chat responses are wrapped ApiResult objects. Top-level `code`/`message` describe transport status only; never render top-level `message: "success"` as the assistant reply. Render `data.answer` first, with old-shape fallback only under `data.reply`, `data.message`, or `data.content`.
+Treat `data.metadata.pageActionQueue` as the preferred UI/Page Action queue. Treat `data.uiRequest` and `data.uiRequest.extension.pageActionRequest` as compatible single-action instructions. Execute them through the current page bridge and report each request id back to `/api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result`; do not only render `data.answer`.
+
+Page Action result posted to Embed API: platform DTO accepts `status` string and `error` string. Bridge handlers may use richer internal statuses (`FAILED`, `CANCELLED`, ...); map to `SUCCESS` or an appropriate string `status`/`error` at the API boundary. See `references/platform-apis.md` for Embed vs bare JSON response shapes.
 
 ## Front-End Embed Integration
 
 Add the ReachAI chat/embed entry in the real business front end when that front end is in scope. Do not stop at backend annotations if a UI module is present.
 
-Use a token provider that calls the business gateway token broker:
+Use a token provider that calls the business gateway token broker. Before adding runtime front-end code, call Agent provisioning from the AI coding tool, local shell, or server-side integration step; use `agent.keySlug` from the bare JSON response (not `data.agent.keySlug`) as browser configuration:
 
 ```ts
-const provisionedAgentKeySlug =
-  agentProvisionResponse.agent.keySlug ||
-  manifest.agentProvisioning?.defaultKeySlug ||
-  manifest.agentWorkflow?.globalAgentKeySlug ||
-  manifest.embed.defaultAgentKeySlug ||
-  manifest.embed.defaultAgentId
+// Set this from the provisioning response's top-level agent.keySlug.
+// Do not call the provisioning API from browser runtime code or expose aiCodingKey.
+const provisionedAgentKeySlug = '<provisioned-agent-key-slug>'
 
 const tokenProvider = async () => {
   const query = new URLSearchParams({
@@ -194,18 +208,23 @@ const tokenProvider = async () => {
   })
   const response = await fetch('/api/reachai/embed-token?' + query)
   const payload = await response.json()
-  return payload.data?.token || payload.token
+  if (payload.code && payload.code !== 200 && payload.code !== 0) {
+    throw new Error(payload.message || 'embed token broker failed')
+  }
+  const token = payload.data?.token || payload.token
+  if (!token) throw new Error('ReachAI embed token missing')
+  return token
 }
 ```
 
-The front end should pass `pageInstanceId`, `route`, and `origin` so ReachAI can bind chat sessions, audit events, and page actions to the exact page instance.
+The front end should pass `pageKey`, `pageInstanceId`, `route`, and `origin` so ReachAI can bind chat sessions, audit events, and page actions to the exact page instance. Use the same values in token exchange and session create.
 
 When creating the global chat entry, pass the same page descriptor to the SDK so the chat session can resolve the page Workflow:
 
 ```ts
 createEafChat({
   mount: '#reachai-chat',
-  apiBase: '/api/reachai/embed',
+  apiBase: 'http://localhost:18603',
   agentId: provisionedAgentKeySlug,
   tokenProvider,
   page: {
@@ -214,6 +233,8 @@ createEafChat({
   },
 })
 ```
+
+`apiBase` must be the ReachAI platform origin (or a gateway host that exposes **`/api/embed/**`**). The SDK requests `${apiBase}/api/embed/chat/sessions`. **Do not** set `apiBase: '/api/reachai/embed'`; that becomes `/api/reachai/embed/api/embed/...`. If the gateway only proxies `/api/reachai/embed/**`, add a `/api/embed/**` route or keep `apiBase` as the ReachAI origin for direct browser access.
 
 Do not create one chat button per Workflow. Keep one global embedded AI button and let ReachAI resolve the page/action/intent Workflow from `pageKey` and `ai_agent_workflow_binding`.
 

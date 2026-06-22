@@ -24,6 +24,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -325,6 +326,7 @@ public class AiAssistController {
             AiAccessSessionService.AccessSessionView session = accessSessionService.getOrCreatePageAssistantLatest(
                     projectId,
                     new AiAccessSessionService.PageAssistantSessionRequest(toolName, pageKey, routePattern, actionKeys));
+            String effectiveAiCodingKey = resolveEffectiveAiCodingKey(project, aiCodingKey);
             String manifestUrl = baseUrl + "/api/ai-assist/projects/" + projectId + "/page-assistant/onboarding-manifest";
             String latestSessionUrl = baseUrl + "/api/ai-assist/projects/" + projectId + "/page-assistant/sessions/latest";
             String stepReportUrl = baseUrl + "/api/ai-assist/projects/" + projectId
@@ -340,14 +342,14 @@ public class AiAssistController {
             String skillPackageUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME + "/latest.zip";
             String scriptDownloadUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME
                     + "/scripts/reachai-page-assistant.ps1";
-            if (StringUtils.hasText(aiCodingKey)) {
-                manifestUrl = appendQuery(manifestUrl, "aiCodingKey", aiCodingKey);
-                latestSessionUrl = appendQuery(latestSessionUrl, "aiCodingKey", aiCodingKey);
-                stepReportUrl = appendQuery(stepReportUrl, "aiCodingKey", aiCodingKey);
-                targetBindUrl = appendQuery(targetBindUrl, "aiCodingKey", aiCodingKey);
-                catalogSyncUrl = appendQuery(catalogSyncUrl, "aiCodingKey", aiCodingKey);
-                checksRunUrl = appendQuery(checksRunUrl, "aiCodingKey", aiCodingKey);
-                registerPageUrl = appendQuery(registerPageUrl, "aiCodingKey", aiCodingKey);
+            if (StringUtils.hasText(effectiveAiCodingKey)) {
+                manifestUrl = appendQuery(manifestUrl, "aiCodingKey", effectiveAiCodingKey);
+                latestSessionUrl = appendQuery(latestSessionUrl, "aiCodingKey", effectiveAiCodingKey);
+                stepReportUrl = appendQuery(stepReportUrl, "aiCodingKey", effectiveAiCodingKey);
+                targetBindUrl = appendQuery(targetBindUrl, "aiCodingKey", effectiveAiCodingKey);
+                catalogSyncUrl = appendQuery(catalogSyncUrl, "aiCodingKey", effectiveAiCodingKey);
+                checksRunUrl = appendQuery(checksRunUrl, "aiCodingKey", effectiveAiCodingKey);
+                registerPageUrl = appendQuery(registerPageUrl, "aiCodingKey", effectiveAiCodingKey);
             }
             String resolvedPageKey = session.targetPageKey();
             String resolvedRoute = session.targetRoute();
@@ -536,6 +538,21 @@ public class AiAssistController {
         }
         try {
             return ResponseEntity.ok(accessSessionService.reportWorkflowAiCodingResult(projectId, sessionId, request));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/workflow-ai-coding-result")
+    public ResponseEntity<?> resetPageAssistantWorkflowAiCodingResult(@PathVariable Long projectId,
+                                                                      @PathVariable String sessionId,
+                                                                      @RequestParam(value = "deleteWorkflow", defaultValue = "true") boolean deleteWorkflow,
+                                                                      @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey) {
+        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+            return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
+        }
+        try {
+            return ResponseEntity.ok(accessSessionService.resetWorkflowAiCodingResult(projectId, sessionId, deleteWorkflow));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
         }
@@ -795,6 +812,18 @@ public class AiAssistController {
         return ".\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl \""
                 + manifestUrl + "\" -FrontendUrl \"<业务前端地址>\" -Route \""
                 + resolvedRoute + "\" -PageKey \"" + resolvedPageKey + "\"";
+    }
+
+    private static String resolveEffectiveAiCodingKey(ScanProjectEntity project, String requestAiCodingKey) {
+        if (StringUtils.hasText(requestAiCodingKey)) {
+            return requestAiCodingKey.trim();
+        }
+        if (project != null
+                && Boolean.TRUE.equals(project.getAiCodingAccessEnabled())
+                && StringUtils.hasText(project.getAiCodingAccessKey())) {
+            return project.getAiCodingAccessKey().trim();
+        }
+        return null;
     }
 
     @PostMapping("/projects/{projectId}/access-sessions/{sessionId}/checks/run")

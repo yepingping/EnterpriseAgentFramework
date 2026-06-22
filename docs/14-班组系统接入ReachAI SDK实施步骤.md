@@ -285,6 +285,22 @@ POST /api/embed/token/exchange
 5. 按 `projectCode + agentId + pageInstanceId + route + origin + externalUserId` 缓存短期 token。
 6. 返回中台签发的 embed token 给前端。
 
+ReachAI token exchange 成功响应是统一 `ApiResult`，不是顶层 token：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "token": "jwt",
+    "expiresIn": 600,
+    "sessionHint": {}
+  }
+}
+```
+
+网关 broker 必须从 `data.token` / `data.expiresIn` 取值；可以兼容历史顶层 `token` / `expiresIn`，但不能只读取顶层字段。实现时需要用上面的包装响应做 mock 单测或本地断言，避免把单路径 helper 误用成 `token.data.token`。
+
 ## 6. 班组前端接入步骤
 
 ### 6.1 增加 ReachAI 前端配置
@@ -312,10 +328,10 @@ reachAi = {
 | 配置 | 含义 |
 | --- | --- |
 | `enabled` | 是否显示嵌入式助手 |
-| `apiBase` | ReachAI Chat API 地址 |
+| `apiBase` | ReachAI Chat API 地址（ReachAI 平台 origin；SDK 请求 `${apiBase}/api/embed/**`。不要写成 `/api/reachai/embed`） |
 | `tokenPath` | 通过业务网关申请 embed token 的路径 |
 | `projectCode` | 当前业务系统项目编码 |
-| `agentId` | 当前页面使用的 Agent |
+| `agentId` | 页面 copilot Agent 的 keySlug；应先 provisioning 获取 `agent.keySlug`，不要用展示名 |
 
 SDK 接入项目的前端配置不再包含 `pageRegistry.appSecret`。项目级 `appSecret` 只保存在业务后端或网关侧，用于服务端到服务端申请 embed token、注册能力和平台调用业务接口时的短期 invocation token 签发链路。
 

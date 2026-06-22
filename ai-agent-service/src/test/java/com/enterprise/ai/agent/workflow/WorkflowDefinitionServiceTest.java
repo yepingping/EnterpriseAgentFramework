@@ -121,6 +121,7 @@ class WorkflowDefinitionServiceTest {
         entity.setProjectCode("demo");
         entity.setKeySlug(keySlug);
         entity.setName("Page Search");
+        entity.setStatus("DRAFT");
         entity.setGraphSpecJson(graphSpecJson);
         return entity;
     }

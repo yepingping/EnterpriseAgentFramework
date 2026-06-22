@@ -311,6 +311,15 @@
               </div>
               <div class="workflow-ai-coding-result-actions">
                 <el-button size="small" @click="openAiCodingWorkflowStudio">打开 Studio</el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="workflowAiCodingResetting"
+                  @click="resetAiCodingWorkflowDraft"
+                >
+                  删除并重新生成
+                </el-button>
                 <el-button size="small" type="primary" @click="useAiCodingWorkflowDraft">使用该 Workflow 继续</el-button>
               </div>
             </div>
@@ -909,6 +918,15 @@
           </div>
           <div class="workflow-ai-coding-result-actions">
             <el-button size="small" @click="openAiCodingWorkflowStudio">打开 Studio</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :loading="workflowAiCodingResetting"
+              @click="resetAiCodingWorkflowDraft"
+            >
+              删除并重新生成
+            </el-button>
             <el-button size="small" type="primary" @click="useAiCodingWorkflowDraft">使用该 Workflow 继续</el-button>
           </div>
         </div>
@@ -966,6 +984,7 @@ import {
   getLatestPageAssistantAccessSession,
   getPageAssistantOnboardingManifest,
   getScanProjects,
+  resetPageAssistantWorkflowAiCodingResult,
   runPageAssistantAccessSessionChecks,
 } from '@/api/scanProject'
 import type { AgentEntry, WorkflowDefinitionDraft, WorkflowDraftGenerationResult, WorkflowDraftResource, PageAssistantWorkflowBindingResult } from '@/types/workflow'
@@ -1019,6 +1038,7 @@ const aiPromptTool = ref<'Cursor' | 'Codex' | 'Claude Code'>('Cursor')
 const workflowAiCodingPromptDialogVisible = ref(false)
 const workflowAiCodingPromptCopied = ref(false)
 const workflowAiCodingPromptTool = ref<'Cursor' | 'Codex' | 'Claude Code'>('Cursor')
+const workflowAiCodingResetting = ref(false)
 const pageAssistantManifest = ref<PageAssistantOnboardingManifest | null>(null)
 const pageAssistantSession = ref<AiAccessSession | null>(null)
 const pageAssistantSessions = ref<PageAssistantSessionSummary[]>([])
@@ -1140,9 +1160,9 @@ const pageAssistantAccessGroups = computed(() => {
 })
 const pageAssistantAccessCount = computed(() => pageAssistantSessions.value.length)
 const sdkTemplate = computed(() => {
-  const pageKey = selectedPageKey.value || manualForm.pageKey || 'teamArchive.list'
-  const actionKey = selectedActions.value[0]?.actionKey || manualForm.actionKey || 'qmssmp.teamArchive.search'
-  return `pageBridge.registerAction({\n  pageKey: '${pageKey}',\n  actionKey: '${actionKey}',\n  title: '查询班组档案',\n  inputSchema: {\n    type: 'object',\n    properties: {\n      teamName: { type: 'string', description: '班组名称' }\n    }\n  },\n  sampleArgs: { teamName: '一班' },\n  handler: async (args) => {\n    // 调用当前页面已有查询函数，并返回执行结果\n    return await queryTeams(args)\n  }\n})`
+  const pageKey = selectedPageKey.value || manualForm.pageKey || 'example.list'
+  const actionKey = selectedActions.value[0]?.actionKey || manualForm.actionKey || 'example.search'
+  return `pageBridge.registerAction({\n  pageKey: '${pageKey}',\n  actionKey: '${actionKey}',\n  title: '查询当前列表',\n  inputSchema: {\n    type: 'object',\n    properties: {\n      keyword: { type: 'string', description: '筛选关键字' }\n    }\n  },\n  sampleArgs: { keyword: '示例' },\n  handler: async (args) => {\n    // 调用当前页面已有查询函数，并返回执行结果\n    return await queryList(args)\n  }\n})`
 })
 const highlightedSdkTemplate = computed(() => highlightSdkCode(sdkTemplate.value))
 const pageAssistantPromptActions = computed(() => selectedActions.value.length ? selectedActions.value : filteredActions.value)
@@ -1821,6 +1841,54 @@ function openAiCodingWorkflowStudio() {
   }
   const studioUrl = workflowAiCodingDraftEvidence.value.studioUrl || `/workflows/${workflowId}/studio`
   router.push(studioUrl.startsWith('/') ? studioUrl : `/${studioUrl}`)
+}
+
+async function resetAiCodingWorkflowDraft() {
+  const sessionId = pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId
+  if (!project.value?.id || !sessionId) {
+    ElMessage.warning('请先创建页面助手 AI 接入会话')
+    return
+  }
+  const workflowId = workflowAiCodingDraftEvidence.value.workflowId
+  try {
+    await ElMessageBox.confirm(
+      workflowId
+        ? `将删除 Workflow 草稿 ${workflowId} 并清空本次 AI Coding 回传结果；如果该 Workflow 已发布或已绑定，后端会拒绝删除。`
+        : '将清空本次 AI Coding 回传结果，然后可以复制提示词重新生成。',
+      '删除并重新生成',
+      {
+        type: 'warning',
+        confirmButtonText: '删除并重新生成',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+  workflowAiCodingResetting.value = true
+  try {
+    const { data } = await resetPageAssistantWorkflowAiCodingResult(
+      project.value.id,
+      sessionId,
+      true,
+      pageAssistantManifest.value?.aiCodingAccess.accessKey,
+    )
+    pageAssistantSession.value = data
+    if (createdWorkflowId.value === workflowId || draftSource.value === 'AI_CODING_RETURNED') {
+      createdWorkflowId.value = ''
+      bindingResult.value = null
+      pageCopilotAgent.value = null
+      draftSource.value = 'NONE'
+    }
+    workflowAiCodingPromptCopied.value = false
+    void loadPageAssistantSessions({ silent: true })
+    ElMessage.success('已删除旧草稿结果，可以重新复制提示词生成')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '删除并重新生成失败')
+  } finally {
+    workflowAiCodingResetting.value = false
+  }
 }
 
 async function confirmSwitchToPlatformGeneration() {

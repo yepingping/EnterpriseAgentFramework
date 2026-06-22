@@ -2,6 +2,41 @@
 
 The onboarding manifest is the primary contract for AI coding tools.
 
+## Platform Response Shapes
+
+Do not assume every ReachAI endpoint uses the same JSON wrapper.
+
+| API family | Wrapped in `ApiResult`? | Read business fields from |
+| --- | --- | --- |
+| Embed 对外 API：`POST /api/embed/token/exchange`、`/api/embed/chat/sessions`、messages、page-actions | **Yes** | `data.token`, `data.sessionId`, `data.answer`, ... |
+| `POST /api/ai-assist/projects/{projectId}/agents/provision` | **No** | `agent.keySlug` (not `data.agent.keySlug`) |
+| AI access sessions：`/api/ai-assist/.../access-sessions/**` | **No** | top-level `sessionId`, `status`, steps, ... |
+| `POST /api/scan-projects/{projectId}/sdk-access-check` | **No** | top-level `overallStatus`, `checks` |
+| `GET /api/ai-assist/projects/{projectId}/onboarding-manifest` | **No** | top-level `project`, `embed`, `agentProvisioning`, ... |
+
+Embed success example:
+
+```json
+{ "code": 200, "message": "success", "data": { "token": "jwt", "expiresIn": 600 } }
+```
+
+Top-level `message: "success"` is transport status only. Never render it as the assistant reply; read `data.answer` for chat messages.
+
+## Chat SDK apiBase
+
+The browser SDK (`eafChat.ts`) calls `${apiBase}/api/embed/chat/sessions` and `${apiBase}/api/embed/chat/sessions/{sessionId}/messages...`.
+
+- **Direct to ReachAI**: `apiBase = <ReachAI platform origin>`, e.g. `http://localhost:18603` → requests hit `<origin>/api/embed/**`.
+- **Via business gateway**: the gateway must proxy **`/api/embed/**`** to ReachAI `/api/embed/**`. Set `apiBase` to the origin that exposes that path (often the gateway host with `/api/embed` reachable, or still the ReachAI origin if the browser talks to ReachAI directly).
+
+**Wrong**: `apiBase: '/api/reachai/embed'` produces `/api/reachai/embed/api/embed/chat/sessions`.
+
+If the gateway only exposes `/api/reachai/embed/**` with rewrite to ReachAI, do not use that path as `apiBase` with the current SDK. Add a separate `/api/embed/**` route or change SDK path strategy later.
+
+The token broker path (e.g. `/api/reachai/embed-token`) is separate from Chat `apiBase`.
+
+Keep the same `pageKey`, `pageInstanceId`, `route`, and `origin` across token exchange, session create, and page actions.
+
 ## Manifest
 
 `GET /api/ai-assist/projects/{projectId}/onboarding-manifest?aiCodingKey={key}`
@@ -116,6 +151,25 @@ Minimum request shape:
 
 The business gateway must sign the platform request with the same project credential mechanism used by SDK registration. `principal.externalUserId` is required. Return only the issued token and expiry metadata to the browser.
 
+Successful token exchange responses are wrapped in ReachAI `ApiResult`:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "token": "jwt",
+    "expiresIn": 600,
+    "sessionHint": {
+      "agentId": "<provisionedAgentKeySlug>",
+      "pageInstanceId": "page-001"
+    }
+  }
+}
+```
+
+The token broker must read `data.token` and `data.expiresIn`. It may keep a backward-compatible fallback for top-level `token` / `expiresIn`, but must not only read top-level fields. If helper methods accept a single path, do not pass `("token", "data", "token")`; that means `token.data.token`, not "token or data.token". Add a mock assertion with the wrapped response shape above before marking the broker complete.
+
 Business front-end flow:
 
 1. Generate or reuse a stable page instance id for the current page.
@@ -139,7 +193,21 @@ filters:
   - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
 ```
 
+For browser Chat SDK traffic, prefer exposing **`/api/embed/**`** on the gateway (or use direct ReachAI `apiBase`). Do not set `apiBase: '/api/reachai/embed'` with the current SDK because it appends `/api/embed/...` again.
+
+Embed SSE ends with `message.completed`; there is no `done` event.
+
 Embed token cache note: front ends may cache the broker-returned embed token, but must expire it before `expiresIn`. If a chat session or message request returns `embed token is expired`, clear the cached embed token, call the broker again, and retry once.
+
+## Embed Chat Page Actions
+
+For non-streaming and streaming chat responses, `data.answer` is only the assistant text. If the response contains `data.metadata.pageActionQueue`, the browser must execute each queued item on the current page through the registered page bridge or the official SDK bridge, then post the result to:
+
+```text
+POST /api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result
+```
+
+Use `data.uiRequest.extension.pageActionRequest` only as a compatibility fallback when `pageActionQueue` is absent. Do not mark an embedded page query as complete just because `data.answer` says the system is querying; the page action result POSTs and the visible page state are part of the contract.
 
 ## Self-Check
 

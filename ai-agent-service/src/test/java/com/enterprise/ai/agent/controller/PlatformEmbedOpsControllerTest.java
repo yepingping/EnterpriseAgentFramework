@@ -11,6 +11,7 @@ import com.enterprise.ai.agent.identity.PageActionEventEntity;
 import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
 import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.identity.PageRegistryEntity;
+import com.enterprise.ai.agent.identity.PageRegistryManagementService;
 import com.enterprise.ai.agent.identity.PageRegistryMapper;
 import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
 import com.enterprise.ai.agent.workflow.WorkflowActionReferenceService;
@@ -218,9 +219,36 @@ class PlatformEmbedOpsControllerTest {
         assertTrue(actionCaptor.getValue().getMetadataJson().contains("MANUAL_DRAFT"));
     }
 
+    @Test
+    void deletePageDelegatesToManagementService() {
+        PageRegistryManagementService managementService = mock(PageRegistryManagementService.class);
+        PlatformEmbedOpsController controller = newController(
+                mock(PageActionRegistryMapper.class),
+                mock(PageActionEventMapper.class),
+                mock(WorkflowActionReferenceService.class),
+                managementService);
+        PageRegistryManagementService.PageRegistryDeleteResult result =
+                new PageRegistryManagementService.PageRegistryDeleteResult(
+                        7L, "team-system", "teamArchive.list", 1, 2, 1, 2, 3, 1, 4);
+        when(managementService.deletePageAndRelations(7L)).thenReturn(result);
+
+        ApiResult<PageRegistryManagementService.PageRegistryDeleteResult> response = controller.deletePage(7L);
+
+        assertEquals("teamArchive.list", response.getData().pageKey());
+        assertEquals(2, response.getData().deletedActions());
+        verify(managementService).deletePageAndRelations(7L);
+    }
+
     private PlatformEmbedOpsController newController(PageActionRegistryMapper actionMapper,
                                                     PageActionEventMapper eventMapper,
                                                     WorkflowActionReferenceService referenceService) {
+        return newController(actionMapper, eventMapper, referenceService, mock(PageRegistryManagementService.class));
+    }
+
+    private PlatformEmbedOpsController newController(PageActionRegistryMapper actionMapper,
+                                                    PageActionEventMapper eventMapper,
+                                                    WorkflowActionReferenceService referenceService,
+                                                    PageRegistryManagementService managementService) {
         return new PlatformEmbedOpsController(
                 mock(EmbedSessionMapper.class),
                 eventMapper,
@@ -230,6 +258,7 @@ class PlatformEmbedOpsControllerTest {
                 mock(RegistryCredentialMapper.class),
                 mock(PageRegistryMapper.class),
                 actionMapper,
+                managementService,
                 referenceService,
                 mock(EmbedAuditEventService.class),
                 objectMapper);
@@ -250,6 +279,7 @@ class PlatformEmbedOpsControllerTest {
                 mock(RegistryCredentialMapper.class),
                 pageMapper,
                 actionMapper,
+                mock(PageRegistryManagementService.class),
                 referenceService,
                 auditEventService,
                 objectMapper);

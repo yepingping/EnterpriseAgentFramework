@@ -13,6 +13,7 @@ Use this skill when a business frontend repository needs to connect one concrete
 - Registering a page through `endpoints.registerPageUrl` creates or reuses a `PAGE_ASSISTANT` Workflow and mounts it to the `PAGE_COPILOT` Agent through `ai_agent_workflow_binding`.
 - Workflow graph editing, debugging, publishing, versions, traces, and replay belong to Workflow Studio. Agent Studio is retired.
 - Never read, print, or commit app secrets. Only use the configured environment variable name.
+- `aiCodingKey` is for AI tools, local shell, or server-side onboarding calls only. Browser runtime code must not call `/api/ai-assist/**` page-assistant endpoints and must not store `aiCodingKey`, `provisionAgentUrl`, or `appSecret` in front-end configuration or bundles.
 
 ## Workflow
 
@@ -25,7 +26,9 @@ Use this skill when a business frontend repository needs to connect one concrete
 6. Mark high-risk row actions with `confirmRequired=true` and metadata `riskLevel=HIGH`.
 7. Run the business frontend build or type check.
 8. Register the page through `endpoints.registerPageUrl` so ReachAI can create or reuse the `PAGE_ASSISTANT` Workflow and Agent binding.
-9. Report files, action keys, build/static/browser verification, and remaining blockers.
+9. If the business frontend already has a custom embedded chat service and this task touches it, make sure it executes `data.metadata.pageActionQueue` (preferred) or `data.uiRequest.extension.pageActionRequest` through `window.__REACHAI_PAGE_BRIDGE__.execute(...)` and posts each result to `/api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result`. Do not only render `data.answer`.
+10. For component query libraries such as `@zhongruigroup/ngx-query` + `zr-table`, inspect the live query state that the table search actually reads. Do not report PASS if `setFilters` only writes a default template while the real Network request remains unfiltered.
+11. Report files, action keys, build/static/browser verification, and remaining blockers.
 
 ## Helper Script Delivery
 
@@ -52,6 +55,8 @@ Use this skill when a business frontend repository needs to connect one concrete
 - Runtime PASS requires `runtimeVerification` / `verification.browserRuntime` with `invokedActions` and successful `redactedResults`
 - FrontendUrl or HTTP 200 alone is WARN, not PASS
 - Without FrontendUrl / login / StorageState / Cookie, runtime must be `SKIPPED` or `WARN`, never `PASS`
+- Query-flow PASS requires an end-to-end evidence chain, not only handler `SUCCESS`: non-empty `setFilters` args, updated current page filters/state, a real business query request carrying the corresponding query parameter, and `readTable` from the refreshed table.
+- Embedded-chat query PASS also requires evidence that the chat response action queue was consumed: a `pageActionQueue` or `pageActionRequest` entry, bridge invokes for the requested action keys, and a POST to `/api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result` for each request id.
 - Helper verify uses Playwright when Node.js + `playwright` are available; optional `-StorageStatePath` for login state
 - Default readonly invoke: `getPageState`, `readTable`; never auto-invoke `openRowAction`
 - Use `-ProbeMutatingActions` only when explicitly probing `setFilters/search/reset`

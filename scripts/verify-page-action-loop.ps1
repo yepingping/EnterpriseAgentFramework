@@ -175,6 +175,7 @@ try {
     @{
       projectCode = $ProjectCode
       agentId = $AgentId
+      pageKey = $PageKey
       pageInstanceId = $pageInstanceId
       route = $Route
       origin = $Origin
@@ -191,6 +192,7 @@ try {
   $session = Unwrap-ApiResult (Invoke-JsonPost `
     "$base/api/embed/chat/sessions" `
     @{
+      pageKey = $PageKey
       pageInstanceId = $pageInstanceId
       route = $Route
       bridgeActions = @($ActionKey)

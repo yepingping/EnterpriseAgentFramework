@@ -2569,14 +2569,23 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
             values.forEach((target, expression) -> {
                 String key = asString(target);
                 if (!key.isBlank()) {
-                    Object resolved = expression instanceof String text
-                            ? resolveExpression(state, text)
-                            : expression;
+                    Object resolved = resolveConfiguredValue(state, expression);
                     putMappedArg(result, key, resolved);
                 }
             });
         }
         return result;
+    }
+
+    private Object resolveConfiguredValue(LangGraphState state, Object expression) {
+        if (!(expression instanceof String text)) {
+            return expression;
+        }
+        String trimmed = text.trim();
+        if (trimmed.contains("{{")) {
+            return renderTemplate(state, trimmed);
+        }
+        return resolveExpression(state, trimmed);
     }
 
     private Map<String, Object> extractParametersByExpression(LangGraphState state,
@@ -2628,28 +2637,188 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
                                                          Map<String, Object> config,
                                                          List<Map<String, Object>> fields) {
         String modelInstanceId = firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), state.value(MODEL_INSTANCE_ID, ""));
-        String schema = stringify(fields);
-        String prompt = "Extract JSON fields from the input. Return only a JSON object.\nSchema: "
-                + schema
-                + "\nInput:\n"
-                + renderModelInput(state);
+        String systemPrompt = firstNonBlank(
+                asString(config.get(SYSTEM_PROMPT)),
+                asString(config.get("prompt")),
+                buildDefaultParameterExtractSystemPrompt(fields));
+        String configuredUserPrompt = asString(config.get("userPrompt"));
+        String userPrompt = configuredUserPrompt.isBlank()
+                ? buildDefaultParameterExtractUserPrompt(state, fields)
+                : (configuredUserPrompt.contains("{{")
+                ? renderTemplate(state, configuredUserPrompt)
+                : configuredUserPrompt);
         ModelServiceClient.ModelChatResult result = modelServiceClient.chat(ModelServiceClient.ModelChatRequest.builder()
                 .modelInstanceId(modelInstanceId)
                 .messages(List.of(
                         ModelServiceClient.ModelChatRequest.ChatMessage.builder()
                                 .role("system")
-                                .content("You extract structured JSON parameters.")
+                                .content(systemPrompt)
                                 .build(),
                         ModelServiceClient.ModelChatRequest.ChatMessage.builder()
                                 .role("user")
-                                .content(prompt)
+                                .content(userPrompt)
                                 .build()))
                 .build());
         if (result == null || result.getCode() != SUCCESS_CODE || result.getData() == null) {
             String message = result == null ? "empty response" : result.getMessage();
             throw new IllegalStateException("parameter extraction model call failed: " + message);
         }
-        return parseJsonObject(nullToEmpty(result.getData().getContent()), "parameter extraction");
+        Map<String, Object> extracted = parseJsonObject(nullToEmpty(result.getData().getContent()), "parameter extraction");
+        enrichExtractedFieldsFromInput(stringify(state.value(INPUT).orElse("")), fields, extracted);
+        return extracted;
+    }
+
+    private String buildDefaultParameterExtractSystemPrompt(List<Map<String, Object>> fields) {
+        StringBuilder prompt = new StringBuilder("你是企业页面助手工作流中的筛选参数提取节点。")
+                .append("只输出 JSON 对象，不要输出解释、Markdown 或代码块。")
+                .append("用户未提及的字段不要编造，可省略该键或输出 null。");
+        if (fields == null || fields.isEmpty()) {
+            return prompt.toString();
+        }
+        prompt.append("字段定义：请根据字段的 name/key、label/title、description、aliases 理解语义，并且只使用字段定义中的真实键名。");
+        for (Map<String, Object> field : fields) {
+            String name = asString(field.get("name"));
+            if (name.isBlank()) {
+                continue;
+            }
+            String label = nullToEmpty(firstNonBlank(asString(field.get("label")), asString(field.get("title"))));
+            String description = asString(field.get("description"));
+            prompt.append("\n- ").append(name);
+            if (!label.isBlank()) {
+                prompt.append("，label/title=").append(label);
+            }
+            if (!description.isBlank()) {
+                prompt.append("，description=").append(description);
+            }
+            List<String> aliases = parameterFieldAliases(field);
+            if (!aliases.isEmpty()) {
+                prompt.append("，aliases=").append(String.join("/", aliases));
+            }
+        }
+        return prompt.toString();
+    }
+
+    private String buildDefaultParameterExtractUserPrompt(LangGraphState state, List<Map<String, Object>> fields) {
+        return "请从以下用户输入提取筛选字段，返回 JSON 对象。\nSchema: "
+                + stringify(fields)
+                + "\nInput:\n"
+                + renderModelInput(state);
+    }
+
+    private void enrichExtractedFieldsFromInput(String input,
+                                                List<Map<String, Object>> fields,
+                                                Map<String, Object> extracted) {
+        if (input == null || input.isBlank() || fields == null || fields.isEmpty() || extracted == null) {
+            return;
+        }
+        for (Map<String, Object> field : fields) {
+            String name = asString(field.get("name"));
+            if (name.isBlank() || !isBlankValue(extracted.get(name))) {
+                continue;
+            }
+            String matched = firstParameterFieldMatch(input, field);
+            if (!matched.isBlank()) {
+                extracted.put(name, coerceFieldValue(matched, asString(field.get("type"))));
+            }
+        }
+    }
+
+    private String firstParameterFieldMatch(String input, Map<String, Object> field) {
+        for (String regex : parameterFieldRegexes(field)) {
+            String matched = firstRegexGroup(input, regex);
+            if (!matched.isBlank()) {
+                return matched;
+            }
+        }
+        return "";
+    }
+
+    private List<String> parameterFieldRegexes(Map<String, Object> field) {
+        List<String> regexes = new ArrayList<>();
+        Object rawPatterns = firstPresent(field, "patterns", "regexPatterns", "regexes");
+        addPatternValues(regexes, rawPatterns);
+        Object metadataPatterns = asMap(field.get("metadata")).get("patterns");
+        addPatternValues(regexes, metadataPatterns);
+        String value = "([^，。,.\\s的]+)";
+        for (String alias : parameterFieldAliases(field)) {
+            regexes.add(Pattern.quote(alias) + "(?:为|是|叫|包含|包括|有|=|：|:)?\\s*" + value);
+        }
+        return regexes;
+    }
+
+    private List<String> parameterFieldAliases(Map<String, Object> field) {
+        List<String> aliases = new ArrayList<>();
+        addAliasCandidate(aliases, asString(field.get("label")));
+        addAliasCandidate(aliases, asString(field.get("title")));
+        addAliasCandidate(aliases, asString(field.get("displayName")));
+        addStringValues(aliases, field.get("aliases"));
+        addStringValues(aliases, field.get("synonyms"));
+        Map<String, Object> metadata = asMap(field.get("metadata"));
+        addStringValues(aliases, metadata.get("aliases"));
+        addStringValues(aliases, metadata.get("synonyms"));
+        splitAliasText(aliases, asString(field.get("description")));
+        String name = asString(field.get("name"));
+        return aliases.stream()
+                .map(String::trim)
+                .filter(alias -> !alias.isBlank())
+                .filter(alias -> !alias.equals(name))
+                .distinct()
+                .toList();
+    }
+
+    private void splitAliasText(List<String> aliases, String text) {
+        if (text.isBlank() || text.length() > 80) {
+            return;
+        }
+        for (String part : text.split("[/、,，;；|\\s]+")) {
+            addAliasCandidate(aliases, part);
+        }
+    }
+
+    private void addAliasCandidate(List<String> aliases, String value) {
+        String alias = value == null ? "" : value.trim();
+        if (alias.isBlank() || alias.length() > 30) {
+            return;
+        }
+        aliases.add(alias);
+    }
+
+    private void addStringValues(List<String> values, Object raw) {
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                addAliasCandidate(values, asString(item));
+            }
+            return;
+        }
+        splitAliasText(values, asString(raw));
+    }
+
+    private void addPatternValues(List<String> values, Object raw) {
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                String pattern = asString(item).trim();
+                if (!pattern.isBlank()) {
+                    values.add(pattern);
+                }
+            }
+            return;
+        }
+        String pattern = asString(raw).trim();
+        if (!pattern.isBlank()) {
+            values.add(pattern);
+        }
+    }
+
+    private Object firstPresent(Map<String, Object> map, String... keys) {
+        if (map == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+        }
+        return null;
     }
 
     private void validateExtractedFields(List<Map<String, Object>> fields, Map<String, Object> extracted) {

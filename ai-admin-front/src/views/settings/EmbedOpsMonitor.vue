@@ -90,6 +90,15 @@
             <span class="page-card-actions">
               <el-button size="small" type="primary" @click.stop="selectPage(page.pageKey)">动作详情</el-button>
               <el-button size="small" @click.stop="previewPage(page)">预览页面</el-button>
+              <el-button
+                size="small"
+                type="danger"
+                link
+                :loading="deletingPageId === page.id"
+                @click.stop="confirmDeletePage(page)"
+              >
+                删除
+              </el-button>
             </span>
           </span>
         </article>
@@ -330,10 +339,11 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChatDotRound, Clock, Cpu, Document, Grid, Lock, MagicStick, Refresh, Select } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import CommonStatusTag from '@/components/CommonStatusTag.vue'
 import {
   createEmbedRenderer,
+  deletePageRegistry,
   disableEmbedRenderer as disableEmbedRendererApi,
   listEmbedCredentialPolicies,
   listEmbedRenderers,
@@ -359,6 +369,7 @@ const credentialSaving = ref(false)
 const rendererLoading = ref(false)
 const rendererSaving = ref(false)
 const referenceLoading = ref(false)
+const deletingPageId = ref<number | null>(null)
 const pageRegistry = ref<PageRegistryView[]>([])
 const pageActionCatalog = ref<PageActionRegistryView[]>([])
 const actionReferences = ref<PageActionReferenceView[]>([])
@@ -647,6 +658,31 @@ function previewPage(page: PageRegistryView) {
   const url = origin ? `${origin.replace(/\/$/, '')}${routePath.startsWith('/') ? routePath : `/${routePath}`}` : routePath
   if (url) {
     window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+async function confirmDeletePage(page: PageRegistryView) {
+  const pageLabel = page.name || page.pageKey
+  try {
+    await ElMessageBox.confirm(
+      `确认删除页面「${pageLabel}」吗？将同时删除该页面的动作目录、嵌入式会话绑定及页面助手接入进度，此操作不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deletingPageId.value = page.id
+  try {
+    await deletePageRegistry(page.id)
+    if (selectedPageKey.value === page.pageKey) {
+      selectedPageKey.value = ''
+      actionDrawerVisible.value = false
+    }
+    ElMessage.success('页面及关联数据已删除')
+    await loadCatalog()
+  } finally {
+    deletingPageId.value = null
   }
 }
 

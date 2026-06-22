@@ -183,6 +183,19 @@ export interface PageActionManualDeclareResponse {
   action: PageActionRegistryView
 }
 
+export interface PageRegistryDeleteResult {
+  pageId: number
+  projectCode: string
+  pageKey: string
+  deletedPages: number
+  deletedActions: number
+  deletedEmbedSessions: number
+  deletedPageActionEvents: number
+  deletedEmbedChatEvents: number
+  deletedAccessSessions: number
+  deletedAccessSteps: number
+}
+
 export function listEmbedSessions(params: Record<string, unknown> = {}) {
   return agentRequest.get<EmbedSessionView[]>('/api/platform/embed/sessions', { params })
 }
@@ -193,6 +206,10 @@ export function listPageActionEvents(params: Record<string, unknown> = {}) {
 
 export function listPageRegistry(params: Record<string, unknown> = {}) {
   return agentRequest.get<PageRegistryView[]>('/api/platform/embed/pages', { params })
+}
+
+export function deletePageRegistry(id: number) {
+  return agentRequest.delete<PageRegistryDeleteResult>(`/api/platform/embed/pages/${id}`)
 }
 
 export function listPageActionCatalog(params: Record<string, unknown> = {}) {

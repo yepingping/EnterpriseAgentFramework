@@ -205,6 +205,25 @@ Use this node when extracting query/filter parameters from natural language. For
 
 If the workflow has `defaultModelInstanceId`, use that as `modelInstanceId`; otherwise pick an ACTIVE LLM from `context.availableModels`.
 
+For page-assistant filter extraction, `fields` must be derived from the current page action's `setFilters.inputSchema.properties` or `sampleArgs`. Keep each real field key/name, type, title/label, description, and aliases. The `systemPrompt` may document synonym mapping only from that current page schema; do not hard-code business fields from another page. Example: map "负责人" to `owner` only when the current schema explicitly defines `owner` with title/description/alias "负责人"; if the current schema uses `principalUserName`, use that field instead.
+
+### PAGE_ACTION args binding
+
+`PAGE_ACTION` `config.args` values are resolved by `resolveConfiguredMap` / `resolveExpression`, not only Mustache templates.
+
+Preferred expression form:
+
+```json
+{
+  "owner": "nodeOutput.extract_filters.owner",
+  "status": "nodeOutput.extract_filters.status"
+}
+```
+
+`{{ nodeOutput.extract_filters.owner }}` is also supported (rendered via template engine), but prefer the bare expression form above.
+
+Do not hard-code `null` placeholders in setFilters args.
+
 ## Patch Operations
 
 ### ADD_NODE
