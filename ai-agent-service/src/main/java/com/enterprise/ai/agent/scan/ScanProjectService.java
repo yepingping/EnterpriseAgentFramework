@@ -3,7 +3,7 @@ package com.enterprise.ai.agent.scan;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.enterprise.ai.agent.client.ScannerServiceClient;
+import com.enterprise.ai.agent.capability.catalog.client.ScannerServiceClient;
 import com.enterprise.ai.agent.graph.ApiGraphService;
 import com.enterprise.ai.agent.registry.ProjectInstanceEntity;
 import com.enterprise.ai.agent.registry.ProjectInstanceMapper;

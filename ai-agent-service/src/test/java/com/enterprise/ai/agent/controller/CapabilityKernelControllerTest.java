@@ -1,5 +1,7 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.capability.catalog.controller.CapabilityKernelController;
+import com.enterprise.ai.agent.runtime.host.controller.CapabilityRuntimeController;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;

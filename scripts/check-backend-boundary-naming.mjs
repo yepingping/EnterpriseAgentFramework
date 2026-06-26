@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 const root = process.cwd()
 let failures = 0
@@ -21,10 +22,45 @@ function assertFile(rel) {
   }
 }
 
+function assertNoFilesUnder(rel, suffix) {
+  const base = path.join(root, rel)
+  if (!fs.existsSync(base)) {
+    return
+  }
+  const matches = []
+  const stack = [base]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const target = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(target)
+      } else if (!suffix || entry.name.endsWith(suffix)) {
+        matches.push(path.relative(root, target).replace(/\\/g, '/'))
+      }
+    }
+  }
+  if (matches.length > 0) {
+    console.error(`[unexpected files] ${rel}`)
+    for (const match of matches) {
+      console.error(`  ${match}`)
+    }
+    failures += matches.length
+  }
+}
+
 function assertIncludes(rel, needle) {
   const text = read(rel)
   if (!text.includes(needle)) {
     console.error(`[missing text] ${rel}: ${needle}`)
+    failures += 1
+  }
+}
+
+function assertMatches(rel, pattern, description) {
+  const text = read(rel)
+  if (!pattern.test(text)) {
+    console.error(`[missing pattern] ${rel}: ${description}`)
     failures += 1
   }
 }
@@ -34,6 +70,69 @@ function assertNotIncludes(rel, needle) {
   if (text.includes(needle)) {
     console.error(`[stale text] ${rel}: ${needle}`)
     failures += 1
+  }
+}
+
+function addedDiffLines() {
+  let output = ''
+  try {
+    output = execFileSync('git', ['diff', '--no-ext-diff', '--unified=0', '--', '.'], {
+      cwd: root,
+      encoding: 'utf8'
+    })
+  } catch (error) {
+    console.error(`[git diff failed] ${error.message}`)
+    failures += 1
+    return []
+  }
+
+  const lines = []
+  let currentFile = ''
+  for (const line of output.split(/\r?\n/)) {
+    if (line.startsWith('+++ ')) {
+      currentFile = line.startsWith('+++ b/') ? line.slice(6) : ''
+      continue
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      lines.push({ file: currentFile, text: line.slice(1) })
+    }
+  }
+
+  try {
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', '.'], {
+      cwd: root,
+      encoding: 'utf8'
+    }).split(/\r?\n/).filter(Boolean)
+    for (const file of untracked) {
+      const abs = path.join(root, file)
+      if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
+        continue
+      }
+      const text = fs.readFileSync(abs, 'utf8')
+      for (const addedLine of text.split(/\r?\n/)) {
+        lines.push({ file, text: addedLine })
+      }
+    }
+  } catch (error) {
+    console.error(`[git ls-files failed] ${error.message}`)
+    failures += 1
+  }
+  return lines
+}
+
+function assertNoAddedText(pattern, description, allowedFiles = new Set()) {
+  const matches = addedDiffLines().filter(({ file, text }) => {
+    if (!file || allowedFiles.has(file)) {
+      return false
+    }
+    return pattern.test(text)
+  })
+  if (matches.length > 0) {
+    console.error(`[stale added text] ${description}`)
+    for (const match of matches.slice(0, 10)) {
+      console.error(`  ${match.file}: ${match.text}`)
+    }
+    failures += matches.length
   }
 }
 
@@ -57,9 +156,206 @@ assertIncludes('ai-admin-front/src/api/request.ts', 'Knowledge / Retrieval deplo
 assertIncludes('ai-admin-front/src/views/dashboard/Dashboard.vue', 'Knowledge / Retrieval')
 assertIncludes('ai-admin-front/src/views/dashboard/Dashboard.vue', "name: 'ai-skills-service'")
 assertIncludes('ai-admin-front/src/views/dashboard/Dashboard.vue', "healthPath: '/ai/actuator/health'")
-assertIncludes('ai-admin-front/vite.config.ts', "target: 'http://localhost:18602'")
-assertIncludes('ai-admin-front/vite.config.ts', "target: 'http://localhost:18603'")
-assertIncludes('ai-admin-front/vite.config.ts', "target: 'http://localhost:18601'")
+assertIncludes('ai-agent-service/src/main/resources/application.yml', 'port: 18603')
+assertIncludes('ai-skills-service/src/main/resources/application.yml', 'port: 18602')
+assertIncludes('ai-model-service/src/main/resources/application.yml', 'port: 18601')
+assertMatches('ai-admin-front/vite.config.ts', /['"]\/ai['"]:\s*\{[\s\S]*?target:\s*['"]http:\/\/localhost:18602['"]/, '/ai proxy -> 18602')
+assertMatches('ai-admin-front/vite.config.ts', /['"]\/api['"]:\s*\{[\s\S]*?target:\s*['"]http:\/\/localhost:18603['"]/, '/api proxy -> 18603')
+assertMatches('ai-admin-front/vite.config.ts', /\^\/model\/\(providers\|instances\|chat\)[\s\S]*?target:\s*['"]http:\/\/localhost:18601['"]/, '/model proxy -> 18601')
+assertNoFilesUnder('ai-agent-service/src/main/java/com/enterprise/ai/agent/controller', '.java')
+assertNoFilesUnder('ai-agent-service/src/main/java/com/enterprise/ai/agent/service', '.java')
+
+const keyApiPaths = [
+  ['ai-model-service/src/main/java/com/enterprise/ai/model/controller/ModelController.java', '@RequestMapping("/model")'],
+  ['ai-model-service/src/main/java/com/enterprise/ai/model/controller/OpenAIProxyController.java', '@RequestMapping("/model/openai-proxy")'],
+  ['ai-model-service/src/main/java/com/enterprise/ai/model/instance/ModelInstanceController.java', '@RequestMapping("/model/instances")'],
+  ['ai-skills-service/src/main/java/com/enterprise/ai/controller/KnowledgeController.java', '@RequestMapping("/knowledge")'],
+  ['ai-skills-service/src/main/java/com/enterprise/ai/controller/RagController.java', '@RequestMapping("/rag")'],
+  ['ai-skills-service/src/main/java/com/enterprise/ai/controller/RetrievalController.java', '@RequestMapping("/retrieval")'],
+  ['ai-skills-service/src/main/java/com/enterprise/ai/controller/ScannerController.java', '@RequestMapping("/scanner")'],
+  ['ai-skills-service/src/main/java/com/enterprise/ai/bizindex/controller/BizIndexController.java', '@RequestMapping("/biz-index")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/AiRegistryController.java', '@RequestMapping("/api/registry")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/ApiAssetController.java', '@RequestMapping("/api/api-assets")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/ApiGraphController.java', '@RequestMapping("/api/api-graph/projects/{projectId}")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/CapabilityKernelController.java', '@RequestMapping("/api/capabilities")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/CompositionController.java', '@RequestMapping({"/api/compositions", "/api/skills"})'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/DomainController.java', '@RequestMapping("/api/domains")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/ScanProjectController.java', '@RequestMapping("/api/scan-projects")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/SemanticDocController.java', '@RequestMapping("/api")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/SkillMiningController.java', '@RequestMapping({"/api/skill-mining", "/api/capability-mining"})'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/ToolController.java', '@RequestMapping("/api/tools")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/ToolRetrievalController.java', '@RequestMapping("/api/tool-retrieval")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/AgentEntryController.java', '@RequestMapping("/api/agents")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/AgentController.java', '@RequestMapping("/api/agent")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/AgentInteractionController.java', '@RequestMapping("/api/agent/interactions")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/AgentWorkflowBindingController.java', '@RequestMapping("/api/agents/{agentId}/workflow-bindings")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/CapabilityRuntimeController.java', '@RequestMapping("/api/runtime")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/ChatController.java', '@RequestMapping("/api/chat")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/RuntimeRegistryController.java', '@RequestMapping("/api/runtimes")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/ExecutableDebugSessionController.java', '@RequestMapping("/api/runtime/debug-sessions")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/TraceController.java', '@RequestMapping("/api/traces")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/RunOpsController.java', '@RequestMapping("/api/runops")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowCredentialController.java', '@RequestMapping("/api/agent/workflow-credentials")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowAiCodingCatalogController.java', '@RequestMapping("/api/workflows/ai-coding")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowAiCodingController.java', '@RequestMapping("/api/workflows/{workflowId}/ai-coding")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowDefinitionController.java', '@RequestMapping("/api/workflows")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowStudioDraftController.java', '@RequestMapping("/api/workflows/studio")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowStudioDebugController.java', '@RequestMapping("/api/workflows/studio")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/WorkflowVersionController.java', '@RequestMapping("/api/workflows/{workflowId}/versions")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AgentGatewayController.java', '@RequestMapping("/api/v1/agents")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/A2aAdminController.java', '@RequestMapping("/api/admin/a2a")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AiAssistController.java', '@RequestMapping("/api/ai-assist")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AiCodingContextCandidateController.java', '@RequestMapping("/api/ai-coding/projects/{projectId}/context-candidates")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AiCodingGatewayController.java', '@RequestMapping("/api/ai-coding/projects/{projectId}")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AiCodingProjectAssistController.java', '@RequestMapping("/api/ai-coding/projects/{projectId}")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/ContextController.java', '@RequestMapping("/api/context")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/ContextMemoryCandidateController.java', '@RequestMapping("/api/context/memory/candidates")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/ContextRuntimeUserMappingController.java', '@RequestMapping("/api/context/runtime-user-mappings")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/EmbedChatController.java', '@RequestMapping("/api/embed")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/EmbedMemoryCandidateController.java', '@RequestMapping("/api/embed/sessions/{sessionId}/memory/candidates")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/McpAdminController.java', '@RequestMapping("/api/mcp")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/AiGatewayController.java', '@RequestMapping("/gateway")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/PlatformEmbedOpsController.java', '@RequestMapping("/api/platform/embed")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/PlatformAuthController.java', '@RequestMapping("/api/platform")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/SlotDictController.java', '@RequestMapping("/api/slot-dict")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/SlotExtractLogController.java', '@RequestMapping("/api")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/SlotExtractorController.java', '@RequestMapping("/api/slot-extractors")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/ToolAclController.java', '@RequestMapping("/api/tool-acl")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/mcp/McpServerEndpoint.java', '@RequestMapping("/mcp")'],
+  ['ai-agent-service/src/main/java/com/enterprise/ai/agent/a2a/A2aServerEndpoint.java', '@RequestMapping("/a2a")']
+]
+
+for (const [rel, apiPath] of keyApiPaths) {
+  assertIncludes(rel, apiPath)
+}
+
+const platformControlControllers = [
+  'A2aAdminController.java',
+  'AgentGatewayController.java',
+  'AiAssistController.java',
+  'AiCodingContextCandidateController.java',
+  'AiCodingGatewayController.java',
+  'AiCodingProjectAssistController.java',
+  'AiGatewayController.java',
+  'ContextController.java',
+  'ContextMemoryCandidateController.java',
+  'ContextRuntimeUserMappingController.java',
+  'EmbedChatController.java',
+  'EmbedMemoryCandidateController.java',
+  'MarketController.java',
+  'McpAdminController.java',
+  'PlatformAuthController.java',
+  'PlatformAuthProviderController.java',
+  'PlatformBusinessUserController.java',
+  'PlatformEmbedOpsController.java',
+  'SlotDictController.java',
+  'SlotExtractLogController.java',
+  'SlotExtractorController.java',
+  'ToolAclController.java',
+  'TraceCenterController.java'
+]
+
+for (const fileName of platformControlControllers) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/controller/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.platform.control.controller;')
+}
+
+const platformControlConfigs = [
+  'ToolRateLimitProperties.java'
+]
+
+for (const fileName of platformControlConfigs) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/platform/control/config/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.platform.control.config;')
+}
+
+const capabilityCatalogControllers = [
+  'AiRegistryController.java',
+  'ApiAssetController.java',
+  'ApiGraphController.java',
+  'CapabilityKernelController.java',
+  'CompositionController.java',
+  'DomainController.java',
+  'ScanProjectController.java',
+  'SemanticDocController.java',
+  'SkillMiningController.java',
+  'ToolController.java',
+  'ToolRetrievalController.java'
+]
+
+for (const fileName of capabilityCatalogControllers) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/controller/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.capability.catalog.controller;')
+}
+
+const capabilityCatalogClients = [
+  'ScannerServiceClient.java'
+]
+
+for (const fileName of capabilityCatalogClients) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/client/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.capability.catalog.client;')
+}
+
+const capabilityCatalogConfigs = [
+  'DomainProperties.java',
+  'ToolRetrievalProperties.java'
+]
+
+for (const fileName of capabilityCatalogConfigs) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/capability/catalog/config/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.capability.catalog.config;')
+}
+
+const runtimeHostControllers = [
+  'AgentController.java',
+  'AgentEntryController.java',
+  'AgentInteractionController.java',
+  'AgentWorkflowBindingController.java',
+  'CapabilityRuntimeController.java',
+  'ChatController.java',
+  'ExecutableDebugSessionController.java',
+  'RunOpsController.java',
+  'RuntimeRegistryController.java',
+  'TraceController.java',
+  'WorkflowCredentialController.java',
+  'WorkflowAiCodingCatalogController.java',
+  'WorkflowAiCodingController.java',
+  'WorkflowAiCodingControllerAdvice.java',
+  'WorkflowDefinitionController.java',
+  'WorkflowStudioDebugController.java',
+  'WorkflowStudioDraftController.java',
+  'WorkflowVersionController.java'
+]
+
+for (const fileName of runtimeHostControllers) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/controller/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.runtime.host.controller;')
+}
+
+const runtimeHostServices = [
+  'AgentService.java',
+  'ChatService.java',
+  'IntentService.java',
+  'LightweightToolCaller.java',
+  'RouteEvaluationService.java'
+]
+
+for (const fileName of runtimeHostServices) {
+  const rel = `ai-agent-service/src/main/java/com/enterprise/ai/agent/runtime/host/service/${fileName}`
+  assertFile(rel)
+  assertIncludes(rel, 'package com.enterprise.ai.agent.runtime.host.service;')
+}
+
+const allowedDiffScanFiles = new Set(['scripts/check-backend-boundary-naming.mjs'])
+assertNoAddedText(/\bAI Skills Service\b/, 'do not add new mainline "AI Skills Service" wording', allowedDiffScanFiles)
+assertNoAddedText(/\bAgent Studio\b/, 'do not add new wording that reverts Workflow Studio back to Agent Studio', allowedDiffScanFiles)
 
 if (failures > 0) {
   console.error(`backend boundary naming check failed: ${failures} issue(s)`)

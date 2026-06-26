@@ -5,7 +5,7 @@ import com.enterprise.ai.agent.acl.ToolAclService;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.agentscope.adapter.AiToolAgentAdapter;
 import com.enterprise.ai.agent.config.LLMConfig;
-import com.enterprise.ai.agent.config.ToolRetrievalProperties;
+import com.enterprise.ai.agent.capability.catalog.config.ToolRetrievalProperties;
 import com.enterprise.ai.agent.domain.DomainTagger;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
 import com.enterprise.ai.agent.skill.SubAgentSkillExecutor;

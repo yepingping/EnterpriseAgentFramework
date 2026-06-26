@@ -3,7 +3,7 @@ package com.enterprise.ai.agent.agent;
 import com.enterprise.ai.agent.agentscope.AgentRouter;
 import com.enterprise.ai.agent.config.LLMConfig;
 import com.enterprise.ai.agent.model.AgentResult;
-import com.enterprise.ai.agent.service.IntentService;
+import com.enterprise.ai.agent.runtime.host.service.IntentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

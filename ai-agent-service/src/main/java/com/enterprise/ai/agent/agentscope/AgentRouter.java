@@ -14,7 +14,7 @@ import com.enterprise.ai.agent.runtime.EmbeddedRuntimeDispatchRequest;
 import com.enterprise.ai.agent.runtime.EmbeddedRuntimeDispatchResult;
 import com.enterprise.ai.agent.runtime.EmbeddedRuntimeDispatchService;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
-import com.enterprise.ai.agent.service.IntentService;
+import com.enterprise.ai.agent.runtime.host.service.IntentService;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
 import com.enterprise.ai.agent.workflow.AgentWorkflowBindingEntity;

@@ -1,7 +1,7 @@
 package com.enterprise.ai.agent.tool.retrieval;
 
 import com.enterprise.ai.agent.client.ModelServiceClient;
-import com.enterprise.ai.agent.config.ToolRetrievalProperties;
+import com.enterprise.ai.agent.capability.catalog.config.ToolRetrievalProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 

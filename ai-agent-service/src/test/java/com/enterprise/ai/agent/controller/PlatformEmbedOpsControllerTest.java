@@ -13,6 +13,7 @@ import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.identity.PageRegistryEntity;
 import com.enterprise.ai.agent.identity.PageRegistryManagementService;
 import com.enterprise.ai.agent.identity.PageRegistryMapper;
+import com.enterprise.ai.agent.platform.control.controller.PlatformEmbedOpsController;
 import com.enterprise.ai.agent.registry.RegistryCredentialMapper;
 import com.enterprise.ai.agent.workflow.WorkflowActionReferenceService;
 import com.enterprise.ai.common.dto.ApiResult;

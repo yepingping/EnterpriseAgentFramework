@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.tool.governance;
 
-import com.enterprise.ai.agent.config.ToolRateLimitProperties;
+import com.enterprise.ai.agent.platform.control.config.ToolRateLimitProperties;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

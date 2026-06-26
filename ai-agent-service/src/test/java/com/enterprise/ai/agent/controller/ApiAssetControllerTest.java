@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.capability.catalog.controller.ApiAssetController;
 import com.enterprise.ai.agent.scan.ScanModuleEntity;
 import com.enterprise.ai.agent.scan.ScanModuleService;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;

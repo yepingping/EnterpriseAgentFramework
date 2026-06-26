@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.capability.catalog.controller.CompositionController;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.RequestMapping;
 

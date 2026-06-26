@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.assist;
 
-import com.enterprise.ai.agent.controller.AiAssistController;
+import com.enterprise.ai.agent.platform.control.controller.AiAssistController;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;

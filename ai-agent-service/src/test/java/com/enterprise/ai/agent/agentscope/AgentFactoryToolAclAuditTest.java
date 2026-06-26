@@ -3,7 +3,7 @@ package com.enterprise.ai.agent.agentscope;
 import com.enterprise.ai.agent.acl.ToolAclDecision;
 import com.enterprise.ai.agent.acl.ToolAclService;
 import com.enterprise.ai.agent.config.LLMConfig;
-import com.enterprise.ai.agent.config.ToolRetrievalProperties;
+import com.enterprise.ai.agent.capability.catalog.config.ToolRetrievalProperties;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
 import com.enterprise.ai.agent.tool.governance.ToolRateLimiter;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;

@@ -1,8 +1,8 @@
 package com.enterprise.ai.agent.tool.retrieval;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.enterprise.ai.agent.config.DomainProperties;
-import com.enterprise.ai.agent.config.ToolRetrievalProperties;
+import com.enterprise.ai.agent.capability.catalog.config.DomainProperties;
+import com.enterprise.ai.agent.capability.catalog.config.ToolRetrievalProperties;
 import com.enterprise.ai.agent.domain.DomainAssignmentService;
 import com.enterprise.ai.agent.tool.log.ToolCallLogService;
 import com.enterprise.ai.agent.tool.log.ToolExecutionContext;

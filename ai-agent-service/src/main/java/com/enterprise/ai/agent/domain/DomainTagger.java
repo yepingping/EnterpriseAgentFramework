@@ -1,6 +1,6 @@
 package com.enterprise.ai.agent.domain;
 
-import com.enterprise.ai.agent.config.DomainProperties;
+import com.enterprise.ai.agent.capability.catalog.config.DomainProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

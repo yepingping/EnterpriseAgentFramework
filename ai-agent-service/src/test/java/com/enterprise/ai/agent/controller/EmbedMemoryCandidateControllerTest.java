@@ -1,6 +1,7 @@
 package com.enterprise.ai.agent.controller;
 
 import com.enterprise.ai.agent.context.memory.*;
+import com.enterprise.ai.agent.platform.control.controller.EmbedMemoryCandidateController;
 import com.enterprise.ai.agent.identity.EmbedSessionEntity;
 import com.enterprise.ai.agent.identity.EmbedSessionService;
 import com.enterprise.ai.agent.identity.EmbedTokenClaims;

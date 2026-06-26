@@ -1,7 +1,7 @@
 package com.enterprise.ai.agent.tool.retrieval;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.enterprise.ai.agent.config.ToolRetrievalProperties;
+import com.enterprise.ai.agent.capability.catalog.config.ToolRetrievalProperties;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionEntity;
 import com.enterprise.ai.agent.tools.definition.ToolDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;

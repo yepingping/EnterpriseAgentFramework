@@ -9,6 +9,7 @@ import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateResult;
 import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateService;
 import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.context.runtime.RuntimeContextPackageService;
+import com.enterprise.ai.agent.platform.control.controller.EmbedChatController;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
 import com.enterprise.ai.agent.agentscope.AgentRouter;

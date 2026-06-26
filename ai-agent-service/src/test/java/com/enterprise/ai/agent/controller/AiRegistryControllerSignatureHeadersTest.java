@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.capability.catalog.controller.AiRegistryController;
 import com.enterprise.ai.agent.registry.AiRegistryService;
 import com.enterprise.ai.agent.identity.PageActionCatalogService;
 import com.enterprise.ai.agent.registry.RegistryContracts.ProjectRegisterRequest;

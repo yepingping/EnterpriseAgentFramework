@@ -1,6 +1,25 @@
-import assert from 'node:assert/strict'
 import type { AgentForm, AgentGraphSpec } from '@/types/agent'
 import { definitionToCanvas } from './studio'
+
+function assertPresent<T>(value: T, message: string): asserts value is NonNullable<T> {
+  if (value === null || value === undefined) {
+    throw new Error(message)
+  }
+}
+
+function assertEqual(actual: unknown, expected: unknown, message?: string) {
+  if (actual !== expected) {
+    throw new Error(message ?? `Expected ${String(expected)}, got ${String(actual)}`)
+  }
+}
+
+function assertDeepEqual(actual: unknown, expected: unknown, message?: string) {
+  const actualJson = JSON.stringify(actual)
+  const expectedJson = JSON.stringify(expected)
+  if (actualJson !== expectedJson) {
+    throw new Error(message ?? `Expected ${expectedJson}, got ${actualJson}`)
+  }
+}
 
 const base = {
   name: 'Test Workflow',
@@ -44,10 +63,10 @@ const classifierSnapshot = canvasSnapshot([{
 }])
 
 const classifierNode = classifierSnapshot.nodes.find((node) => node.id === 'classifier-1')
-assert.ok(classifierNode, 'classifier node should exist')
-assert.equal(classifierNode.data.configVersion, 2)
-assert.equal(classifierNode.data.classifierConfig?.strategy, 'HYBRID')
-assert.equal(classifierNode.data.classifierConfig?.classes?.[0]?.id, 'search_intent')
+assertPresent(classifierNode, 'classifier node should exist')
+assertEqual(classifierNode.data.configVersion, 2)
+assertEqual(classifierNode.data.classifierConfig?.strategy, 'HYBRID')
+assertEqual(classifierNode.data.classifierConfig?.classes?.[0]?.id, 'search_intent')
 
 const pageActionSnapshot = canvasSnapshot([{
   id: 'page-action-1',
@@ -71,10 +90,10 @@ const pageActionSnapshot = canvasSnapshot([{
 }])
 
 const pageActionNode = pageActionSnapshot.nodes.find((node) => node.id === 'page-action-1')
-assert.ok(pageActionNode, 'page action node should exist')
-assert.equal(pageActionNode.data.configVersion, 2)
-assert.equal(pageActionNode.data.pageActionConfig?.actionKey, 'orders.search')
-assert.equal(pageActionNode.data.pageActionConfig?.projectCode, 'orders')
+assertPresent(pageActionNode, 'page action node should exist')
+assertEqual(pageActionNode.data.configVersion, 2)
+assertEqual(pageActionNode.data.pageActionConfig?.actionKey, 'orders.search')
+assertEqual(pageActionNode.data.pageActionConfig?.projectCode, 'orders')
 
 const graphHydratedSnapshot = canvasSnapshotWithGraphSpec([
   {
@@ -133,22 +152,22 @@ const graphHydratedSnapshot = canvasSnapshotWithGraphSpec([
 })
 
 const hydratedClassifier = graphHydratedSnapshot.nodes.find((node) => node.id === 'router')
-assert.ok(hydratedClassifier, 'hydrated classifier should exist')
-assert.equal(hydratedClassifier.position.x, 10)
-assert.equal(hydratedClassifier.position.y, 20)
-assert.equal(hydratedClassifier.data.label, 'Intent Router')
-assert.equal(hydratedClassifier.data.classifierConfig?.strategy, 'HYBRID')
-assert.deepEqual(
+assertPresent(hydratedClassifier, 'hydrated classifier should exist')
+assertEqual(hydratedClassifier.position.x, 10)
+assertEqual(hydratedClassifier.position.y, 20)
+assertEqual(hydratedClassifier.data.label, 'Intent Router')
+assertEqual(hydratedClassifier.data.classifierConfig?.strategy, 'HYBRID')
+assertDeepEqual(
   hydratedClassifier.data.classifierConfig?.classes?.map((item) => item.id),
   ['query_intent', 'reset_intent'],
 )
 
 const hydratedPageAction = graphHydratedSnapshot.nodes.find((node) => node.id === 'search_action')
-assert.ok(hydratedPageAction, 'hydrated page action should exist')
-assert.equal(hydratedPageAction.position.x, 30)
-assert.equal(hydratedPageAction.position.y, 40)
-assert.equal(hydratedPageAction.data.label, '执行查询')
-assert.equal(hydratedPageAction.data.pageActionConfig?.actionKey, 'search')
-assert.equal(hydratedPageAction.data.pageActionConfig?.projectCode, 'orders')
+assertPresent(hydratedPageAction, 'hydrated page action should exist')
+assertEqual(hydratedPageAction.position.x, 30)
+assertEqual(hydratedPageAction.position.y, 40)
+assertEqual(hydratedPageAction.data.label, '执行查询')
+assertEqual(hydratedPageAction.data.pageActionConfig?.actionKey, 'search')
+assertEqual(hydratedPageAction.data.pageActionConfig?.projectCode, 'orders')
 
 console.log('studio canvas node data checks passed')
