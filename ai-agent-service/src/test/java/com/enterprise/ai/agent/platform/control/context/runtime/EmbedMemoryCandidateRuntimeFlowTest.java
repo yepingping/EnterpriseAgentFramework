@@ -2,6 +2,8 @@ package com.enterprise.ai.agent.platform.control.context.runtime;
 
 import com.enterprise.ai.agent.platform.control.context.*;
 import com.enterprise.ai.agent.platform.control.context.memory.*;
+import com.enterprise.ai.agent.runtime.RuntimeContextIdentity;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -7,7 +7,6 @@ import com.enterprise.ai.agent.platform.control.context.ContextSearchResult;
 import com.enterprise.ai.agent.platform.control.context.MemoryLane;
 import com.enterprise.ai.agent.platform.control.context.memory.RuntimeMemoryCandidateResult;
 import com.enterprise.ai.agent.platform.control.context.memory.RuntimeMemoryCandidateService;
-import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.platform.control.controller.EmbedChatController;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
@@ -30,6 +29,7 @@ import com.enterprise.ai.agent.model.ChatResponse;
 import com.enterprise.ai.agent.model.interactive.UiRequestPayload;
 import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistrySecurityService;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentWorkflowBindingEntity;
 import com.enterprise.ai.agent.workflow.EmbedWorkflowRuntimeService;
@@ -802,7 +802,14 @@ class EmbedChatControllerAuditTest {
         when(runtimeContextPackageService.injectForEmbedAgent(any(), any(), any(), any(), any()))
                 .thenReturn(RuntimeContextInjectionResult.builder()
                         .enabled(true)
-                        .packageResponse(pkg)
+                        .hitSummaries(List.of(Map.of(
+                                "section", "userMemory",
+                                "itemId", 101L,
+                                "itemType", ContextItemType.PREFERENCE.name(),
+                                "title", "视觉偏好",
+                                "rankScore", 2.4,
+                                "hitReason", "content token keyword match",
+                                "scoreBreakdown", "tokens=0.6, trust=0.7")))
                         .itemCount(1)
                         .truncatedCount(0)
                         .build());

@@ -1,6 +1,5 @@
 package com.enterprise.ai.agent.agentscope;
 
-import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.model.AgentResult;
@@ -8,6 +7,7 @@ import com.enterprise.ai.agent.runtime.AgentRuntimeAdapter;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.runtime.AgentRuntimeRequest;
 import com.enterprise.ai.agent.runtime.AgentRuntimeResult;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.runtime.host.AgentRuntimeSelector;
 import com.enterprise.ai.agent.runtime.GraphRuntimeContext;
 import com.enterprise.ai.agent.runtime.EmbeddedRuntimeDispatchRequest;

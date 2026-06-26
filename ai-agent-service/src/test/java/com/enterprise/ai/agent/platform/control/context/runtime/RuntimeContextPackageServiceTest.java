@@ -10,6 +10,8 @@ import com.enterprise.ai.agent.platform.control.context.MemoryLane;
 import com.enterprise.ai.agent.platform.control.identity.EmbedSessionEntity;
 import com.enterprise.ai.agent.platform.control.identity.EmbedTokenClaims;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
+import com.enterprise.ai.agent.runtime.RuntimeContextIdentity;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -5,8 +5,8 @@ import com.enterprise.ai.agent.platform.control.context.memory.RuntimeMemoryCand
 import com.enterprise.ai.agent.platform.control.context.memory.RuntimeMemoryCandidateService;
 import com.enterprise.ai.agent.platform.control.context.ContextPackageResponse;
 import com.enterprise.ai.agent.platform.control.context.ContextSearchResult;
-import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.platform.control.context.runtime.RuntimeContextPackageService;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
@@ -551,41 +551,10 @@ public class EmbedChatController {
     }
 
     private List<Map<String, Object>> runtimeContextHitSummaries(RuntimeContextInjectionResult runtimeContext) {
-        ContextPackageResponse pkg = runtimeContext.getPackageResponse();
-        if (pkg == null) {
+        if (runtimeContext.getHitSummaries() == null || runtimeContext.getHitSummaries().isEmpty()) {
             return List.of();
         }
-        List<Map<String, Object>> hits = new java.util.ArrayList<>();
-        appendRuntimeContextHits(hits, "userMemory", pkg.getUserMemory());
-        appendRuntimeContextHits(hits, "pageContext", pkg.getPageContext());
-        appendRuntimeContextHits(hits, "workflowContext", pkg.getWorkflowContext());
-        appendRuntimeContextHits(hits, "apiContext", pkg.getApiContext());
-        appendRuntimeContextHits(hits, "rules", pkg.getRules());
-        return hits.size() > 10 ? hits.subList(0, 10) : hits;
-    }
-
-    private void appendRuntimeContextHits(List<Map<String, Object>> target,
-                                          String section,
-                                          List<ContextSearchResult> hits) {
-        if (hits == null || hits.isEmpty()) {
-            return;
-        }
-        for (ContextSearchResult hit : hits) {
-            if (hit == null || hit.getItem() == null) {
-                continue;
-            }
-            Map<String, Object> summary = new LinkedHashMap<>();
-            summary.put("section", section);
-            summary.put("itemId", hit.getItem().getId());
-            summary.put("itemType", hit.getItem().getItemType());
-            summary.put("title", hit.getItem().getTitle());
-            summary.put("rankScore", hit.getRankScore());
-            summary.put("hitReason", hit.getHitReason());
-            if (StringUtils.hasText(hit.getScoreBreakdown())) {
-                summary.put("scoreBreakdown", hit.getScoreBreakdown());
-            }
-            target.add(summary);
-        }
+        return runtimeContext.getHitSummaries();
     }
 
     private Map<String, Object> readObjectMap(String json) {

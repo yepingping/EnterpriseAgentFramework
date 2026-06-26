@@ -6,6 +6,7 @@ import com.enterprise.ai.agent.platform.control.context.ContextPackageResponse;
 import com.enterprise.ai.agent.platform.control.context.ContextSearchResult;
 import com.enterprise.ai.agent.platform.control.context.MemoryLane;
 import com.enterprise.ai.agent.runtime.AgentRuntimeRequest;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

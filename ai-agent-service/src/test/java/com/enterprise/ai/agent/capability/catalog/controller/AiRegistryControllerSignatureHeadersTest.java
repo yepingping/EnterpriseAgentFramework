@@ -2,7 +2,6 @@ package com.enterprise.ai.agent.capability.catalog.controller;
 
 import com.enterprise.ai.agent.capability.catalog.controller.AiRegistryController;
 import com.enterprise.ai.agent.registry.AiRegistryService;
-import com.enterprise.ai.agent.platform.control.identity.PageActionCatalogService;
 import com.enterprise.ai.agent.registry.RegistryContracts.ProjectRegisterRequest;
 import com.enterprise.ai.agent.registry.RegistryContracts.RegistryProjectResponse;
 import com.enterprise.ai.agent.registry.RegistrySecurityService;
@@ -24,8 +23,7 @@ class AiRegistryControllerSignatureHeadersTest {
     void registerProjectPrefersReachAiSignatureHeaders() {
         AiRegistryService registryService = mock(AiRegistryService.class);
         RegistrySecurityService securityService = mock(RegistrySecurityService.class);
-        PageActionCatalogService pageActionCatalogService = mock(PageActionCatalogService.class);
-        AiRegistryController controller = new AiRegistryController(registryService, securityService, pageActionCatalogService);
+        AiRegistryController controller = new AiRegistryController(registryService, securityService);
 
         ProjectRegisterRequest request = new ProjectRegisterRequest(
                 "demo",

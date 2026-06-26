@@ -1,4 +1,4 @@
-package com.enterprise.ai.agent.platform.control.context.runtime;
+package com.enterprise.ai.agent.runtime;
 
 import lombok.Builder;
 import lombok.Data;

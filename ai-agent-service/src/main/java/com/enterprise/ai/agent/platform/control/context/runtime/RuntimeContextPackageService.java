@@ -9,6 +9,8 @@ import com.enterprise.ai.agent.platform.control.context.MemoryLane;
 import com.enterprise.ai.agent.platform.control.identity.EmbedSessionEntity;
 import com.enterprise.ai.agent.platform.control.identity.EmbedTokenClaims;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
+import com.enterprise.ai.agent.runtime.RuntimeContextIdentity;
+import com.enterprise.ai.agent.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -103,10 +106,10 @@ public class RuntimeContextPackageService {
             return RuntimeContextInjectionResult.builder()
                     .enabled(true)
                     .identity(identity)
-                    .packageResponse(pkg)
                     .promptSection(prompt)
                     .itemCount(itemCount)
                     .truncatedCount(pkg.getTruncatedCount())
+                    .hitSummaries(runtimeContextHitSummaries(pkg))
                     .build();
         } catch (Exception ex) {
             log.warn("[RuntimeContext] compose failed, skip injection: tenantId={}, sessionId={}, reason={}",
@@ -219,6 +222,43 @@ public class RuntimeContextPackageService {
 
     private int sizeOf(List<ContextSearchResult> hits) {
         return hits == null ? 0 : hits.size();
+    }
+
+    private List<Map<String, Object>> runtimeContextHitSummaries(ContextPackageResponse pkg) {
+        if (pkg == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> hits = new java.util.ArrayList<>();
+        appendRuntimeContextHits(hits, "userMemory", pkg.getUserMemory());
+        appendRuntimeContextHits(hits, "pageContext", pkg.getPageContext());
+        appendRuntimeContextHits(hits, "workflowContext", pkg.getWorkflowContext());
+        appendRuntimeContextHits(hits, "apiContext", pkg.getApiContext());
+        appendRuntimeContextHits(hits, "rules", pkg.getRules());
+        return hits.size() > 10 ? List.copyOf(hits.subList(0, 10)) : List.copyOf(hits);
+    }
+
+    private void appendRuntimeContextHits(List<Map<String, Object>> target,
+                                          String section,
+                                          List<ContextSearchResult> hits) {
+        if (hits == null || hits.isEmpty()) {
+            return;
+        }
+        for (ContextSearchResult hit : hits) {
+            if (hit == null || hit.getItem() == null) {
+                continue;
+            }
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("section", section);
+            summary.put("itemId", hit.getItem().getId());
+            summary.put("itemType", hit.getItem().getItemType());
+            summary.put("title", hit.getItem().getTitle());
+            summary.put("rankScore", hit.getRankScore());
+            summary.put("hitReason", hit.getHitReason());
+            if (StringUtils.hasText(hit.getScoreBreakdown())) {
+                summary.put("scoreBreakdown", hit.getScoreBreakdown());
+            }
+            target.add(summary);
+        }
     }
 
     private String normalizePlacement(String placement) {

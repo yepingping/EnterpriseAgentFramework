@@ -1,6 +1,7 @@
 package com.enterprise.ai.agent.runtime.host.controller;
 
 import com.enterprise.ai.agent.platform.control.controller.AiCodingGatewayController;
+import com.enterprise.ai.agent.platform.control.controller.AiCodingGatewayControllerAdvice;
 import com.enterprise.ai.agent.platform.control.auth.PlatformAuthContext;
 import com.enterprise.ai.agent.platform.control.auth.PlatformPrincipal;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAccessDeniedException;
@@ -129,7 +130,7 @@ class WorkflowAiCodingControllerTest {
 
     @Test
     void adviceCoversGenericAiCodingGatewayDiscovery() {
-        RestControllerAdvice annotation = WorkflowAiCodingControllerAdvice.class.getAnnotation(RestControllerAdvice.class);
+        RestControllerAdvice annotation = AiCodingGatewayControllerAdvice.class.getAnnotation(RestControllerAdvice.class);
         assertTrue(Arrays.asList(annotation.assignableTypes()).contains(AiCodingGatewayController.class));
     }
 
