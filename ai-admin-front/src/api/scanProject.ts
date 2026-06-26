@@ -1,6 +1,7 @@
 import { agentRequest } from './request'
 import type {
   BatchPromoteToToolsResult,
+  AiCodingGatewayManifest,
   ProjectToolInfo,
   PromotedGlobalTool,
   ScanProject,
@@ -101,10 +102,13 @@ export function getAiOnboardingManifest(id: number) {
   return agentRequest.get<AiOnboardingManifest>(`/api/ai-assist/projects/${id}/onboarding-manifest`)
 }
 
+export function getAiCodingGatewayManifest(id: number) {
+  return agentRequest.get<AiCodingGatewayManifest>(`/api/ai-coding/projects/${id}/manifest`)
+}
+
 export function getPageAssistantOnboardingManifest(
   id: number,
   data?: PageAssistantSessionRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.get<PageAssistantOnboardingManifest>(
     `/api/ai-assist/projects/${id}/page-assistant/onboarding-manifest`,
@@ -114,7 +118,6 @@ export function getPageAssistantOnboardingManifest(
         pageKey: data?.pageKey,
         routePattern: data?.routePattern,
         actionKeys: data?.actionKeys,
-        aiCodingKey: aiCodingKey || undefined,
       },
     },
   )
@@ -124,20 +127,18 @@ export function startPageAssistantAccessSession(id: number, data: PageAssistantS
   return agentRequest.post<AiAccessSession>(`/api/ai-assist/projects/${id}/page-assistant/sessions`, data)
 }
 
-export function getLatestPageAssistantAccessSession(id: number, pageKey?: string | null, aiCodingKey?: string | null) {
+export function getLatestPageAssistantAccessSession(id: number, pageKey?: string | null) {
   return agentRequest.get<AiAccessSession>(`/api/ai-assist/projects/${id}/page-assistant/sessions/latest`, {
     params: {
       pageKey: pageKey || undefined,
-      aiCodingKey: aiCodingKey || undefined,
     },
   })
 }
 
-export function getPageAssistantAccessSessions(id: number, pageKey?: string | null, aiCodingKey?: string | null) {
+export function getPageAssistantAccessSessions(id: number, pageKey?: string | null) {
   return agentRequest.get<PageAssistantSessionSummary[]>(`/api/ai-assist/projects/${id}/page-assistant/sessions`, {
     params: {
       pageKey: pageKey || undefined,
-      aiCodingKey: aiCodingKey || undefined,
     },
   })
 }
@@ -146,12 +147,10 @@ export function bindPageAssistantAccessSessionTarget(
   id: number,
   sessionId: string,
   data: PageAssistantTargetRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.put<AiAccessSession>(
     `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/target`,
     data,
-    { params: aiCodingKey ? { aiCodingKey } : {} },
   )
 }
 
@@ -159,12 +158,10 @@ export function syncPageAssistantAccessCatalog(
   id: number,
   sessionId: string,
   data: PageAssistantCatalogSyncRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.post<PageAssistantCatalogSyncResponse>(
     `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/catalog/sync`,
     data,
-    { params: aiCodingKey ? { aiCodingKey } : {} },
   )
 }
 
@@ -172,24 +169,20 @@ export function runPageAssistantAccessSessionChecks(
   id: number,
   sessionId: string,
   data: PageAssistantCheckRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.post<PageAssistantCheckRunResponse>(
     `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/checks/run`,
     data,
-    { params: aiCodingKey ? { aiCodingKey } : {} },
   )
 }
 
 export function registerPageAssistantPage(
   id: number,
   data: PageAssistantPageRegisterRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.post<PageAssistantPageRegisterResponse>(
     `/api/ai-assist/projects/${id}/page-assistant/pages/register`,
     data,
-    { params: aiCodingKey ? { aiCodingKey } : {} },
   )
 }
 
@@ -197,12 +190,10 @@ export function reportPageAssistantWorkflowAiCodingResult(
   id: number,
   sessionId: string,
   data: PageAssistantWorkflowAiCodingResultRequest,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.post<AiAccessSession>(
     `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`,
     data,
-    { params: aiCodingKey ? { aiCodingKey } : {} },
   )
 }
 
@@ -210,14 +201,12 @@ export function resetPageAssistantWorkflowAiCodingResult(
   id: number,
   sessionId: string,
   deleteWorkflow = true,
-  aiCodingKey?: string | null,
 ) {
   return agentRequest.delete<AiAccessSession>(
     `/api/ai-assist/projects/${id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`,
     {
       params: {
         deleteWorkflow,
-        aiCodingKey: aiCodingKey || undefined,
       },
     },
   )

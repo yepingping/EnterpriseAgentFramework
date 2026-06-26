@@ -89,6 +89,7 @@
             </span>
             <span class="page-card-actions">
               <el-button size="small" type="primary" @click.stop="selectPage(page.pageKey)">动作详情</el-button>
+              <el-button size="small" :icon="Document" @click.stop="openPageMemoryWorkbench(page)">上下文</el-button>
               <el-button size="small" @click.stop="previewPage(page)">预览页面</el-button>
               <el-button
                 size="small"
@@ -332,6 +333,12 @@
       </el-table>
     </el-drawer>
 
+    <PageMemoryWorkbench
+      v-model="pageMemoryWorkbenchVisible"
+      :page="selectedMemoryPage"
+      :project-code="currentProjectCode"
+    />
+
   </div>
 </template>
 
@@ -341,6 +348,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ChatDotRound, Clock, Cpu, Document, Grid, Lock, MagicStick, Refresh, Select } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import CommonStatusTag from '@/components/CommonStatusTag.vue'
+import PageMemoryWorkbench from './PageMemoryWorkbench.vue'
 import {
   createEmbedRenderer,
   deletePageRegistry,
@@ -382,6 +390,8 @@ const renderers = ref<EmbedRendererView[]>([])
 const credentialDrawerVisible = ref(false)
 const credentialDialogVisible = ref(false)
 const rendererDrawerVisible = ref(false)
+const pageMemoryWorkbenchVisible = ref(false)
+const selectedMemoryPage = ref<PageRegistryView | null>(null)
 const currentProjectCode = computed(() => String(route.params.projectCode || route.query.projectCode || ''))
 const editingCredentialId = ref<number | null>(null)
 const editingCredentialKey = ref('')
@@ -650,6 +660,11 @@ function goSessionAudit() {
 function selectPage(pageKey: string) {
   selectedPageKey.value = pageKey
   actionDrawerVisible.value = true
+}
+
+function openPageMemoryWorkbench(page: PageRegistryView) {
+  selectedMemoryPage.value = page
+  pageMemoryWorkbenchVisible.value = true
 }
 
 function previewPage(page: PageRegistryView) {

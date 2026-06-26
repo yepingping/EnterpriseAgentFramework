@@ -15,7 +15,7 @@ Do not default every platform API to `data.` or to top-level fields. See `refere
 ## Module Placement
 
 - Add `reachai-spring-boot2-starter` to the runnable Spring Boot application module.
-- Add `reachai-capability-sdk` to every module that declares `@ReachCapability`, `@ReachParam`, or `@ReachOutput`.
+- Add `reachai-capability-sdk` to every module that declares `@ReachCapability`, `@ReachParam`, or response DTO fields annotated with `@ReachOutput`.
 - In a single-module service, both dependencies usually go into the root `pom.xml`.
 - In a multi-module service, do not add the starter to pure API, DTO, or library modules.
 
@@ -113,6 +113,18 @@ Always provide explicit `@ReachParam(name = "...")` for simple parameters, espec
 
 For request DTOs, annotate important fields with `@ReachParam` so generated parameter metadata is useful for agents.
 
+Use `@ReachOutput` only on response DTO fields that should be visible to later workflow nodes or agent reasoning. Do not put `@ReachOutput` on controller or service methods.
+
+## Self-Check Readiness Levels
+
+The SDK access check may return both detailed `checks` and summarized `readiness` levels:
+
+- `CODE_READY`: manifest, dependencies/configuration, registry credentials, gateway base URL, and token broker path are present.
+- `RUNTIME_READY`: the business service has started with `REACHAI_REGISTRY_APP_SECRET`, SDK heartbeat is online, and API assets have synced.
+- `E2E_READY`: a selected API asset or embed chat/token-broker path has completed a real invocation.
+
+`CODE_READY` can pass while `RUNTIME_READY` or `E2E_READY` remains WARN. Treat that as "code/config looks ready but runtime has not proven itself yet", not as an automatic integration failure.
+
 ## Gateway Route And Token Broker
 
 SDK onboarding is not complete if the business gateway is untouched and the business front end has no safe token path.
@@ -120,6 +132,7 @@ SDK onboarding is not complete if the business gateway is untouched and the busi
 Before changing gateway or front-end code, read the manifest's `embed` section:
 - Call `agentProvisioning.provisionAgentUrl` from the AI coding tool, local shell, or server-side integration step when present. It creates or reuses the project `PAGE_COPILOT` Agent and default Workflow binding.
 - Use the response `agent.keySlug` as the front-end `agentId`. Store only that key slug in business front-end configuration after provisioning succeeds.
+- If the response includes `defaultWorkflow.id`, use Workflow AI Coding to draw or adjust the default Workflow, save a valid draft, then call `POST /api/workflows/{workflowId}/ai-coding/publish` once with `X-ReachAI-AiCoding-Key` to create the initial ACTIVE version before declaring embed chat ready.
 - Do not call `agentProvisioning.provisionAgentUrl` from browser runtime code, and never put `aiCodingKey` in browser configuration or bundles.
 - If provisioning is unavailable, prefer `agentProvisioning.defaultKeySlug`, then `agentWorkflow.globalAgentKeySlug`, then `embed.defaultAgentKeySlug`.
 - Use `embed.defaultAgentId` only when no key slug is available.
@@ -160,6 +173,26 @@ SecurityWebFilterChain reachAiEmbedProxySecurity(ServerHttpSecurity http) {
 
 - In Spring Cloud Gateway this usually means both a route rewrite and a gateway authentication whitelist/security matcher. If both the gateway and ReachAI add CORS response headers, add route-level dedupe such as `DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST` so the browser does not hide the real 401/500 response as `status 0 Unknown Error`.
 - In Nginx or a BFF, apply the same auth bypass and CORS de-duplication rule at the real authentication/proxy boundary.
+
+### Gateway checklist
+
+For Spring Cloud Gateway + WebFlux + OAuth2 Resource Server, verify these five items before marking the embed gateway work complete:
+
+1. The token broker path, usually `/api/reachai/embed-token`, stays behind the business login and exchanges the current user for a short-lived ReachAI embed token.
+2. `/api/reachai/embed/**` or the chosen proxy path rewrites to ReachAI `/api/embed/**` and forwards `Authorization: Bearer <embedToken>` intact.
+3. Header-cleaning filters such as `IgnoreUrlsRemoveJwtFilter`, `RemoveJwtFilter`, or `RemoveRequestHeader=Authorization` do not clear `Authorization` on the embed proxy path.
+4. A high-priority WebFlux security chain matches the embed proxy path and does not enable the business `oauth2ResourceServer()` parser on that chain.
+5. Gateway and ReachAI CORS headers are de-duplicated so the browser exposes the real 401/500 response body.
+
+### Local dev topology
+
+Common local topology:
+
+```text
+front end :9200 -> business gateway :8080 (token broker + business APIs) -> ReachAI :18603 (embed APIs)
+```
+
+`gatewayBaseUrl` is the business gateway origin used by the business UI. `api.v2.baseUrl` or Chat `apiBase` may still point directly to ReachAI, for example `http://localhost:18603`, when the browser is allowed to call ReachAI `/api/embed/**` directly. Do not assume these two URLs are always the same.
 
 Expose a server-side embed token broker for the business UI, for example:
 
@@ -246,7 +279,7 @@ When caching embed tokens in the front end:
 
 ## Access Session Progress Reporting
 
-When the ReachAI prompt provides `/api/ai-assist/projects/{projectId}/access-sessions/...`, report progress back to the platform instead of only summarizing in chat.
+When the ReachAI prompt provides `/api/ai-coding/projects/{projectId}/access-sessions/...`, report progress back to the platform instead of only summarizing in chat.
 
 Recommended reporting points:
 - `project-manifest`: manifest fetched and parsed.

@@ -1,6 +1,6 @@
 ---
 name: workflow-ai-coding
-description: Edit, validate, debug, and inspect ReachAI Workflow drafts through the Workflow AI Coding REST API. Use when asked to create or modify a workflow graph, add/update/delete nodes or edges, validate GraphSpec, dry-run or debug-run a workflow, inspect trace/run output, check release readiness, or work on PAGE_ASSISTANT workflows from Cursor/Codex.
+description: Edit, validate, debug, publish, and inspect ReachAI Workflow drafts through the Workflow AI Coding REST API. Use when asked to create or modify a workflow graph, add/update/delete nodes or edges, validate GraphSpec, dry-run or debug-run a workflow, inspect trace/run output, check release readiness, publish a validated draft, or work on PAGE_ASSISTANT workflows from Cursor/Codex.
 ---
 
 # Workflow AI Coding
@@ -15,12 +15,12 @@ Core mental model:
 - Patch/create default `layout.autoLayout=true`: platform saves rank-based `canvas_json.nodes[].position` (Studio-aligned). Before reporting back, confirm positions are spread across levels/lanes; do not patch GraphSpec only and skip canvas layout.
 - `START` and `END` are virtual GraphSpec edge endpoints, not node types. Do not add them to `nodes`.
 - Every workflow must include a real entry node, set `graphSpec.entry` to that node id, add `START -> <entryNode>` with `condition=always`, and connect every terminal branch to `END`.
-- Workflow AI Coding updates **draft definition** only.
-- **AI tools must not publish.** Publishing is a manual admin action after release validation passes.
+- Workflow AI Coding updates **draft definition** until an explicit publish request is made.
+- Workflow AI Coding may publish a validated draft through `POST /api/workflows/{workflowId}/ai-coding/publish`; publish still runs release validation and creates an ACTIVE `ai_workflow_version`.
 - Always read `GET .../context` before patching. Use `workflow.updatedAt` as `baseRevision` when saving.
 - Default patch behavior is `dryRun=true`. Only set `dryRun=false` after validation passes.
 
-Authentication: Workflow AI Coding endpoints use **aiCodingKey only** (no platform Bearer). Obtain the project-level key from ReachAI **项目详情 → AI Coding 接入秘钥**. Send it on every request as query param `aiCodingKey` or header `X-ReachAI-AiCoding-Key`. Missing key returns `401`; invalid or disabled key returns `403`. API base URL depends on deployment; use relative paths from the platform manifest.
+Authentication: Workflow AI Coding endpoints use **aiCodingKey only** (no platform Bearer). Obtain the project-level key from ReachAI **项目详情 → AI Coding 接入秘钥**. Send it on every request as header `X-ReachAI-AiCoding-Key`; do not put the key in generated URLs, scripts, logs, or browser runtime code. Missing key returns `401`; invalid or disabled key returns `403`. API base URL depends on deployment; use relative paths from the platform manifest.
 
 Do not use platform login cookies or Bearer tokens for `/api/workflows/**/ai-coding/**`.
 
@@ -41,7 +41,7 @@ When calling Workflow AI Coding APIs from Windows, prevent Chinese text from bei
 4. Use `curl.exe`, not the PowerShell `curl` alias:
 
    ```powershell
-   curl.exe -X POST $url -H "Content-Type: application/json; charset=utf-8" --data-binary "@request.json"
+   curl.exe -X POST $url -H "X-ReachAI-AiCoding-Key: $AI_CODING_KEY" -H "Content-Type: application/json; charset=utf-8" --data-binary "@request.json"
    ```
 
 5. If using `Invoke-RestMethod`, send UTF-8 bytes rather than a plain string body:
@@ -69,7 +69,8 @@ When calling Workflow AI Coding APIs from Windows, prevent Chinese text from bei
    - `GET .../runs?limit=&days=`
    - `GET .../runs/{traceId}`
 8. Check release readiness: `GET .../versions`
-9. Report: changed nodes/edges, validation result, traceId, release readiness, and **"ready for manual publish"** if applicable
+9. Publish when release validation is valid: `POST .../publish`
+10. Report: changed nodes/edges, validation result, traceId, release readiness, published version, and any remaining issues
 
 ## Endpoint Map
 
@@ -240,9 +241,9 @@ Returns:
 - version history
 - release validation for current draft
 - `draftDirty` flag
-- warnings, including explicit note that publish is manual
+- warnings, including publish readiness and the AI Coding publish endpoint
 
-AI must stop at readiness reporting. Do not call legacy publish endpoints.
+When `releaseValidation.valid=true`, call `POST /api/workflows/{workflowId}/ai-coding/publish` with a semantic version such as `v1.0.0`. If that version already exists, read `/versions` and choose the next version. Do not call legacy admin publish endpoints.
 
 ### Runs / trace
 
@@ -279,4 +280,4 @@ End with:
 - Validation result (`valid`, key errors/warnings)
 - Debug status, traceId/runId if executed
 - Release readiness from `/versions`
-- Explicit statement whether manual publish is still required
+- Publish result (`version`, `versionId`, `status`) or the validation/version-conflict reason publish was not completed

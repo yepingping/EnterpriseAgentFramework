@@ -24,10 +24,12 @@ import java.util.LinkedHashMap;
 public class PlatformAuthService {
 
     private static final List<String> DEFAULT_PERMISSIONS = List.of(
-            "*", "platform:read", "platform:write", "platform:admin");
+            "*", "platform:read", "platform:write", "platform:admin",
+            "context:runtime-user:review", "context:runtime-user:mapping:manage");
 
     private static final Map<String, List<String>> DEFAULT_ROLE_PERMISSIONS = Map.of(
-            "PLATFORM_ADMIN", List.of("*", "platform:read", "platform:write", "platform:admin"),
+            "PLATFORM_ADMIN", List.of("*", "platform:read", "platform:write", "platform:admin",
+                    "context:runtime-user:review", "context:runtime-user:mapping:manage"),
             "AGENT_DESIGNER", List.of("platform:read", "platform:write"),
             "PROJECT_OWNER", List.of("platform:read", "platform:write"),
             "OPERATOR", List.of("platform:read", "platform:write"),

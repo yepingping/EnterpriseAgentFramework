@@ -236,6 +236,18 @@
                 <strong>整体结果：{{ statusLabel(checkResult.overallStatus) }}</strong>
                 <span>{{ checkResult.projectCode }}</span>
               </div>
+              <div v-if="checkResult.readiness?.length" class="readiness-list">
+                <div
+                  v-for="item in checkResult.readiness"
+                  :key="item.key"
+                  class="readiness-row"
+                  :class="item.status.toLowerCase()"
+                >
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ statusLabel(item.status) }}</span>
+                  <small>{{ item.message }}</small>
+                </div>
+              </div>
               <div class="result-list">
                 <div v-for="item in checkResult.checks" :key="item.key" class="result-row" :class="item.status.toLowerCase()">
                   <span class="result-status">{{ statusLabel(item.status) }}</span>
@@ -589,7 +601,7 @@ sessionStorage.setItem('reachaiPageInstanceId', pageInstanceId)
 const pageKey = '<current-page-key>'
 
 // Provisioning runs once during onboarding from AI tool / local shell / server-side integration.
-// Browser runtime must NOT call /api/ai-assist/** or store project signing secrets in front-end config.
+// Browser runtime must NOT call /api/ai-coding/projects/** onboarding/provisioning/session APIs or store project signing secrets in front-end config.
 // Use only the provisioned bare JSON agent.keySlug below as agentId.
 const provisionedAgentKeySlug = '${expectedKeySlug}'
 
@@ -637,7 +649,6 @@ const aiOnboardingPrompt = computed(() => {
   const appKey = manifest?.project.registryAppKey || p?.registryAppKey || 'your-app-key'
   const secretEnv = manifest?.security.appSecretEnv || 'REACHAI_REGISTRY_APP_SECRET'
   const skillPackageUrl = manifest?.endpoints.skillPackageUrl || '/api/ai-assist/skills/reachai-onboarding/latest.zip'
-  const platformManifestUrl = manifest?.endpoints.manifestUrl || `/api/ai-assist/projects/${projectId}/onboarding-manifest`
   const embedAgentId = manifest?.agentProvisioning?.defaultKeySlug || manifest?.embed?.defaultAgentKeySlug || manifest?.embed?.defaultAgentId || ''
   const embedAgentLine = embedAgentId
     ? `默认嵌入 Agent：${embedAgentId}`
@@ -646,18 +657,14 @@ const aiOnboardingPrompt = computed(() => {
   const allowedAgentLine = allowedAgents.length
     ? `可嵌入 Agent 清单：${allowedAgents.map((item) => item.keySlug || item.id).join(', ')}`
     : '可嵌入 Agent 清单：空'
-  const externalManifestUrl =
-    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? appendQuery(platformManifestUrl, 'aiCodingKey', aiCodingAccessKey.value.trim())
-      : platformManifestUrl
+  const aiCodingKey = aiCodingAccessKey.value.trim()
   const platformUrl = manifest?.sdk.config.registryUrl || window.location.origin
+  const externalProjectRoot = `${platformUrl}/api/ai-coding/projects/${projectId}`
+  const externalManifestUrl = `${externalProjectRoot}/onboarding-manifest`
   const agentProvisioning = manifest?.agentProvisioning
-  const fallbackProvisionAgentUrl = `${platformUrl}/api/ai-assist/projects/${projectId}/agents/provision`
-  const provisionAgentUrl = agentProvisioning?.provisionAgentUrl
-    || (aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? appendQuery(fallbackProvisionAgentUrl, 'aiCodingKey', aiCodingAccessKey.value.trim())
-      : fallbackProvisionAgentUrl)
+  const provisionAgentUrl = `${externalProjectRoot}/agents/provision`
   const agentWorkflow = manifest?.agentWorkflow
+  const workflowAiCoding = agentWorkflow?.workflowAiCoding
   const globalAgentKeySlug = agentProvisioning?.defaultKeySlug || agentWorkflow?.globalAgentKeySlug || embedAgentId || `${code}-page-copilot`
   const agentProvisioningBlock = [
     `- Agent provisioning model: ${agentProvisioning?.model || 'agent-provisioning.v1'}`,
@@ -680,6 +687,18 @@ const aiOnboardingPrompt = computed(() => {
     `- Agents API: ${agentWorkflow?.endpoints?.agentsUrl || `${platformUrl}/api/agents`}`,
     `- Workflows API: ${agentWorkflow?.endpoints?.workflowsUrl || `${platformUrl}/api/workflows`}`,
     `- Bindings API: ${agentWorkflow?.endpoints?.globalAgentBindingsUrl || `${platformUrl}/api/agents/${globalAgentKeySlug}/workflow-bindings`}`,
+  ].join('\n')
+  const workflowAiCodingPublishUrl = workflowAiCoding?.publishUrlTemplate || `${platformUrl}/api/workflows/{workflowId}/ai-coding/publish`
+  const workflowAiCodingBlock = [
+    `- Workflow AI Coding skill package: ${workflowAiCoding?.skillPackageUrl || `${platformUrl}/api/ai-assist/skills/workflow-ai-coding/latest.zip`}`,
+    `- Context URL template: ${workflowAiCoding?.contextUrlTemplate || `${platformUrl}/api/workflows/{workflowId}/ai-coding/context`}`,
+    `- Patch URL template: ${workflowAiCoding?.patchUrlTemplate || `${platformUrl}/api/workflows/{workflowId}/ai-coding/patch`}`,
+    `- Validate URL template: ${workflowAiCoding?.validateUrlTemplate || `${platformUrl}/api/workflows/{workflowId}/ai-coding/validate`}`,
+    `- Versions URL template: ${workflowAiCoding?.versionsUrlTemplate || `${platformUrl}/api/workflows/{workflowId}/ai-coding/versions`}`,
+    `- Publish URL template: ${workflowAiCodingPublishUrl}`,
+    '- Workflow AI Coding 允许发布：完成默认工作流绘制、保存草稿并确认 release validation 通过后，必须调用 publish URL 做首次发布，创建 ACTIVE workflow version。',
+    '- 首次发布建议版本号使用 v1.0.0；若版本已存在，请读取 /versions 后使用下一个语义化版本号。',
+    '- 发布请求必须发送 X-ReachAI-AiCoding-Key header，body 至少包含 {"version":"v1.0.0","note":"initial AI Coding publish","publishedBy":"<toolName>"}。',
   ].join('\n')
   const globalPageRoutingBlock = [
     `- Use one project page copilot Agent for the embedded AI button. Expected keySlug after provisioning: ${globalAgentKeySlug}.`,
@@ -719,10 +738,42 @@ const aiOnboardingPrompt = computed(() => {
     '- 如果 reachai-capability-sdk 或 reachai-spring-boot2-starter 无法解析，请停止并报告需要安装/发布 Maven 产物，不要虚构下载 URL。',
     '- 前端 SDK 同理：若业务仓库没有可用 npm 包或本地构建产物，不要从 ReachAI 平台猜测 /api/embed/sdk 或 /npm/**；应按 manifest 的 embed HTTP 合同实现最小调用，或报告需要提供正式前端 SDK 包。',
   ].join('\n')
+  const annotationBoundaryBlock = [
+    'ReachAI 注解边界：',
+    '- @ReachCapability 用于业务方法或 Controller 方法。',
+    '- @ReachParam 用于方法参数或请求 DTO 字段。',
+    '- @ReachOutput 只用于返回 DTO 字段；不要写在方法上。',
+    '- 如果返回值是 WebApiResult<Page<T>> 这类包装类型，优先在真实返回 DTO 字段上补 @ReachOutput，方法上仍只保留 @ReachCapability。',
+  ].join('\n')
+  const readinessBlock = [
+    '平台自检分层解释：',
+    '- CODE_READY：manifest、依赖/配置、registry 凭证、gatewayBaseUrl、embedTokenPath 等代码和配置前置条件。',
+    '- RUNTIME_READY：业务服务已带 REACHAI_REGISTRY_APP_SECRET 启动，SDK 实例在线，API 资产已同步。',
+    '- E2E_READY：选定 API 资产完成一次真实调用，或嵌入式 Chat/token broker 链路真实打通。',
+    '- CODE_READY 通过但 RUNTIME_READY/E2E_READY 为 WARN，通常表示服务未启动、心跳未上报、API 未同步或未选择真实调用参数，不等于代码接入失败。',
+  ].join('\n')
+  const gatewayChecklistBlock = [
+    '网关接入必查 5 项：',
+    '1. /api/reachai/embed-token 使用业务登录 token，只在服务端签名调用 ReachAI POST /api/embed/token/exchange。',
+    '2. /api/reachai/embed/** 代理 ReachAI /api/embed/**，必须原样透传 Authorization: Bearer <embedToken>。',
+    '3. Spring Security WebFlux / OAuth2 Resource Server 需要独立高优先级 SecurityWebFilterChain；只写 permitAll 不充分。',
+    '4. IgnoreUrlsRemoveJwtFilter / RemoveJwtFilter / RemoveRequestHeader=Authorization / mutate().header("Authorization", "") 不能作用于 /api/reachai/embed/**。',
+    '5. Spring Cloud Gateway 代理时如网关和 ReachAI 都写 CORS 头，配置 DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST。',
+  ].join('\n')
+  const localTopologyBlock = [
+    '本地联调拓扑：',
+    `- 前端 :9200 -> 网关 :8080（${embedTokenPath.value || '/api/reachai/embed-token'} + /api/reachai/embed/**）-> ReachAI :18603（/api/embed/**）。`,
+    `- Chat apiBase 默认是 ReachAI 平台 origin（例如 ${platformUrl}）；gatewayBaseUrl 默认是业务网关入口（例如 ${gatewayBaseUrl.value || 'http://localhost:8080'}），两者可能不同，不能互相替代。`,
+    '- dev proxy / Nginx / Spring Cloud Gateway 三选一即可，但必须明确浏览器最终访问的 token broker 与 chat/embed 地址。',
+  ].join('\n')
   const aiCodingKeyLine =
-    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? `AI Coding 接入秘钥：${aiCodingAccessKey.value.trim()}`
+    aiCodingAccessEnabled.value && aiCodingKey
+      ? `AI Coding 请求头：X-ReachAI-AiCoding-Key: ${aiCodingKey}`
       : 'AI Coding 接入秘钥：已关闭，外部 AI 工具无法免登录读取 manifest'
+  const aiCodingAuthLine =
+    aiCodingAccessEnabled.value && aiCodingKey
+      ? '平台 /api/ai-coding/** 请求必须发送 X-ReachAI-AiCoding-Key header，不要把 aiCodingKey 拼进 URL'
+      : '平台 AI Coding 接入已关闭；如需外部工具免登录读取 manifest，请先在平台开启 AI Coding 接入秘钥'
   const toolName =
     aiPromptTool.value === 'cursor'
       ? 'Cursor'
@@ -732,23 +783,12 @@ const aiOnboardingPrompt = computed(() => {
   const session = accessSession.value
   const sessionId = session?.sessionId || ''
   const reportUrlPattern = sessionId
-    ? `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/${sessionId}/steps/{stepKey}/report`
-    : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/{sessionId}/steps/{stepKey}/report`
-  const reportUrlPatternWithKey =
-    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? appendQuery(reportUrlPattern, 'aiCodingKey', aiCodingAccessKey.value.trim())
-      : reportUrlPattern
-  const latestSessionUrl =
-    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? appendQuery(`${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/latest`, 'aiCodingKey', aiCodingAccessKey.value.trim())
-      : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/latest`
+    ? `${externalProjectRoot}/access-sessions/${sessionId}/steps/{stepKey}/report`
+    : `${externalProjectRoot}/access-sessions/{sessionId}/steps/{stepKey}/report`
+  const latestSessionUrl = `${externalProjectRoot}/access-sessions/latest`
   const sessionCheckUrl = sessionId
-    ? `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/${sessionId}/checks/run`
-    : `${platformUrl}/api/ai-assist/projects/${projectId}/access-sessions/{sessionId}/checks/run`
-  const sessionCheckUrlWithKey =
-    aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim()
-      ? appendQuery(sessionCheckUrl, 'aiCodingKey', aiCodingAccessKey.value.trim())
-      : sessionCheckUrl
+    ? `${externalProjectRoot}/access-sessions/${sessionId}/checks/run`
+    : `${externalProjectRoot}/access-sessions/{sessionId}/checks/run`
   const installHint =
     aiPromptTool.value === 'cursor'
       ? '如果当前工具不支持直接安装 Skill，请下载 zip 后读取其中的 SKILL.md，并把 references/、templates/、scripts/ 作为本次任务的工作资料。'
@@ -767,17 +807,21 @@ const aiOnboardingPrompt = computed(() => {
 - 项目名称：${name}
 - App Key：${appKey}
 - ${aiCodingKeyLine}
+- ${aiCodingAuthLine}
 - App Secret 环境变量：${secretEnv}
 - AI 接入会话 ID：${sessionId || '请先用 latest session 接口获取'}
 - AI 接入会话查询：${latestSessionUrl}
-- 步骤进度回传 URL：${reportUrlPatternWithKey}
-- 平台会话化自检 URL：${sessionCheckUrlWithKey}
+- 步骤进度回传 URL：${reportUrlPattern}
+- 平台会话化自检 URL：${sessionCheckUrl}
 - Embed Token Broker：${manifest?.embed?.tokenPath || embedTokenPath.value || '/api/reachai/embed-token'}
 - ${embedAgentLine}
 - ${allowedAgentLine}
 
 Agent/Workflow target model:
 ${agentWorkflowBlock}
+
+Workflow AI Coding publish contract:
+${workflowAiCodingBlock}
 
 Agent provisioning contract:
 ${agentProvisioningBlock}
@@ -797,6 +841,14 @@ ${pageActionResultBlock}
 SDK artifact resolution contract:
 ${dependencyResolutionBlock}
 
+${annotationBoundaryBlock}
+
+${readinessBlock}
+
+${gatewayChecklistBlock}
+
+${localTopologyBlock}
+
 安装/读取要求：
 ${installHint}
 
@@ -812,7 +864,7 @@ ${installHint}
 3. 在正确的 Maven 模块中引入 reachai-capability-sdk 和 reachai-spring-boot2-starter。
 4. 识别业务代码主包名，只扫描业务包下的 Controller / Service，不要把业务系统依赖的框架包、平台包、第三方包接口同步到 ReachAI。若启动类根包过宽，请优先选择实际业务包。
 5. 在业务系统配置中增加 reachai.registry、reachai.project、reachai.capability 配置，并用 ${secretEnv} 引用密钥；同时配置 reachai.capability.scan-packages 与 reachai.capability.exclude-packages。
-6. 根据现有 Controller / Service 代码，优先选择 1-2 个低风险查询能力，补充 @ReachCapability、@ReachParam、@ReachOutput 示例。
+6. 根据现有 Controller / Service 代码，优先选择 1-2 个低风险查询能力，补充 @ReachCapability / @ReachParam；@ReachOutput 只用于返回 DTO 字段，不要写在方法上。
 7. 检查业务系统是否有统一网关模块、Spring Cloud Gateway 配置、Nginx 配置或前端 dev proxy。若有网关，必须补上 ReachAI 相关路由；若没有网关，必须在计划里说明缺口，不要把 secret 下沉到浏览器。
 8. 在业务网关或服务端 token broker 中实现前端获取 embed token 的接口，默认路径可用 ${embedTokenPath.value || '/api/reachai/embed-token'}。该接口必须从业务登录态解析当前用户，映射 principal.externalUserId，使用项目 appKey/appSecret 服务端签名调用 ReachAI 的 POST /api/embed/token/exchange，并按短期 token 策略缓存；appSecret 仍只能来自 ${secretEnv} 或密钥管理器。ReachAI token exchange 返回统一 ApiResult：{code:200,message:"success",data:{token,expiresIn,sessionHint}}，broker 必须读取 data.token / data.expiresIn，可兼容历史顶层 token / expiresIn，但不能只读取顶层 token，也不能把 helper 的一条路径误写成 token.data.token。
 9. 在业务前端接入 ReachAI Chat Embed：增加配置、组件或页面入口；你必须在接入阶段从本机或服务端 POST Agent provisioning API（${provisionAgentUrl}），并将返回的裸 JSON 字段 agent.keySlug 写入业务前端配置作为 agentId（不是 data.agent.keySlug，也不是让用户手工填写 Agent）。运行时浏览器不得调用 provisioning API，不得保存 aiCodingKey。createEafChat 的 apiBase 使用 ReachAI 平台 origin（例如 ${platformUrl}），SDK 会请求 ${platformUrl}/api/embed/**；不要把 apiBase 写成 /api/reachai/embed。让前端通过业务网关 token broker 获取 embed token，再用 token 调用 ReachAI /api/embed/chat/sessions 与消息接口。前端不得保存 appSecret，不得使用 pageRegistry.appSecret 自动上报密钥。
@@ -824,11 +876,13 @@ ${installHint}
 15. 业务前端缓存 embed token 时必须按 expiresIn 提前失效；如果创建 session 或发送消息返回 embed token is expired，应清空缓存、重新调用 token broker 获取新 embed token 并重试一次。
 16. 保证网关转发时透传 X-ReachAI-Invocation-Token、X-ReachAI-Trace-Id、X-ReachAI-Run-Id，以及业务身份所需的 Authorization / 用户上下文头；业务接口不能只凭普通 X-ReachAI-* 上下文头放行。
 17. 分别运行业务后端、网关和业务前端的最小可行编译/构建/测试。
-18. 如果业务系统、网关和 ReachAI 服务可访问，调用“平台会话化自检 URL”做接入自检，URL 必须保留 aiCodingKey；body 中带 gatewayBaseUrl=${gatewayBaseUrl.value || 'http://localhost:8080'} 与 embedTokenPath=${embedTokenPath.value || '/api/reachai/embed-token'}。如果只能拿到 manifest.endpoints.sdkAccessCheckUrl 且该接口返回 platform login required，请回到会话化自检 URL；否则说明缺少的本地前置条件。
-19. 最后给出修改文件清单、验证结果、仍需人工配置的密钥或环境变量。
+18. 完成默认 Workflow 绘制和草稿保存后，必须读取 /api/workflows/{workflowId}/ai-coding/versions 确认 releaseValidation.valid=true；随后调用 ${workflowAiCodingPublishUrl} 做首次发布，创建 ACTIVE workflow version。不要停在“只保存草稿，等待人工发布”。如果发布校验失败，修复 GraphSpec 后再发布。
+19. 如果业务系统、网关和 ReachAI 服务可访问，调用“平台会话化自检 URL”做接入自检；请求必须发送 X-ReachAI-AiCoding-Key header，URL 不要拼 aiCodingKey；body 中带 gatewayBaseUrl=${gatewayBaseUrl.value || 'http://localhost:8080'} 与 embedTokenPath=${embedTokenPath.value || '/api/reachai/embed-token'}。如果只能拿到 manifest.endpoints.sdkAccessCheckUrl 且该接口返回 platform login required，请回到会话化自检 URL；否则说明缺少的本地前置条件。
+20. 最后给出修改文件清单、验证结果、首次发布的 workflowId/version/versionId、仍需人工配置的密钥或环境变量。
 
 进度回传要求：
 - 每完成或卡住一个关键步骤，请 POST 到“步骤进度回传 URL”，把 {stepKey} 替换为下列 key 之一：project-manifest、backend-sdk、reachai-config、capability-scan、gateway-route、embed-token-broker、gateway-whitelist、frontend-embed、connectivity-check、handoff-summary。
+- 请求必须发送 X-ReachAI-AiCoding-Key header；不要把 aiCodingKey 拼进 URL。
 - 请求体格式：{"status":"PASS|WARN|FAIL|RUNNING","message":"一句话说明","files":["相对路径"],"evidence":{"command":"执行过的命令","exitCode":0},"reportedBy":"${toolName}"}。
 - 如果你不能访问平台接口，请在最终总结里说明无法回传；如果可以访问，不要只在聊天里报告进度。
 - 做最终自检时优先调用“平台会话化自检 URL”，它会把检查结果同步写入当前会话。
@@ -845,7 +899,7 @@ ${installHint}
 
 业务前端要求：
 - 在真实业务页面接入对话入口，不要只写 README 示例。
-- 浏览器运行时代码不得 fetch /api/ai-assist/**（含 agents/provision、access-sessions、onboarding-manifest）；不得在 environment.ts、.env、window.__env 或前端配置中保存 aiCodingKey、provisionAgentUrl、appSecret。
+- 浏览器运行时代码不得 fetch /api/ai-coding/projects/**（含 onboarding-manifest、agents/provision、access-sessions）；不得在 environment.ts、.env、window.__env 或前端配置中保存 aiCodingKey、provisionAgentUrl、appSecret。
 - 运行时前端只保存 agentId=<provisioned agent.keySlug>；provisioning 只能在接入阶段由 AI 工具、本机 shell 或服务端执行。
 - tokenProvider 只能请求业务网关 token broker，不能在浏览器拼 appSecret、registry 签名或项目级密钥。
 - tokenProvider 请求业务网关 token broker 时使用业务登录 token；创建 ReachAI session 和发送消息时使用 token broker 返回的短期 embed token，两者不能混用。
@@ -866,11 +920,6 @@ function escapeHtml(value: string) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-}
-
-function appendQuery(url: string, key: string, value: string) {
-  const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
 }
 
 function highlightXmlCode(value: string) {
@@ -1485,6 +1534,61 @@ function accessStatusLabel(status: AiAccessStepStatus | 'OPEN') {
   }
 }
 
+.readiness-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.readiness-row {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e4e9f2;
+  border-radius: 8px;
+  background: #fbfcff;
+
+  &.pass {
+    border-color: #abefc6;
+    background: #f0fdf4;
+  }
+
+  &.warn {
+    border-color: #fedf89;
+    background: #fffbeb;
+  }
+
+  &.fail {
+    border-color: #fecaca;
+    background: #fef2f2;
+  }
+
+  strong,
+  span,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: #101828;
+    font-size: 13px;
+  }
+
+  span {
+    margin-top: 5px;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 750;
+  }
+
+  small {
+    margin-top: 4px;
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
 .result-status {
   width: 54px;
   height: 26px;
@@ -1516,6 +1620,10 @@ function accessStatusLabel(status: AiAccessStepStatus | 'OPEN') {
 @media (max-width: 980px) {
   .wizard-shell,
   .health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .readiness-list {
     grid-template-columns: 1fr;
   }
 

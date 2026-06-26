@@ -1190,21 +1190,54 @@ const aiCodingAccessState = computed(() => {
   if (!access?.enabled) return '未启用'
   return access.accessKey ? '已启用' : '已启用，未生成秘钥'
 })
-const pageAssistantManifestUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.manifestUrl) || '')
-const pageAssistantRegisterPageUrlWithKey = computed(() => withAiCodingKey(pageAssistantManifest.value?.endpoints.registerPageUrl) || '')
+const pageAssistantProjectIdForTool = computed(() => project.value?.id || pageAssistantManifest.value?.project.id || '')
+const pageAssistantToolRoot = computed(() => (
+  pageAssistantProjectIdForTool.value
+    ? `${window.location.origin}/api/ai-coding/projects/${pageAssistantProjectIdForTool.value}/page-assistant`
+    : ''
+))
+const pageAssistantSessionIdForTool = computed(() => pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId || '')
+const pageAssistantManifestUrlForTool = computed(() => (
+  pageAssistantToolRoot.value ? `${pageAssistantToolRoot.value}/onboarding-manifest` : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.manifestUrl)
+))
+const pageAssistantLatestSessionUrlForTool = computed(() => (
+  pageAssistantToolRoot.value ? `${pageAssistantToolRoot.value}/sessions/latest` : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.latestSessionUrl)
+))
+const pageAssistantStepReportUrlForTool = computed(() => (
+  pageAssistantToolRoot.value && pageAssistantSessionIdForTool.value
+    ? `${pageAssistantToolRoot.value}/sessions/${pageAssistantSessionIdForTool.value}/steps/{stepKey}/report`
+    : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.stepReportUrl)
+))
+const pageAssistantTargetBindUrlForTool = computed(() => (
+  pageAssistantToolRoot.value && pageAssistantSessionIdForTool.value
+    ? `${pageAssistantToolRoot.value}/sessions/${pageAssistantSessionIdForTool.value}/target`
+    : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.targetBindUrl)
+))
+const pageAssistantCatalogSyncUrlForTool = computed(() => (
+  pageAssistantToolRoot.value && pageAssistantSessionIdForTool.value
+    ? `${pageAssistantToolRoot.value}/sessions/${pageAssistantSessionIdForTool.value}/catalog/sync`
+    : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.catalogSyncUrl)
+))
+const pageAssistantChecksRunUrlForTool = computed(() => (
+  pageAssistantToolRoot.value && pageAssistantSessionIdForTool.value
+    ? `${pageAssistantToolRoot.value}/sessions/${pageAssistantSessionIdForTool.value}/checks/run`
+    : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.checksRunUrl)
+))
+const pageAssistantRegisterPageUrlForTool = computed(() => (
+  pageAssistantToolRoot.value ? `${pageAssistantToolRoot.value}/pages/register` : pageAssistantToolUrl(pageAssistantManifest.value?.endpoints.registerPageUrl)
+))
+const pageAssistantAiCodingKeyArgument = computed(() => (
+  pageAssistantManifest.value?.aiCodingAccess.enabled ? ' -AiCodingKey $env:REACHAI_AI_CODING_KEY' : ''
+))
 const pageAssistantScaffoldCommand = computed(() => {
-  const fromManifest = pageAssistantManifest.value?.scaffold?.scaffoldCommand
-  if (fromManifest) return fromManifest
-  const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
-  return `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "${manifestUrl}" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
+  const manifestUrl = pageAssistantManifestUrlForTool.value || '<页面助手接入清单 URL>'
+  return `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "${manifestUrl}"${pageAssistantAiCodingKeyArgument.value} -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
 })
 const pageAssistantVerifyCommand = computed(() => {
-  const fromManifest = pageAssistantManifest.value?.scaffold?.verifyCommand
-  if (fromManifest) return fromManifest
-  const manifestUrl = pageAssistantManifestUrlWithKey.value || '<页面助手接入清单 URL>'
+  const manifestUrl = pageAssistantManifestUrlForTool.value || '<页面助手接入清单 URL>'
   const routePattern = selectedPage.value?.routePattern || '<目标路由>'
   const pageKey = selectedPage.value?.pageKey || selectedPageKey.value || '<pageKey>'
-  return `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "${manifestUrl}" -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
+  return `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "${manifestUrl}"${pageAssistantAiCodingKeyArgument.value} -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
 })
 const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardingPrompt({
   toolName: aiPromptTool.value,
@@ -1229,15 +1262,20 @@ const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardin
   actions: pageAssistantPromptActions.value,
   progress: {
     aiCodingAccessKey: pageAssistantManifest.value?.aiCodingAccess.accessKey,
+    authMode: pageAssistantManifest.value?.auth?.mode,
+    authHeaderName: pageAssistantManifest.value?.auth?.headerName,
+    authKeyEnv: pageAssistantManifest.value?.auth?.keyEnv,
+    externalToolPath: pageAssistantToolRoot.value ? `${pageAssistantToolRoot.value}/**` : pageAssistantManifest.value?.auth?.externalToolPath,
+    platformSessionPath: pageAssistantManifest.value?.auth?.platformSessionPath,
     appSecretEnv: pageAssistantManifest.value?.security.appSecretEnv,
     sessionId: pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId,
-    manifestUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.manifestUrl),
-    latestSessionUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.latestSessionUrl),
-    stepReportUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.stepReportUrl),
-    targetBindUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.targetBindUrl),
-    catalogSyncUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.catalogSyncUrl),
-    checksRunUrl: withAiCodingKey(pageAssistantManifest.value?.endpoints.checksRunUrl),
-    registerPageUrl: pageAssistantRegisterPageUrlWithKey.value,
+    manifestUrl: pageAssistantManifestUrlForTool.value,
+    latestSessionUrl: pageAssistantLatestSessionUrlForTool.value,
+    stepReportUrl: pageAssistantStepReportUrlForTool.value,
+    targetBindUrl: pageAssistantTargetBindUrlForTool.value,
+    catalogSyncUrl: pageAssistantCatalogSyncUrlForTool.value,
+    checksRunUrl: pageAssistantChecksRunUrlForTool.value,
+    registerPageUrl: pageAssistantRegisterPageUrlForTool.value,
     skillPackageUrl: pageAssistantManifest.value?.endpoints.skillPackageUrl || pageAssistantManifest.value?.scaffold?.skillPackageUrl,
     scriptDownloadUrl: pageAssistantManifest.value?.endpoints.scriptDownloadUrl || pageAssistantManifest.value?.scaffold?.scriptDownloadUrl,
     helperScriptPath: pageAssistantManifest.value?.scaffold?.helperScriptPath || 'scripts/reachai-page-assistant.ps1',
@@ -1251,8 +1289,8 @@ const pageAssistantOnboardingPrompt = computed(() => buildPageAssistantOnboardin
 const workflowAiCodingReportUrl = computed(() => {
   const sessionId = pageAssistantSession.value?.sessionId || pageAssistantManifest.value?.session.sessionId
   if (!project.value?.id || !sessionId) return ''
-  const base = `${window.location.origin}/api/ai-assist/projects/${project.value.id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`
-  return withAiCodingKey(base) || base
+  const base = `${window.location.origin}/api/ai-coding/projects/${project.value.id}/page-assistant/sessions/${sessionId}/workflow-ai-coding-result`
+  return base
 })
 
 const workflowAiCodingDraftStep = computed(() =>
@@ -1758,14 +1796,10 @@ function pageAssistantSessionRequest(): PageAssistantSessionRequest {
   }
 }
 
-function withAiCodingKey(url?: string | null) {
+function pageAssistantToolUrl(url?: string | null) {
   const value = url?.trim()
-  const key = pageAssistantManifest.value?.aiCodingAccess.enabled
-    ? pageAssistantManifest.value?.aiCodingAccess.accessKey?.trim()
-    : ''
-  if (!value || !key || value.includes('aiCodingKey=')) return value || undefined
-  const separator = value.includes('?') ? '&' : '?'
-  return `${value}${separator}aiCodingKey=${encodeURIComponent(key)}`
+  if (!value) return undefined
+  return value
 }
 
 function stepStatusTagType(status: string) {
@@ -1872,7 +1906,6 @@ async function resetAiCodingWorkflowDraft() {
       project.value.id,
       sessionId,
       true,
-      pageAssistantManifest.value?.aiCodingAccess.accessKey,
     )
     pageAssistantSession.value = data
     if (createdWorkflowId.value === workflowId || draftSource.value === 'AI_CODING_RETURNED') {

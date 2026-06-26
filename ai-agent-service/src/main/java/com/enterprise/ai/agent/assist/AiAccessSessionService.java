@@ -418,17 +418,12 @@ public class AiAccessSessionService {
                 steps.add(created);
                 return created;
             });
-            step.setStatus(item.status().name());
-            step.setMessage(item.message());
-            step.setEvidenceJson(writeJson(Map.of(
-                    "label", item.label(),
-                    "evidence", item.evidence() == null ? "" : item.evidence())));
-            step.setReportedBy("platform-check");
+            applySdkPlatformCheck(step, item);
             LocalDateTime now = LocalDateTime.now();
             if (step.getStartedAt() == null) {
                 step.setStartedAt(now);
             }
-            if (item.status() == SdkAccessCheckService.CheckStatus.PASS) {
+            if ("PASS".equalsIgnoreCase(step.getStatus())) {
                 step.setCompletedAt(now);
             }
             step.setUpdatedAt(now);
@@ -436,6 +431,24 @@ public class AiAccessSessionService {
         }
         AccessSessionView view = persistProgress(session, steps);
         return new AccessCheckRunResponse(checkResult, view);
+    }
+
+    private void applySdkPlatformCheck(AiAccessStepEntity step, SdkAccessCheckService.SdkAccessCheckItem item) {
+        Map<String, Object> platformEvidence = Map.of(
+                "label", item.label(),
+                "status", item.status().name(),
+                "message", item.message(),
+                "evidence", item.evidence() == null ? "" : item.evidence());
+        if (isExternalReport(step)) {
+            Map<String, Object> evidence = new LinkedHashMap<>(readMap(step.getEvidenceJson()));
+            evidence.put("platformCheck", platformEvidence);
+            step.setEvidenceJson(writeJson(evidence));
+            return;
+        }
+        step.setStatus(item.status().name());
+        step.setMessage(item.message());
+        step.setEvidenceJson(writeJson(platformEvidence));
+        step.setReportedBy("platform-check");
     }
 
     public PageAssistantCheckRunResponse runPageAssistantChecks(Long projectId,

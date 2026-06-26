@@ -20,6 +20,11 @@ export interface PageAssistantPromptAction {
 
 export interface PageAssistantPromptProgress {
   aiCodingAccessKey?: string | null
+  authMode?: string | null
+  authHeaderName?: string | null
+  authKeyEnv?: string | null
+  externalToolPath?: string | null
+  platformSessionPath?: string | null
   appSecretEnv?: string | null
   sessionId?: string | null
   manifestUrl?: string | null
@@ -77,7 +82,18 @@ export function buildPageAssistantOnboardingPrompt(context: PageAssistantOnboard
   const routePattern = clean(context.page?.routePattern) || '请在业务前端中识别真实 route'
   const actions = (context.actions || []).filter((action) => clean(action.actionKey))
   const progress = context.progress || {}
-  const aiCodingAccessKey = clean(progress.aiCodingAccessKey) || '未启用或未生成；如需自动回传进度，请先在 ReachAI 平台启用 AI Coding 接入秘钥'
+  const rawAiCodingAccessKey = clean(progress.aiCodingAccessKey)
+  const aiCodingAccessState = rawAiCodingAccessKey
+    ? '已启用；仅通过 X-ReachAI-AiCoding-Key 请求头发送，不写入 URL'
+    : '未启用或未生成；如需自动回传进度，请先在 ReachAI 平台启用 AI Coding 接入秘钥'
+  const aiCodingHeader = rawAiCodingAccessKey
+    ? `X-ReachAI-AiCoding-Key: ${rawAiCodingAccessKey}`
+    : 'X-ReachAI-AiCoding-Key: <项目 AI Coding 秘钥>'
+  const authHeaderName = clean(progress.authHeaderName) || 'X-ReachAI-AiCoding-Key'
+  const authKeyEnv = clean(progress.authKeyEnv) || 'REACHAI_AI_CODING_KEY'
+  const authMode = clean(progress.authMode) || 'ai-coding-key'
+  const externalToolPath = clean(progress.externalToolPath) || '/api/ai-coding/projects/{projectId}/page-assistant/**'
+  const platformSessionPath = clean(progress.platformSessionPath) || '/api/ai-assist/projects/{projectId}/page-assistant/**'
   const appSecretEnv = clean(progress.appSecretEnv) || 'REACHAI_REGISTRY_APP_SECRET'
   const actionCatalog = actions.length
     ? actions.map((action) => {
@@ -88,8 +104,8 @@ export function buildPageAssistantOnboardingPrompt(context: PageAssistantOnboard
   const progressBlock = buildProgressBlock(progress)
   const helperScriptPath = clean(progress.helperScriptPath) || 'scripts/reachai-page-assistant.ps1'
   const scriptDownloadUrl = clean(progress.scriptDownloadUrl) || clean(progress.skillPackageUrl) || 'manifest.endpoints.scriptDownloadUrl 或 skillPackageUrl'
-  const scaffoldCommand = clean(progress.scaffoldCommand) || `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "<页面助手接入清单 URL>" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
-  const verifyCommand = clean(progress.verifyCommand) || `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "<页面助手接入清单 URL>" -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
+  const scaffoldCommand = clean(progress.scaffoldCommand) || `.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "<页面助手接入清单 URL>" -AiCodingKey $env:REACHAI_AI_CODING_KEY -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"`
+  const verifyCommand = clean(progress.verifyCommand) || `.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "<页面助手接入清单 URL>" -AiCodingKey $env:REACHAI_AI_CODING_KEY -FrontendUrl "<业务前端地址>" -Route "${routePattern}" -PageKey "${pageKey}"`
   const bridgeApiGlobal = clean(progress.bridgeApiGlobal) || 'window.__REACHAI_PAGE_BRIDGE__'
 
   return `你现在要在当前业务前端仓库中完成 ReachAI 页面助手接入，请使用 ${context.toolName || 'Cursor/Codex/Claude Code'} 执行。
@@ -99,6 +115,9 @@ export function buildPageAssistantOnboardingPrompt(context: PageAssistantOnboard
 - 目标落盘路径固定为 .\\${helperScriptPath}；Windows 优先使用 PowerShell 5+ 执行。
 - script 下载地址：${scriptDownloadUrl}
 - 落盘完成后再执行 scaffold / verify；不要在没有 helper script 时直接假设 .\\scripts\\reachai-page-assistant.ps1 已存在。
+- 外部 AI Coding 鉴权模式：${authMode}；调用 ${externalToolPath} 时统一发送请求头 ${authHeaderName}: ${rawAiCodingAccessKey || `<${authKeyEnv}>`}；不要把 aiCodingKey 拼进 URL。
+- ${platformSessionPath} 是 platform-session 控制台登录态接口，只给 ReachAI 管理端页面使用；Cursor/Codex/helper 脚本不得拿它作为 ManifestUrl、stepReportUrl、registerPageUrl 或 checksRunUrl。
+- 本地环境如果同时有 5200 前端代理和 18603 后端服务，复制给 AI Coding 的 manifest / scaffold / verify / step report / register / checks URL 必须保持同一个可访问 origin，优先使用当前页面 origin 下的 ${externalToolPath}。
 - scaffold 命令：${scaffoldCommand}
 - verify 命令：${verifyCommand}
 
@@ -130,7 +149,8 @@ ReachAI 平台上下文：
 - 项目编码：${projectCode}
 - 项目名称：${projectName}
 - App Key：${appKey}
-- AI Coding 接入秘钥：${aiCodingAccessKey}
+- AI Coding 接入状态：${aiCodingAccessState}
+- AI Coding 请求头：${aiCodingHeader}
 - App Secret 环境变量：${appSecretEnv}（只使用变量名，不读取、不打印、不提交真实值）
 - 页面名称：${pageName}
 - pageKey：${pageKey}
@@ -144,6 +164,7 @@ ReachAI 平台上下文：
 ${progressBlock}
 
 AI Coding key 可写范围：
+- 所有 page-assistant / ai-coding 请求必须使用 X-ReachAI-AiCoding-Key header；不要使用 aiCodingKey query。
 - 可以读取页面助手接入清单、刷新最新 session、回传 step、绑定目标页、同步页面动作目录、运行页面助手自检。
 - 优先使用“页面一键注册 URL”一次提交目标页、动作目录、文件证据和验证结果；只有该 URL 缺失时，才降级使用目标页绑定、目录同步和自检三个分散接口。
 - 不要尝试调用需要平台登录态的后台管理接口；如果某接口返回 platform login required，请回到上面的 page-assistant 专用 URL。
@@ -227,7 +248,7 @@ Page Action 注册一致性硬约束：
 - 如果 AI Coding 接入秘钥未启用，跳过自动回传，在最终总结里列出每个 stepKey 的完成情况。
 
 安全边界：
-- aiCodingKey 只能用于 AI 工具、本机 PowerShell/curl 或服务端接入阶段调用 page-assistant / ai-assist 接口；浏览器运行时代码不得调用这些接口，也不得把 aiCodingKey、provisionAgentUrl 或 appSecret 写入业务前端配置、环境变量或构建包。
+- aiCodingKey 只能作为 X-ReachAI-AiCoding-Key 请求头用于 AI 工具、本机 PowerShell/curl 或服务端接入阶段调用 page-assistant / ai-coding 接口；浏览器运行时代码不得调用这些接口，也不得把 aiCodingKey、provisionAgentUrl 或 appSecret 写入业务前端配置、环境变量或构建包。
 - 默认先做只读 / 查询类动作。
 - 新增、编辑、删除、审批、导出、批量处理、状态变更、跨页面跳转等动作必须需要用户确认或标记为高风险。
 - 任何 handler 都不得绕过页面权限。

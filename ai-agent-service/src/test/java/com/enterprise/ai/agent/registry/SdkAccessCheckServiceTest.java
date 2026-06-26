@@ -64,12 +64,40 @@ class SdkAccessCheckServiceTest {
         assertEquals(SdkAccessCheckService.CheckStatus.PASS, statusOf(response, "gateway-route"));
         assertEquals(SdkAccessCheckService.CheckStatus.PASS, statusOf(response, "embed-token"));
         assertEquals(SdkAccessCheckService.CheckStatus.PASS, statusOf(response, "api-invocation"));
+        assertEquals(SdkAccessCheckService.CheckStatus.PASS, readinessOf(response, "CODE_READY"));
+        assertEquals(SdkAccessCheckService.CheckStatus.PASS, readinessOf(response, "RUNTIME_READY"));
+        assertEquals(SdkAccessCheckService.CheckStatus.PASS, readinessOf(response, "E2E_READY"));
         assertTrue(response.checks().stream()
                 .filter(item -> "api-invocation".equals(item.key()))
                 .findFirst()
                 .orElseThrow()
                 .evidence()
                 .contains("ok=true"));
+    }
+
+    @Test
+    void readinessSeparatesCodeReadyFromRuntimeAndE2EWarnings() {
+        ScanProjectEntity project = registeredProject();
+        RegistryCredentialEntity credential = new RegistryCredentialEntity();
+        credential.setAppKey("qmssmp-teams-construction-service");
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("qmssmp-teams-construction-service"))
+                .thenReturn(Optional.of(credential));
+        when(aiRegistryService.listInstances("qmssmp-teams-construction-service")).thenReturn(List.of());
+        when(scanProjectToolService.listByProject(1L)).thenReturn(List.of());
+
+        SdkAccessCheckService.SdkAccessCheckResponse response = service.check(
+                1L,
+                new SdkAccessCheckService.SdkAccessCheckRequest(
+                        null,
+                        Map.of(),
+                        "http://localhost:8080",
+                        "/api/reachai/embed-token"));
+
+        assertEquals(SdkAccessCheckService.CheckStatus.WARN, response.overallStatus());
+        assertEquals(SdkAccessCheckService.CheckStatus.PASS, readinessOf(response, "CODE_READY"));
+        assertEquals(SdkAccessCheckService.CheckStatus.WARN, readinessOf(response, "RUNTIME_READY"));
+        assertEquals(SdkAccessCheckService.CheckStatus.WARN, readinessOf(response, "E2E_READY"));
     }
 
     @Test
@@ -91,6 +119,16 @@ class SdkAccessCheckServiceTest {
             SdkAccessCheckService.SdkAccessCheckResponse response,
             String key) {
         return response.checks().stream()
+                .filter(item -> key.equals(item.key()))
+                .findFirst()
+                .orElseThrow()
+                .status();
+    }
+
+    private static SdkAccessCheckService.CheckStatus readinessOf(
+            SdkAccessCheckService.SdkAccessCheckResponse response,
+            String key) {
+        return response.readiness().stream()
                 .filter(item -> key.equals(item.key()))
                 .findFirst()
                 .orElseThrow()

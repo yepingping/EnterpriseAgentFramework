@@ -1,5 +1,14 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.context.ContextItemResponse;
+import com.enterprise.ai.agent.context.ContextItemType;
+import com.enterprise.ai.agent.context.ContextPackageResponse;
+import com.enterprise.ai.agent.context.ContextSearchResult;
+import com.enterprise.ai.agent.context.MemoryLane;
+import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateResult;
+import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateService;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
 import com.enterprise.ai.agent.agentscope.AgentRouter;
@@ -11,6 +20,7 @@ import com.enterprise.ai.agent.identity.EmbedRendererAuthorizationService;
 import com.enterprise.ai.agent.identity.EmbedSessionEntity;
 import com.enterprise.ai.agent.identity.EmbedSessionService;
 import com.enterprise.ai.agent.identity.EmbedTokenClaims;
+import com.enterprise.ai.agent.identity.EmbedTokenException;
 import com.enterprise.ai.agent.identity.EmbedTokenIssueResult;
 import com.enterprise.ai.agent.identity.EmbedTokenService;
 import com.enterprise.ai.agent.identity.PageActionEventEntity;
@@ -35,6 +45,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,12 +54,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EmbedChatControllerAuditTest {
+
+    private RuntimeContextPackageService runtimeContextService() {
+        RuntimeContextPackageService service = mock(RuntimeContextPackageService.class);
+        RuntimeContextInjectionResult skipped = RuntimeContextInjectionResult.builder()
+                .enabled(false)
+                .skippedReason("test-stub")
+                .build();
+        lenient().when(service.injectForEmbedAgent(any(), any(), any(), any(), any())).thenReturn(skipped);
+        lenient().when(service.injectForEmbedWorkflow(any(), any(), any(), any(), any(), any())).thenReturn(skipped);
+        return service;
+    }
+
+    private RuntimeMemoryCandidateService runtimeMemoryCandidateService() {
+        RuntimeMemoryCandidateService service = mock(RuntimeMemoryCandidateService.class);
+        lenient().when(service.tryCreateFromInteraction(any(), any(), any(), any(), any()))
+                .thenReturn(RuntimeMemoryCandidateResult.builder()
+                        .created(false)
+                        .skippedReason("test-stub")
+                        .build());
+        return service;
+    }
 
     @Test
     void deniedTokenExchangeIsWrittenToGuardAudit() {
@@ -66,7 +99,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 mock(EmbedWorkflowRuntimeService.class),
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         RegistryCredentialEntity credential = new RegistryCredentialEntity();
         credential.setProjectCode("demo");
@@ -118,7 +153,9 @@ class EmbedChatControllerAuditTest {
                 auditEventService,
                 mock(EmbedRendererAuthorizationService.class),
                 mock(EmbedWorkflowRuntimeService.class),
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         EmbedTokenClaims claims = new EmbedTokenClaims();
         claims.setProjectCode("bzsdk");
@@ -166,7 +203,9 @@ class EmbedChatControllerAuditTest {
                 auditEventService,
                 mock(EmbedRendererAuthorizationService.class),
                 mock(EmbedWorkflowRuntimeService.class),
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         EmbedTokenClaims claims = new EmbedTokenClaims();
         claims.setProjectCode("bzsdk");
@@ -214,7 +253,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         RegistryCredentialEntity credential = new RegistryCredentialEntity();
         credential.setProjectCode("demo");
@@ -259,7 +300,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         RegistryCredentialEntity credential = new RegistryCredentialEntity();
         credential.setProjectCode("demo");
@@ -300,7 +343,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 mock(EmbedWorkflowRuntimeService.class),
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         RegistryCredentialEntity credential = new RegistryCredentialEntity();
         credential.setProjectCode("demo");
@@ -341,7 +386,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
 
         RegistryCredentialEntity credential = new RegistryCredentialEntity();
         credential.setProjectCode("demo");
@@ -374,6 +421,7 @@ class EmbedChatControllerAuditTest {
         AgentRouter agentRouter = mock(AgentRouter.class);
         EmbedWorkflowRuntimeService embedWorkflowRuntimeService = mock(EmbedWorkflowRuntimeService.class);
         WorkflowRuntimeService workflowRuntimeService = mock(WorkflowRuntimeService.class);
+        RuntimeContextPackageService runtimeContextPackageService = runtimeContextService();
         EmbedChatController controller = new EmbedChatController(
                 mock(RegistrySecurityService.class),
                 tokenService,
@@ -386,7 +434,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                workflowRuntimeService);
+                workflowRuntimeService,
+                runtimeContextPackageService,
+                runtimeMemoryCandidateService());
 
         EmbedTokenClaims claims = new EmbedTokenClaims();
         claims.setProjectCode("orders");
@@ -481,7 +531,122 @@ class EmbedChatControllerAuditTest {
         assertEquals(7L, runtimeRequest.getValue().getMetadata().get("bindingId"));
         assertEquals("PAGE", runtimeRequest.getValue().getMetadata().get("bindingType"));
         verify(agentRouter, never()).executeByProfile(any(), eq("embed-session-1"), eq("u-1"),
-                eq("show orders"), anyList(), any());
+                eq("show orders"), anyList(), any(), any());
+    }
+
+    @Test
+    void sendMessageMapsUnpublishedWorkflowRuntimeErrorToStudioPublishHint() {
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        EmbedSessionService sessionService = mock(EmbedSessionService.class);
+        AgentRouter agentRouter = mock(AgentRouter.class);
+        EmbedWorkflowRuntimeService embedWorkflowRuntimeService = mock(EmbedWorkflowRuntimeService.class);
+        WorkflowRuntimeService workflowRuntimeService = mock(WorkflowRuntimeService.class);
+        EmbedChatController controller = new EmbedChatController(
+                mock(RegistrySecurityService.class),
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                sessionService,
+                mock(AgentEntryService.class),
+                agentRouter,
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class),
+                embedWorkflowRuntimeService,
+                workflowRuntimeService,
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setProjectCode("orders");
+        claims.setAgentId("global-agent");
+        claims.setExternalUserId("u-1");
+        when(tokenService.verify("token")).thenReturn(claims);
+        EmbedSessionEntity session = new EmbedSessionEntity();
+        session.setSessionId("embed-session-1");
+        session.setAppId("orders");
+        session.setProjectCode("orders");
+        session.setAgentId("global-agent");
+        session.setPageKey("orders.list");
+        session.setRoute("/orders");
+        session.setExternalUserId("u-1");
+        when(sessionService.requireActiveSession("embed-session-1", claims)).thenReturn(session);
+
+        AgentEntryEntity agent = new AgentEntryEntity();
+        agent.setId("global-agent");
+        agent.setKeySlug("orders-global-ai");
+        agent.setProjectCode("orders");
+
+        AgentWorkflowBindingEntity binding = new AgentWorkflowBindingEntity();
+        binding.setId(7L);
+        binding.setAgentId("global-agent");
+        binding.setWorkflowId("workflow-1");
+        binding.setBindingType("PAGE");
+        binding.setPageKey("orders.list");
+        binding.setEnabled(true);
+
+        WorkflowDefinitionEntity workflow = new WorkflowDefinitionEntity();
+        workflow.setId("workflow-1");
+        workflow.setKeySlug("orders-list-assistant");
+        workflow.setName("Orders List Assistant");
+        workflow.setWorkflowType("PAGE_ASSISTANT");
+        workflow.setRuntimeType("LANGGRAPH4J");
+
+        when(embedWorkflowRuntimeService.resolveRunnableWorkflowContext(session, null))
+                .thenReturn(Optional.of(new EmbedWorkflowRuntimeService.RunnableWorkflowContext(
+                        agent, binding, workflow, null)));
+        when(workflowRuntimeService.execute(any(WorkflowRuntimeRequest.class)))
+                .thenThrow(new IllegalArgumentException("active workflow version is required"));
+
+        ResponseEntity<ApiResult<ChatResponse>> response = controller.sendMessage(
+                "embed-session-1",
+                "Bearer token",
+                new EmbedChatController.EmbedChatMessageRequest("show orders"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("工作流尚未发布，请到 Workflow Studio 发布", response.getBody().getMessage());
+        verify(agentRouter, never()).executeByProfile(any(), eq("embed-session-1"), eq("u-1"),
+                eq("show orders"), anyList(), any(), any());
+    }
+
+    @Test
+    void sendMessageMapsExpiredEmbedSessionToRefreshHint() {
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        EmbedSessionService sessionService = mock(EmbedSessionService.class);
+        AgentRouter agentRouter = mock(AgentRouter.class);
+        EmbedChatController controller = new EmbedChatController(
+                mock(RegistrySecurityService.class),
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                sessionService,
+                mock(AgentEntryService.class),
+                agentRouter,
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class),
+                mock(EmbedWorkflowRuntimeService.class),
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setProjectCode("orders");
+        claims.setAgentId("global-agent");
+        claims.setExternalUserId("u-1");
+        when(tokenService.verify("token")).thenReturn(claims);
+        when(sessionService.requireActiveSession("embed-session-1", claims))
+                .thenThrow(new EmbedTokenException("embed chat session is expired"));
+
+        ResponseEntity<ApiResult<ChatResponse>> response = controller.sendMessage(
+                "embed-session-1",
+                "Bearer token",
+                new EmbedChatController.EmbedChatMessageRequest("show orders"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals("秘钥超时，请刷新页面后重试", response.getBody().getMessage());
+        verify(agentRouter, never()).executeByProfile(any(), eq("embed-session-1"), eq("u-1"),
+                eq("show orders"), anyList(), any(), any());
     }
 
     @Test
@@ -491,6 +656,7 @@ class EmbedChatControllerAuditTest {
         AgentRouter agentRouter = mock(AgentRouter.class);
         EmbedWorkflowRuntimeService embedWorkflowRuntimeService = mock(EmbedWorkflowRuntimeService.class);
         WorkflowRuntimeService workflowRuntimeService = mock(WorkflowRuntimeService.class);
+        RuntimeContextPackageService runtimeContextPackageService = runtimeContextService();
         ObjectMapper objectMapper = new ObjectMapper();
         EmbedChatController controller = new EmbedChatController(
                 mock(RegistrySecurityService.class),
@@ -504,7 +670,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                workflowRuntimeService);
+                workflowRuntimeService,
+                runtimeContextPackageService,
+                runtimeMemoryCandidateService());
 
         EmbedTokenClaims claims = new EmbedTokenClaims();
         claims.setProjectCode("orders");
@@ -555,7 +723,113 @@ class EmbedChatControllerAuditTest {
         ArgumentCaptor<WorkflowRuntimeRequest> runtimeRequest = ArgumentCaptor.forClass(WorkflowRuntimeRequest.class);
         verify(workflowRuntimeService).execute(runtimeRequest.capture());
         assertEquals("show orders", runtimeRequest.getValue().getMessage());
-        verify(agentRouter, never()).executeByProfile(any(), any(), any(), any(), anyList(), any());
+        verify(agentRouter, never()).executeByProfile(any(), any(), any(), any(), anyList(), any(), any());
+    }
+
+    @Test
+    void sendMessageReturnsRuntimeContextHitSummariesInMetadata() {
+        EmbedTokenService tokenService = mock(EmbedTokenService.class);
+        EmbedSessionService sessionService = mock(EmbedSessionService.class);
+        AgentRouter agentRouter = mock(AgentRouter.class);
+        EmbedWorkflowRuntimeService embedWorkflowRuntimeService = mock(EmbedWorkflowRuntimeService.class);
+        RuntimeContextPackageService runtimeContextPackageService = mock(RuntimeContextPackageService.class);
+        EmbedChatController controller = new EmbedChatController(
+                mock(RegistrySecurityService.class),
+                tokenService,
+                mock(BusinessUserDirectoryService.class),
+                sessionService,
+                mock(AgentEntryService.class),
+                agentRouter,
+                new ObjectMapper(),
+                mock(GuardDecisionLogService.class),
+                mock(EmbedAuditEventService.class),
+                mock(EmbedRendererAuthorizationService.class),
+                embedWorkflowRuntimeService,
+                mock(WorkflowRuntimeService.class),
+                runtimeContextPackageService,
+                runtimeMemoryCandidateService());
+
+        EmbedTokenClaims claims = new EmbedTokenClaims();
+        claims.setProjectCode("orders");
+        claims.setAgentId("global-agent");
+        claims.setExternalUserId("u-1");
+        claims.setRoles(List.of("USER"));
+        when(tokenService.verify("token")).thenReturn(claims);
+        EmbedSessionEntity session = new EmbedSessionEntity();
+        session.setSessionId("embed-session-1");
+        session.setAppId("orders");
+        session.setProjectCode("orders");
+        session.setAgentId("global-agent");
+        session.setPageInstanceId("page-1");
+        session.setExternalUserId("u-1");
+        session.setGlobalUserId("g-1");
+        when(sessionService.requireActiveSession("embed-session-1", claims)).thenReturn(session);
+        when(embedWorkflowRuntimeService.resolveRunnableWorkflowContext(session, null)).thenReturn(Optional.empty());
+        AgentEntryEntity agent = agentEntry("global-agent", "orders", true);
+        agent.setKeySlug("orders-global-ai");
+        agent.setEntryConfigJson("{\"intentType\":\"CHAT\",\"runtimePlacement\":\"CENTRAL\"}");
+        when(embedWorkflowRuntimeService.resolveAgentEntry("global-agent")).thenReturn(Optional.of(agent));
+
+        ContextSearchResult hit = ContextSearchResult.builder()
+                .item(ContextItemResponse.builder()
+                        .id(101L)
+                        .itemType(ContextItemType.PREFERENCE.name())
+                        .memoryLane(MemoryLane.RUNTIME_USER.name())
+                        .title("视觉偏好")
+                        .content("用户偏好使用深色模式")
+                        .summary("偏好深色模式")
+                        .confidence(new BigDecimal("0.9000"))
+                        .trustLevel("HIGH")
+                        .build())
+                .rankScore(2.4)
+                .hitReason("content token keyword match")
+                .scoreBreakdown("tokens=0.6, trust=0.7")
+                .build();
+        ContextPackageResponse pkg = ContextPackageResponse.builder()
+                .memoryLane(MemoryLane.RUNTIME_USER.name())
+                .tenantId("default")
+                .totalItems(1)
+                .truncatedCount(0)
+                .projectMemory(List.of())
+                .userMemory(List.of(hit))
+                .pageContext(List.of())
+                .workflowContext(List.of())
+                .apiContext(List.of())
+                .rules(List.of())
+                .evidenceSummary(List.of())
+                .build();
+        when(runtimeContextPackageService.injectForEmbedAgent(any(), any(), any(), any(), any()))
+                .thenReturn(RuntimeContextInjectionResult.builder()
+                        .enabled(true)
+                        .packageResponse(pkg)
+                        .itemCount(1)
+                        .truncatedCount(0)
+                        .build());
+        when(agentRouter.executeByProfile(any(AgentRuntimeProfile.class), eq("embed-session-1"), eq("u-1"),
+                eq("我想切换成深色主题"), anyList(), any(), any()))
+                .thenReturn(AgentResult.builder()
+                        .answer("已按你的偏好处理。")
+                        .metadata(Map.of("traceId", "trace-1"))
+                        .build());
+
+        ResponseEntity<ApiResult<ChatResponse>> response = controller.sendMessage(
+                "embed-session-1",
+                "Bearer token",
+                new EmbedChatController.EmbedChatMessageRequest("我想切换成深色主题"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        Map<String, Object> metadata = response.getBody().getData().getMetadata();
+        assertEquals(true, metadata.get("runtimeContextEnabled"));
+        assertEquals(1, metadata.get("runtimeContextItemCount"));
+        List<?> hits = (List<?>) metadata.get("runtimeContextHits");
+        assertEquals(1, hits.size());
+        Map<?, ?> firstHit = (Map<?, ?>) hits.get(0);
+        assertEquals(101L, firstHit.get("itemId"));
+        assertEquals("PREFERENCE", firstHit.get("itemType"));
+        assertEquals("视觉偏好", firstHit.get("title"));
+        assertEquals("content token keyword match", firstHit.get("hitReason"));
+        assertEquals("tokens=0.6, trust=0.7", firstHit.get("scoreBreakdown"));
+        assertEquals(false, firstHit.containsKey("content"));
     }
 
     @Test
@@ -577,7 +851,9 @@ class EmbedChatControllerAuditTest {
                 mock(EmbedAuditEventService.class),
                 mock(EmbedRendererAuthorizationService.class),
                 embedWorkflowRuntimeService,
-                mock(WorkflowRuntimeService.class));
+                mock(WorkflowRuntimeService.class),
+                runtimeContextService(),
+                runtimeMemoryCandidateService());
         EmbedTokenClaims claims = new EmbedTokenClaims();
         claims.setProjectCode("bzsdk");
         claims.setAgentId("team-agent");
@@ -604,7 +880,7 @@ class EmbedChatControllerAuditTest {
                         "requestId", "page-action-1",
                         "actionKey", "team.openDetail")))
                 .build();
-        when(agentRouter.executeByProfile(any(AgentRuntimeProfile.class), eq("embed-session-1"), eq("u-1"), eq("open"), anyList(), any()))
+        when(agentRouter.executeByProfile(any(AgentRuntimeProfile.class), eq("embed-session-1"), eq("u-1"), eq("open"), anyList(), any(), any()))
                 .thenReturn(AgentResult.builder().answer("ok").uiRequest(uiRequest).build());
 
         ResponseEntity<ApiResult<ChatResponse>> response = controller.sendMessage(

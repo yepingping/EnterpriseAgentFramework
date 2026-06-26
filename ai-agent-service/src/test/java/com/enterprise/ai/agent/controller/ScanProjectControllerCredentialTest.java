@@ -136,6 +136,7 @@ class ScanProjectControllerCredentialTest {
                 1L,
                 "qmssmp-teams-construction-service",
                 SdkAccessCheckService.CheckStatus.PASS,
+                List.of(),
                 List.of(new SdkAccessCheckService.SdkAccessCheckItem(
                         "api-invocation",
                         "最终接口自检",

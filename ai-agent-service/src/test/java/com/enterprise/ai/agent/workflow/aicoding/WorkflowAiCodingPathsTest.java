@@ -17,9 +17,11 @@ class WorkflowAiCodingPathsTest {
             "/api/workflows/wf-1/ai-coding/validate",
             "/api/workflows/wf-1/ai-coding/run",
             "/api/workflows/wf-1/ai-coding/versions",
+            "/api/workflows/wf-1/ai-coding/publish",
             "/api/workflows/wf-1/ai-coding/runs",
             "/api/workflows/wf-1/ai-coding/runs/trace-1",
             "/api/workflows/wf-1/ai-coding/page-assistant/catalog",
+            "/api/workflows/wf-1/ai-coding/page-assistant/validate",
             "/api/workflows/wf-1/ai-coding/page-assistant/smoke-test"
     })
     void matchesWorkflowAiCodingPaths(String path) {
@@ -31,6 +33,9 @@ class WorkflowAiCodingPathsTest {
             "/api/workflows/studio/generate-draft",
             "/api/workflows/wf-1/studio/edit-draft",
             "/api/workflows/wf-1/ai-coding-extra/context",
+            "/api/workflows/wf-1/ai-coding/unknown",
+            "/api/workflows/wf-1/ai-coding/page-assistant/unknown",
+            "/api/workflows/wf-1/ai-coding/runs/trace-1/extra",
             "/api/workflows/ai-coding/workflows/extra",
             "/api/workflows//ai-coding/context",
             "/api/agents"

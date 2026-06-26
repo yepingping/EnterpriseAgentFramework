@@ -379,6 +379,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/domain/DomainClassifierTest.vue'),
         meta: { title: '分类器测试' },
       },
+      {
+        path: 'context/governance',
+        name: 'ContextGovernance',
+        component: () => import('@/views/context/ContextGovernance.vue'),
+        meta: { title: '上下文治理' },
+      },
     ],
   },
 ]

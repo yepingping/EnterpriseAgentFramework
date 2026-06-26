@@ -13,7 +13,9 @@ Use this skill when a business frontend repository needs to connect one concrete
 - Registering a page through `endpoints.registerPageUrl` creates or reuses a `PAGE_ASSISTANT` Workflow and mounts it to the `PAGE_COPILOT` Agent through `ai_agent_workflow_binding`.
 - Workflow graph editing, debugging, publishing, versions, traces, and replay belong to Workflow Studio. Agent Studio is retired.
 - Never read, print, or commit app secrets. Only use the configured environment variable name.
-- `aiCodingKey` is for AI tools, local shell, or server-side onboarding calls only. Browser runtime code must not call `/api/ai-assist/**` page-assistant endpoints and must not store `aiCodingKey`, `provisionAgentUrl`, or `appSecret` in front-end configuration or bundles.
+- `aiCodingKey` is for AI tools, local shell, or server-side onboarding calls only. Browser runtime code must not call `/api/ai-coding/projects/{projectId}/page-assistant/**` endpoints and must not store `aiCodingKey`, `provisionAgentUrl`, or `appSecret` in front-end configuration or bundles.
+- Page Assistant `/api/ai-coding/projects/{projectId}/page-assistant/**` endpoint URLs do not carry `aiCodingKey`. Use `-AiCodingKey $env:REACHAI_AI_CODING_KEY` with the helper script or send `X-ReachAI-AiCoding-Key` from curl/CLI/server-side scripts. Do not use platform Bearer login for external tool calls.
+- Manifest `auth.mode=ai-coding-key` means Cursor/Codex/helper scripts must use `auth.externalToolPath` and `auth.headerName`; `auth.platformSessionPath` is for the ReachAI console UI only. Do not mix the two origins or copy platform-session URLs into local helper commands.
 
 ## Workflow
 
@@ -36,6 +38,7 @@ Use this skill when a business frontend repository needs to connect one concrete
 - Full skill package: `endpoints.skillPackageUrl`
 - Target path: `scaffold.helperScriptPath` (default `scripts/reachai-page-assistant.ps1`)
 - Commands: `scaffold.scaffoldCommand`, `scaffold.verifyCommand`
+- Header-auth commands expect `REACHAI_AI_CODING_KEY` to be set locally or `-AiCodingKey` to be passed explicitly; the helper sends it as `X-ReachAI-AiCoding-Key`.
 
 ## Register files
 
@@ -58,10 +61,12 @@ Use this skill when a business frontend repository needs to connect one concrete
 - Query-flow PASS requires an end-to-end evidence chain, not only handler `SUCCESS`: non-empty `setFilters` args, updated current page filters/state, a real business query request carrying the corresponding query parameter, and `readTable` from the refreshed table.
 - Embedded-chat query PASS also requires evidence that the chat response action queue was consumed: a `pageActionQueue` or `pageActionRequest` entry, bridge invokes for the requested action keys, and a POST to `/api/embed/chat/sessions/{sessionId}/page-actions/{requestId}/result` for each request id.
 - Helper verify uses Playwright when Node.js + `playwright` are available; optional `-StorageStatePath` for login state
+- Helper verify returns structured `failureCode` values such as `PLAYWRIGHT_MISSING`, `JSON_PARSE_ERROR`, `LOGIN_REQUIRED`, and `FRONTEND_UNREACHABLE`; use those codes in the handoff instead of pasting raw stderr as the only diagnosis.
 - Default readonly invoke: `getPageState`, `readTable`; never auto-invoke `openRowAction`
 - Use `-ProbeMutatingActions` only when explicitly probing `setFilters/search/reset`
 - Platform checks append `platformCheck` and do not overwrite Cursor-reported evidence
 - String-only `files` shorthand is accepted but marked `HASH_MISSING`; run helper verify for sha256
+- Embed sessions snapshot `bridgeActions` when the chat session is created. After adding or renaming actions in the business frontend, refresh the page or recreate the embed session before testing chat-triggered Page Actions.
 
 ## References
 

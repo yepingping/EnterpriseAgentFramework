@@ -351,11 +351,11 @@ public class WorkflowAiCodingService {
         if (!releaseValidation.valid()) {
             warnings.add("Release validation currently has errors; workflow is not ready to publish");
         } else if (draftDirty) {
-            warnings.add("Release validation passed for current draft, but publish must be performed manually in admin UI");
+            warnings.add("Release validation passed for current draft; call POST /api/workflows/{workflowId}/ai-coding/publish to publish the draft");
         } else if (activeVersion == null) {
-            warnings.add("No published version yet; publish must be performed manually in admin UI after draft is ready");
+            warnings.add("No published version yet; call POST /api/workflows/{workflowId}/ai-coding/publish after the draft is ready");
         } else {
-            warnings.add("Workflow AI Coding does not expose publish; manual publish is required in admin UI");
+            warnings.add("Workflow AI Coding can publish a validated draft through POST /api/workflows/{workflowId}/ai-coding/publish");
         }
 
         return WorkflowAiCodingVersionsResponse.builder()
@@ -367,6 +367,24 @@ public class WorkflowAiCodingService {
                 .draftDirty(draftDirty)
                 .warnings(warnings)
                 .build();
+    }
+
+    @Transactional
+    public WorkflowAiCodingPublishResponse publish(String workflowId, WorkflowAiCodingPublishRequest request) {
+        WorkflowDefinitionEntity workflow = requireAccessibleWorkflow(workflowId);
+        WorkflowAiCodingPublishRequest safeRequest = request == null
+                ? WorkflowAiCodingPublishRequest.builder().build()
+                : request;
+        Integer rolloutPercent = safeRequest.getRolloutPercent();
+        WorkflowVersionService.WorkflowPublishRequest publishRequest =
+                new WorkflowVersionService.WorkflowPublishRequest(
+                        safeRequest.getVersion(),
+                        rolloutPercent == null ? 100 : rolloutPercent,
+                        safeRequest.getNote(),
+                        safeRequest.getPublishedBy());
+        WorkflowVersionEntity published = versionService.publish(workflow.getId(), publishRequest);
+        auditPublish(workflow, safeRequest, published);
+        return WorkflowAiCodingPublishResponse.fromEntity(published);
     }
 
     public WorkflowAiCodingRunListResponse listRuns(String workflowId, Integer limit, Integer days) {
@@ -637,6 +655,36 @@ public class WorkflowAiCodingService {
                 workflow.getId(),
                 "DEBUG_RUN",
                 null,
+                metadata);
+    }
+
+    private void auditPublish(WorkflowDefinitionEntity workflow,
+                              WorkflowAiCodingPublishRequest request,
+                              WorkflowVersionEntity published) {
+        PlatformPrincipal principal = PlatformAuthContext.get();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("workflowId", workflow.getId());
+        metadata.put("projectId", workflow.getProjectId());
+        metadata.put("projectCode", workflow.getProjectCode());
+        if (published != null) {
+            metadata.put("versionId", published.getId());
+            metadata.put("version", published.getVersion());
+            metadata.put("status", published.getStatus());
+            metadata.put("rolloutPercent", published.getRolloutPercent());
+        }
+        if (principal != null) {
+            metadata.put("userId", principal.userId());
+            metadata.put("username", principal.username());
+        } else {
+            metadata.put("authSource", aiCodingAuthService.auditActorLabel(workflow.getProjectId()));
+        }
+        guardDecisionLogService.record(
+                null,
+                "WORKFLOW_AI_CODING",
+                "WORKFLOW",
+                workflow.getId(),
+                "PUBLISH",
+                request == null ? null : request.getNote(),
                 metadata);
     }
 

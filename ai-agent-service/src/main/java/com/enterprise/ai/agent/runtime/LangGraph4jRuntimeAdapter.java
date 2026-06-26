@@ -3082,9 +3082,25 @@ public class LangGraph4jRuntimeAdapter implements AgentRuntimeAdapter {
         if (isWorkflowSourceType(runtimeContext.getSourceType())) {
             state.put("workflowId", nullToEmpty(runtimeContext.getSourceId()));
         }
-        state.put(SYSTEM_PROMPT, firstNonBlank(asString(config.get(SYSTEM_PROMPT)), asString(config.get("prompt")), nullToEmpty(runtimeContext.getSystemPrompt())));
+        state.put(SYSTEM_PROMPT, mergeRuntimeContextPrompt(
+                firstNonBlank(asString(config.get(SYSTEM_PROMPT)), asString(config.get("prompt")), nullToEmpty(runtimeContext.getSystemPrompt())),
+                request));
         state.put(MODEL_INSTANCE_ID, firstNonBlank(asString(config.get(MODEL_INSTANCE_ID)), nullToEmpty(runtimeContext.getModelInstanceId())));
         return state;
+    }
+
+    private String mergeRuntimeContextPrompt(String systemPrompt, AgentRuntimeRequest request) {
+        if (request == null || request.getRuntimeContext() == null) {
+            return systemPrompt;
+        }
+        String runtimePrompt = request.getRuntimeContext().getPromptSection();
+        if (runtimePrompt == null || runtimePrompt.isBlank()) {
+            return systemPrompt;
+        }
+        if (systemPrompt == null || systemPrompt.isBlank()) {
+            return runtimePrompt;
+        }
+        return systemPrompt + "\n\n" + runtimePrompt;
     }
 
     private Map<String, Object> requestParams(AgentRuntimeRequest request) {

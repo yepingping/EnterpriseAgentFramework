@@ -3,6 +3,7 @@ package com.enterprise.ai.agent.workflow;
 import com.enterprise.ai.agent.agentscope.AgentRouter;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.model.AgentResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.runtime.GraphRuntimeContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ public class WorkflowRuntimeService {
                 WorkflowRuntimeGraphAdapter.RuntimeContextOptions.builder()
                         .metadata(metadata)
                         .build());
+        mergeRuntimeContextIntoGraph(runtimeGraph.runtimeContext(), request.getRuntimeContext());
         return agentRouter.executeByGraphSpec(
                 runtimeGraph.graphSpec(),
                 runtimeGraph.runtimeContext(),
@@ -46,7 +48,8 @@ public class WorkflowRuntimeService {
                 userId(request.getPrincipal()),
                 request.getMessage(),
                 roles(request.getPrincipal()),
-                metadata);
+                metadata,
+                request.getRuntimeContext());
     }
 
     public WorkflowRuntimeGraphAdapter.RuntimeGraph toRuntimeGraph(AgentEntryEntity agent,
@@ -110,9 +113,26 @@ public class WorkflowRuntimeService {
             return null;
         }
         return firstText(
-                stringValue(principal.get("externalUserId")),
                 stringValue(principal.get("globalUserId")),
+                stringValue(principal.get("externalUserId")),
                 stringValue(principal.get("userId")));
+    }
+
+    private void mergeRuntimeContextIntoGraph(GraphRuntimeContext runtimeContext,
+                                              RuntimeContextInjectionResult runtimeContextInjection) {
+        if (runtimeContext == null || runtimeContextInjection == null || !runtimeContextInjection.isEnabled()) {
+            return;
+        }
+        String prompt = runtimeContextInjection.getPromptSection();
+        if (!StringUtils.hasText(prompt)) {
+            return;
+        }
+        String existing = runtimeContext.getSystemPrompt();
+        if (!StringUtils.hasText(existing)) {
+            runtimeContext.setSystemPrompt(prompt);
+            return;
+        }
+        runtimeContext.setSystemPrompt(existing + "\n\n" + prompt);
     }
 
     private List<String> roles(Map<String, Object> principal) {

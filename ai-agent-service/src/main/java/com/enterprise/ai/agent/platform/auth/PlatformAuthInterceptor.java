@@ -1,7 +1,7 @@
 package com.enterprise.ai.agent.platform.auth;
 
+import com.enterprise.ai.agent.aicoding.AiCodingExternalAccessPolicy;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
-import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPaths;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -33,7 +33,7 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
         if (isPublic(request) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        if (isWorkflowAiCodingAccess(path)) {
+        if (isExternalAiCodingAccess(request, path)) {
             return true;
         }
         Optional<PlatformPrincipal> principal = authService.authenticate(extractBearer(request));
@@ -71,70 +71,22 @@ public class PlatformAuthInterceptor implements HandlerInterceptor {
                 || path.startsWith("/api/embed/")
                 || path.startsWith("/api/registry/")
                 || path.startsWith("/api/v1/agents/")
-                || path.startsWith("/api/ai-assist/skills/")
-                || isAiCodingManifestAccess(request, path)
-                || isAiCodingAgentProvisionAccess(request, path)
-                || isAiCodingAccessSessionAccess(request, path)
-                || isAiCodingPageAssistantAccess(request, path);
+                || path.startsWith("/api/ai-assist/skills/");
     }
 
-    private boolean isWorkflowAiCodingAccess(String path) {
-        return WorkflowAiCodingPaths.matchesRequestPath(path);
+    private boolean isExternalAiCodingAccess(HttpServletRequest request, String path) {
+        return AiCodingExternalAccessPolicy.matchesRequest(request.getMethod(), path);
     }
 
     private void captureAiCodingKey(HttpServletRequest request) {
-        String headerValue = request.getHeader(AI_CODING_KEY_HEADER);
-        if (StringUtils.hasText(headerValue)) {
-            AiCodingKeyContext.set(headerValue);
-            return;
-        }
-        String queryValue = request.getParameter("aiCodingKey");
-        if (StringUtils.hasText(queryValue)) {
-            AiCodingKeyContext.set(queryValue);
+        String accessKey = extractAiCodingKey(request);
+        if (StringUtils.hasText(accessKey)) {
+            AiCodingKeyContext.set(accessKey);
         }
     }
 
-    private boolean isAiCodingManifestAccess(HttpServletRequest request, String path) {
-        return "GET".equalsIgnoreCase(request.getMethod())
-                && path.startsWith("/api/ai-assist/projects/")
-                && path.endsWith("/onboarding-manifest")
-                && request.getParameter("aiCodingKey") != null;
-    }
-
-    private boolean isAiCodingAccessSessionAccess(HttpServletRequest request, String path) {
-        if (request.getParameter("aiCodingKey") == null
-                || !path.startsWith("/api/ai-assist/projects/")
-                || !path.contains("/access-sessions/")) {
-            return false;
-        }
-        return ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/access-sessions/latest"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/checks/run"));
-    }
-
-    private boolean isAiCodingAgentProvisionAccess(HttpServletRequest request, String path) {
-        return request.getParameter("aiCodingKey") != null
-                && "POST".equalsIgnoreCase(request.getMethod())
-                && path.startsWith("/api/ai-assist/projects/")
-                && path.endsWith("/agents/provision");
-    }
-
-    private boolean isAiCodingPageAssistantAccess(HttpServletRequest request, String path) {
-        if (request.getParameter("aiCodingKey") == null
-                || !path.startsWith("/api/ai-assist/projects/")
-                || !path.contains("/page-assistant/")) {
-            return false;
-        }
-        return ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/onboarding-manifest"))
-                || ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/sessions"))
-                || ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/sessions/latest"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/page-assistant/pages/register"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/report"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/workflow-ai-coding-result"))
-                || ("DELETE".equalsIgnoreCase(request.getMethod()) && path.endsWith("/workflow-ai-coding-result"))
-                || ("PUT".equalsIgnoreCase(request.getMethod()) && path.endsWith("/target"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/catalog/sync"))
-                || ("POST".equalsIgnoreCase(request.getMethod()) && path.endsWith("/checks/run"));
+    private String extractAiCodingKey(HttpServletRequest request) {
+        return request.getHeader(AI_CODING_KEY_HEADER);
     }
 
     private String extractBearer(HttpServletRequest request) {

@@ -10,7 +10,7 @@ Never place `appSecret` or project `aiCodingKey` in:
 - Markdown reports.
 - Terminal output summaries.
 
-`aiCodingKey` and `provisionAgentUrl` belong to AI coding tools, local shell scripts, or server-side onboarding only. Browser runtime must not call `/api/ai-assist/**` provisioning or access-session endpoints.
+`aiCodingKey` and `provisionAgentUrl` belong to AI coding tools, local shell scripts, or server-side onboarding only. Browser runtime must not call `/api/ai-coding/projects/{projectId}/onboarding-manifest`, `/api/ai-coding/projects/{projectId}/agents/provision`, or `/api/ai-coding/projects/{projectId}/access-sessions` endpoints.
 
 Use the manifest field `sdk.config.appSecretEnv` and write configuration like:
 

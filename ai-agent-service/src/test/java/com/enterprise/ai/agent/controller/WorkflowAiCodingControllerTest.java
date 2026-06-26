@@ -6,6 +6,8 @@ import com.enterprise.ai.agent.workflow.aicoding.WorkflowAccessDeniedException;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingUnauthorizedException;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingContextResponse;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingCreateRequest;
+import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPublishRequest;
+import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPublishResponse;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingService;
 import com.enterprise.ai.agent.workflow.aicoding.pageassistant.WorkflowPageAssistantAiCodingService;
 import com.enterprise.ai.agent.workflow.aicoding.pageassistant.WorkflowPageAssistantCatalogResponse;
@@ -15,12 +17,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +45,9 @@ class WorkflowAiCodingControllerTest {
 
         Method context = WorkflowAiCodingController.class.getMethod("context", String.class);
         assertArrayEquals(new String[]{"/context"}, context.getAnnotation(GetMapping.class).value());
+
+        Method publish = WorkflowAiCodingController.class.getMethod("publish", String.class, WorkflowAiCodingPublishRequest.class);
+        assertArrayEquals(new String[]{"/publish"}, publish.getAnnotation(PostMapping.class).value());
     }
 
     @Test
@@ -50,6 +58,24 @@ class WorkflowAiCodingControllerTest {
         when(service.getContext("wf-1")).thenReturn(expected);
 
         assertEquals(expected, controller.context("wf-1").getBody());
+    }
+
+    @Test
+    void publishDelegatesToService() {
+        WorkflowAiCodingService service = mock(WorkflowAiCodingService.class);
+        WorkflowAiCodingController controller = new WorkflowAiCodingController(service, mock(WorkflowPageAssistantAiCodingService.class));
+        WorkflowAiCodingPublishRequest request = WorkflowAiCodingPublishRequest.builder()
+                .version("v1")
+                .note("first publish")
+                .publishedBy("codex")
+                .build();
+        WorkflowAiCodingPublishResponse expected = WorkflowAiCodingPublishResponse.builder()
+                .workflowId("wf-1")
+                .version("v1")
+                .build();
+        when(service.publish("wf-1", request)).thenReturn(expected);
+
+        assertEquals(expected, controller.publish("wf-1", request).getBody());
     }
 
     @Test
@@ -98,6 +124,12 @@ class WorkflowAiCodingControllerTest {
     void adviceMapsUnauthorizedTo401() {
         var response = advice.unauthorized(new WorkflowAiCodingUnauthorizedException("aiCodingKey is required"));
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+    }
+
+    @Test
+    void adviceCoversGenericAiCodingGatewayDiscovery() {
+        RestControllerAdvice annotation = WorkflowAiCodingControllerAdvice.class.getAnnotation(RestControllerAdvice.class);
+        assertTrue(Arrays.asList(annotation.assignableTypes()).contains(AiCodingGatewayController.class));
     }
 
     @Test

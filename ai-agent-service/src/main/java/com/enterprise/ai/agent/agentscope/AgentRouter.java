@@ -1,5 +1,7 @@
 package com.enterprise.ai.agent.agentscope;
 
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.model.AgentResult;
 import com.enterprise.ai.agent.runtime.AgentRuntimeAdapter;
@@ -56,6 +58,7 @@ public class AgentRouter {
     private final AgentRuntimeSelector runtimeSelector;
     private final EmbeddedRuntimeDispatchService embeddedRuntimeDispatchService;
     private final GuardDecisionLogService guardDecisionLogService;
+    private final RuntimeContextPackageService runtimeContextPackageService;
 
     public AgentResult executeByProfile(AgentRuntimeProfile profile, String sessionId,
                                         String userId, String message) {
@@ -70,6 +73,13 @@ public class AgentRouter {
     public AgentResult executeByProfile(AgentRuntimeProfile profile, String sessionId,
                                         String userId, String message, List<String> roles,
                                         Map<String, Object> metadata) {
+        return executeByProfile(profile, sessionId, userId, message, roles, metadata, null);
+    }
+
+    public AgentResult executeByProfile(AgentRuntimeProfile profile, String sessionId,
+                                        String userId, String message, List<String> roles,
+                                        Map<String, Object> metadata,
+                                        RuntimeContextInjectionResult runtimeContext) {
         String traceId = UUID.randomUUID().toString();
         String intentType = profile.getIntentType();
         log.info("[AgentRouter] Execute profile: agent={}, keySlug={}, runtime={}, placement={}, sessionId={}, roles={}, traceId={}",
@@ -85,6 +95,7 @@ public class AgentRouter {
                 .intentType(intentType)
                 .agentRuntimeProfile(profile)
                 .metadata(metadata)
+                .runtimeContext(runtimeContext)
                 .build();
         AgentResult denied = denyIfAgentRoleNotAllowed(request, intentType, profile.getAllowedRoles(), agentKeyOf(profile));
         if (denied != null) {
@@ -108,6 +119,17 @@ public class AgentRouter {
                                           String message,
                                           List<String> roles,
                                           Map<String, Object> metadata) {
+        return executeByGraphSpec(graphSpec, runtimeContext, sessionId, userId, message, roles, metadata, null);
+    }
+
+    public AgentResult executeByGraphSpec(GraphSpec graphSpec,
+                                          GraphRuntimeContext runtimeContext,
+                                          String sessionId,
+                                          String userId,
+                                          String message,
+                                          List<String> roles,
+                                          Map<String, Object> metadata,
+                                          RuntimeContextInjectionResult runtimeContextInjection) {
         if (graphSpec == null || runtimeContext == null) {
             throw new IllegalArgumentException("graphSpec and runtimeContext are required");
         }
@@ -138,6 +160,7 @@ public class AgentRouter {
                 .graphSpec(graphSpec)
                 .graphRuntimeContext(runtimeContext)
                 .metadata(safeMetadata)
+                .runtimeContext(runtimeContextInjection)
                 .build();
         return executeRuntime(request, intentType);
     }
@@ -251,6 +274,10 @@ public class AgentRouter {
                 metadata.put("embeddedFallbackReason", embedded.getMetadata().get("embeddedFallbackReason"));
             }
             request.setMetadata(metadata);
+            RuntimeContextInjectionResult fallbackContext = injectRuntimeContextForHybridFallback(request);
+            if (fallbackContext != null) {
+                request.setRuntimeContext(fallbackContext);
+            }
         }
         try {
             AgentRuntimeAdapter adapter = runtimeSelector.select(request);
@@ -269,6 +296,17 @@ public class AgentRouter {
                     .metadata(metadata)
                     .build();
         }
+    }
+
+    private RuntimeContextInjectionResult injectRuntimeContextForHybridFallback(AgentRuntimeRequest request) {
+        RuntimeContextInjectionResult runtimeContext = request == null ? null : request.getRuntimeContext();
+        if (runtimeContext == null || runtimeContext.isEnabled()) {
+            return runtimeContext;
+        }
+        if (!"hybrid-placement-deferred".equals(runtimeContext.getSkippedReason())) {
+            return runtimeContext;
+        }
+        return runtimeContextPackageService.injectForCentralFallback(runtimeContext);
     }
 
     private AgentResult executeEmbedded(AgentRuntimeRequest request, String intentType, boolean allowCentralFallback) {

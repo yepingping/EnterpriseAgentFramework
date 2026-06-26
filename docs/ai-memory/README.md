@@ -8,6 +8,7 @@
 2. `.cursor/rules/reachai-project.mdc`：Cursor 自动加载规则。
 3. 本目录文件：
    - `PROJECT-MEMORY.md`：项目定位、模块地图、当前事实。
+   - `CONTEXT-GOVERNANCE-BASELINE.md`：Context Governance Kernel v1 精简架构基线（AI 必读）。
    - `WORKING-RULES.md`：开发、SQL、验证、协作规则。
    - `DECISIONS.md`：已经形成的架构和命名决策。
    - `KNOWN-PITFALLS.md`：历史问题、错误签名和诊断顺序。

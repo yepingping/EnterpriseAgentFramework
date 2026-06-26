@@ -9,10 +9,10 @@ Do not assume every ReachAI endpoint uses the same JSON wrapper.
 | API family | Wrapped in `ApiResult`? | Read business fields from |
 | --- | --- | --- |
 | Embed 对外 API：`POST /api/embed/token/exchange`、`/api/embed/chat/sessions`、messages、page-actions | **Yes** | `data.token`, `data.sessionId`, `data.answer`, ... |
-| `POST /api/ai-assist/projects/{projectId}/agents/provision` | **No** | `agent.keySlug` (not `data.agent.keySlug`) |
-| AI access sessions：`/api/ai-assist/.../access-sessions/**` | **No** | top-level `sessionId`, `status`, steps, ... |
+| `POST /api/ai-coding/projects/{projectId}/agents/provision` | **No** | `agent.keySlug` (not `data.agent.keySlug`) |
+| AI access sessions：`/api/ai-coding/.../access-sessions/**` | **No** | top-level `sessionId`, `status`, steps, ... |
 | `POST /api/scan-projects/{projectId}/sdk-access-check` | **No** | top-level `overallStatus`, `checks` |
-| `GET /api/ai-assist/projects/{projectId}/onboarding-manifest` | **No** | top-level `project`, `embed`, `agentProvisioning`, ... |
+| `GET /api/ai-coding/projects/{projectId}/onboarding-manifest` | **No** | top-level `project`, `embed`, `agentProvisioning`, ... |
 
 Embed success example:
 
@@ -39,9 +39,17 @@ Keep the same `pageKey`, `pageInstanceId`, `route`, and `origin` across token ex
 
 ## Manifest
 
-`GET /api/ai-assist/projects/{projectId}/onboarding-manifest?aiCodingKey={key}`
+`GET /api/ai-coding/projects/{projectId}/onboarding-manifest`
 
-AI coding tools normally use the `aiCodingKey` URL from the platform prompt. Platform console users may call the same endpoint with their normal login token.
+AI coding tools should use the URL from the platform prompt without adding `aiCodingKey` to the query string. Send the project key as:
+
+```http
+X-ReachAI-AiCoding-Key: {key}
+```
+
+Do not use platform Bearer login for external tool calls. Platform console users may still use console-owned `/api/ai-assist/projects/**` endpoints with their normal login token.
+
+The response does not echo the raw key in `aiCodingAccess.accessKey` or `agentProvisioning.provisionAgentUrl`. Reuse the same header when calling returned platform URLs. Do not add `aiCodingKey` query parameters to returned URLs.
 
 Important fields:
 - `project.id`: ReachAI project id.
@@ -50,7 +58,7 @@ Important fields:
 - `project.registryAppKey`: app key for signed registration.
 - `project.registryCredentialConfigured`: whether ReachAI has a saved credential.
 - `aiCodingAccess.enabled`: whether external AI coding access is enabled.
-- `aiCodingAccess.accessKey`: the project-level key used only to fetch this manifest; it is not the registry app secret.
+- `aiCodingAccess.accessKey`: the project-level key used only to fetch this manifest; it is not the registry app secret. It is `null` for header-auth manifests.
 - `sdk.dependencies`: Maven coordinates to add.
 - `sdk.config.appSecretEnv`: environment variable name for the app secret.
 - `endpoints.skillPackageUrl`: zip URL for this skill.
@@ -67,6 +75,7 @@ Important fields:
 - `agentWorkflow.globalAgentKeySlug`: stable page copilot Agent entry used for Agent/Workflow routing.
 - `agentWorkflow.bindingStrategy`: how page/action/intent Workflows are bound to the page copilot Agent.
 - `agentWorkflow.endpoints`: platform APIs for managing Agents, Workflows, bindings, and resolve preview.
+- `agentWorkflow.workflowAiCoding`: project-key protected Workflow AI Coding endpoints, including `publishUrlTemplate`, used to draw, validate, and first-publish the default Workflow created during SDK onboarding.
 
 The manifest does not include `appSecret`.
 
@@ -74,14 +83,19 @@ The manifest also does not declare a Maven repository, npm registry, or browser 
 
 Before front-end embed work, call `agentProvisioning.provisionAgentUrl` when present. Use the response `agent.keySlug` as the business front-end `agentId`. The call is idempotent, so it is safe for Cursor or another AI coding tool to retry. Do not ask the business user to choose an Agent id. If provisioning is unavailable, fall back to `agentProvisioning.defaultKeySlug`, `agentWorkflow.globalAgentKeySlug`, `embed.defaultAgentKeySlug`, or `embed.defaultAgentId`.
 
+Send `X-ReachAI-AiCoding-Key` on the provisioning request.
+
 ## Agent Provisioning
 
 AI coding tools can create or reuse the project page copilot Agent without requiring manual platform configuration:
 
 ```http
-POST /api/ai-assist/projects/{projectId}/agents/provision?aiCodingKey={key}
+POST /api/ai-coding/projects/{projectId}/agents/provision
+X-ReachAI-AiCoding-Key: {key}
 Content-Type: application/json
 ```
+
+Do not add `aiCodingKey` query parameters to provisioning URLs generated from the current platform prompt.
 
 Request body:
 
@@ -119,6 +133,32 @@ Response body:
 ```
 
 Use `agent.keySlug` everywhere the business gateway token broker or front-end embed SDK asks for `agentId`.
+
+## Default Workflow First Publish
+
+Agent provisioning can create a default Workflow and binding for the project page copilot. That Workflow is a draft until a Workflow version is published. After drawing or updating the default Workflow through Workflow AI Coding:
+
+1. Save the GraphSpec with `POST /api/workflows/{workflowId}/ai-coding/patch` and `dryRun=false`.
+2. Confirm release validation with `GET /api/workflows/{workflowId}/ai-coding/versions` or `POST /api/workflows/{workflowId}/ai-coding/validate`.
+3. If `releaseValidation.valid=true`, call the manifest's `agentWorkflow.workflowAiCoding.publishUrlTemplate`, normally:
+
+```http
+POST /api/workflows/{workflowId}/ai-coding/publish
+X-ReachAI-AiCoding-Key: {key}
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "version": "v1.0.0",
+  "note": "initial AI Coding publish",
+  "publishedBy": "Cursor"
+}
+```
+
+If the version already exists, read `/versions` and choose the next semantic version. Do not leave SDK quick access with only an unpublished default Workflow.
 
 ## Embed Token Exchange
 
@@ -235,15 +275,19 @@ ReachAI can show onboarding progress in the platform page when the prompt includ
 Read the current session:
 
 ```http
-GET /api/ai-assist/projects/{projectId}/access-sessions/latest?aiCodingKey={key}
+GET /api/ai-coding/projects/{projectId}/access-sessions/latest
+X-ReachAI-AiCoding-Key: {key}
 ```
 
 Report one step:
 
 ```http
-POST /api/ai-assist/projects/{projectId}/access-sessions/{sessionId}/steps/{stepKey}/report?aiCodingKey={key}
+POST /api/ai-coding/projects/{projectId}/access-sessions/{sessionId}/steps/{stepKey}/report
+X-ReachAI-AiCoding-Key: {key}
 Content-Type: application/json
 ```
+
+Do not put `aiCodingKey` in access-session URLs generated for new tool runs.
 
 Request body:
 
@@ -277,7 +321,8 @@ Standard `stepKey` values:
 Run the platform self-check and write the result into the session:
 
 ```http
-POST /api/ai-assist/projects/{projectId}/access-sessions/{sessionId}/checks/run
+POST /api/ai-coding/projects/{projectId}/access-sessions/{sessionId}/checks/run
+X-ReachAI-AiCoding-Key: {key}
 ```
 
 Use the same body as `sdkAccessCheckUrl`. This endpoint requires normal platform login when called from the console. External AI tools should use the report endpoint for step progress and call the check endpoint only when the prompt explicitly provides credentials or a reachable authenticated context.

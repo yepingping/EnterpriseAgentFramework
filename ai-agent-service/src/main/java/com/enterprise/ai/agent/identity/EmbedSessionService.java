@@ -59,6 +59,9 @@ public class EmbedSessionService {
     }
 
     public EmbedSessionEntity requireActiveSession(String sessionId, EmbedTokenClaims claims) {
+        if (claims == null) {
+            throw new EmbedTokenException("embed token claims are required");
+        }
         EmbedSessionEntity entity = mapper.selectOne(Wrappers.<EmbedSessionEntity>lambdaQuery()
                 .eq(EmbedSessionEntity::getSessionId, sessionId)
                 .eq(EmbedSessionEntity::getStatus, "ACTIVE")
@@ -66,17 +69,30 @@ public class EmbedSessionService {
         if (entity == null) {
             throw new EmbedTokenException("embed chat session not found");
         }
-        if (claims == null
-                || !entity.getProjectCode().equals(claims.getProjectCode())
-                || !entity.getAgentId().equals(claims.getAgentId())
-                || !entity.getExternalUserId().equals(claims.getExternalUserId())
-                || !entity.getPageInstanceId().equals(claims.getPageInstanceId())) {
-            throw new EmbedTokenException("embed chat session does not match token");
-        }
         if (entity.getExpiresAt() != null && entity.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new EmbedTokenException("embed chat session is expired");
         }
+        assertSessionClaimMatch("tenantId", entity.getTenantId(), claims.getTenantId());
+        assertSessionClaimMatch("appId", entity.getAppId(), claims.getAppId());
+        assertSessionClaimMatch("projectCode", entity.getProjectCode(), claims.getProjectCode());
+        assertSessionClaimMatch("agentId", entity.getAgentId(), claims.getAgentId());
+        assertSessionClaimMatch("externalUserId", entity.getExternalUserId(), claims.getExternalUserId());
+        assertSessionClaimMatch("globalUserId", entity.getGlobalUserId(), claims.getGlobalUserId());
+        assertSessionClaimMatch("pageInstanceId", entity.getPageInstanceId(), claims.getPageInstanceId());
+        assertSessionClaimMatch("pageKey", entity.getPageKey(), claims.getPageKey());
         return entity;
+    }
+
+    private void assertSessionClaimMatch(String field, String sessionValue, String claimValue) {
+        if (!StringUtils.hasText(sessionValue) && !StringUtils.hasText(claimValue)) {
+            return;
+        }
+        if (!StringUtils.hasText(sessionValue) || !StringUtils.hasText(claimValue)) {
+            throw new EmbedTokenException("embed chat session does not match token: " + field);
+        }
+        if (!sessionValue.equals(claimValue)) {
+            throw new EmbedTokenException("embed chat session does not match token: " + field);
+        }
     }
 
     private String writeJson(Object value) {

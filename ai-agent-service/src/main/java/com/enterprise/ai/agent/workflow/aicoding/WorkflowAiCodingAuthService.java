@@ -1,6 +1,8 @@
 package com.enterprise.ai.agent.workflow.aicoding;
 
-import com.enterprise.ai.agent.platform.auth.AiCodingKeyContext;
+import com.enterprise.ai.agent.aicoding.AiCodingAccessDeniedException;
+import com.enterprise.ai.agent.aicoding.AiCodingAccessGuard;
+import com.enterprise.ai.agent.aicoding.AiCodingUnauthorizedException;
 import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
 import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
@@ -13,13 +15,14 @@ import org.springframework.util.StringUtils;
 public class WorkflowAiCodingAuthService {
 
     private final ScanProjectService scanProjectService;
+    private final AiCodingAccessGuard aiCodingAccessGuard;
 
     public void requireAiCodingKeyForProject(Long projectId) {
-        String accessKey = AiCodingKeyContext.get();
-        if (!StringUtils.hasText(accessKey)) {
-            throw new WorkflowAiCodingUnauthorizedException("aiCodingKey is required");
-        }
-        if (projectId == null || !scanProjectService.matchesAiCodingAccessKey(projectId, accessKey)) {
+        try {
+            aiCodingAccessGuard.requireProjectAccess(projectId);
+        } catch (AiCodingUnauthorizedException ex) {
+            throw new WorkflowAiCodingUnauthorizedException(messageOrDefault(ex, "aiCodingKey is required"));
+        } catch (AiCodingAccessDeniedException ex) {
             throw new WorkflowAccessDeniedException("invalid AI Coding access key for workflow project");
         }
     }
@@ -48,5 +51,9 @@ public class WorkflowAiCodingAuthService {
 
     public String auditActorLabel(Long projectId) {
         return projectId == null ? "aiCodingKey" : "aiCodingKey:" + projectId;
+    }
+
+    private String messageOrDefault(RuntimeException ex, String fallback) {
+        return ex.getMessage() == null ? fallback : ex.getMessage();
     }
 }

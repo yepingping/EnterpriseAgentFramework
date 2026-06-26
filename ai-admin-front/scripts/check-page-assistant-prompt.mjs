@@ -18,6 +18,36 @@ const draftRequirementSource = readFileSync(draftRequirementPath, 'utf8')
 const workflowAiCodingPromptSource = readFileSync(workflowAiCodingPromptPath, 'utf8')
 const wizardSource = readFileSync(join(process.cwd(), 'src/views/registry/PageAssistantWizard.vue'), 'utf8')
 const sdkAccessWizardSource = readFileSync(join(process.cwd(), 'src/views/registry/SdkAccessWizard.vue'), 'utf8')
+const scanProjectApiSource = readFileSync(join(process.cwd(), 'src/api/scanProject.ts'), 'utf8')
+const scanProjectTypesSource = readFileSync(join(process.cwd(), 'src/types/scanProject.ts'), 'utf8')
+const pageAssistantSkillSource = readFileSync(
+  join(
+    process.cwd(),
+    '../ai-agent-service/src/main/resources/ai-assist/skills/reachai-page-assistant-onboarding/SKILL.md',
+  ),
+  'utf8',
+)
+const onboardingSecuritySource = readFileSync(
+  join(
+    process.cwd(),
+    '../ai-agent-service/src/main/resources/ai-assist/skills/reachai-onboarding/references/security.md',
+  ),
+  'utf8',
+)
+const onboardingSkillSource = readFileSync(
+  join(
+    process.cwd(),
+    '../ai-agent-service/src/main/resources/ai-assist/skills/reachai-onboarding/SKILL.md',
+  ),
+  'utf8',
+)
+const onboardingJavaSdkAccessSource = readFileSync(
+  join(
+    process.cwd(),
+    '../ai-agent-service/src/main/resources/ai-assist/skills/reachai-onboarding/references/java-sdk-access.md',
+  ),
+  'utf8',
+)
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -162,7 +192,7 @@ const workflowAiCodingPrompt = buildPageAssistantWorkflowAiCodingPrompt({
     stateLabel: '已启用',
   },
   sessionId: 'rai_page_123',
-  reportUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/workflow-ai-coding-result?aiCodingKey=rac_test_key',
+  reportUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/rai_page_123/workflow-ai-coding-result',
   page: {
     pageKey: 'teamArchive.list',
     pageName: '班组档案',
@@ -186,11 +216,15 @@ assert.match(workflowAiCodingPrompt, /strategy=HYBRID/)
 assert.match(workflowAiCodingPrompt, /LINEAR_QUERY/)
 assert.match(workflowAiCodingPrompt, /INTENT_ROUTER/)
 assert.match(workflowAiCodingPrompt, /page-assistant\/validate/)
-assert.match(workflowAiCodingPrompt, /Workflow AI Coding 不允许 publish/)
+assert.match(workflowAiCodingPrompt, /Workflow AI Coding 允许发布/)
+assert.match(workflowAiCodingPrompt, /\/api\/workflows\/\{workflowId\}\/ai-coding\/publish/)
 assert.match(workflowAiCodingPrompt, /不要.*SDK 快速接入/)
 assert.match(workflowAiCodingPrompt, /不要.*registerPage/)
 assert.match(workflowAiCodingPrompt, /\/api\/ai-assist\/skills\/workflow-ai-coding\/latest\.zip/)
 assert.match(workflowAiCodingPrompt, /workflow-ai-coding-result/)
+assert.match(workflowAiCodingPrompt, /X-ReachAI-AiCoding-Key/)
+assert.doesNotMatch(workflowAiCodingPrompt, /\?aiCodingKey=/)
+assert.doesNotMatch(workflowAiCodingPrompt, /query param:\s*`aiCodingKey=/)
 assert.match(workflowAiCodingPrompt, /回传.*workflowId|workflowId.*回传/)
 assert.match(workflowAiCodingPrompt, /是否已成功回传/)
 assert.match(workflowAiCodingPrompt, /runtimeVerification/)
@@ -226,6 +260,15 @@ assert.match(wizardSource, /打开 Studio/)
 assert.match(wizardSource, /使用该 Workflow 继续/)
 assert.match(wizardSource, /useAiCodingWorkflowDraft/)
 assert.match(wizardSource, /openAiCodingWorkflowStudio/)
+assert.match(wizardSource, /pageAssistantToolUrl/)
+assert.match(wizardSource, /-AiCodingKey \$env:REACHAI_AI_CODING_KEY/)
+assert.doesNotMatch(wizardSource, /scaffold\?\.scaffoldCommand/)
+assert.doesNotMatch(wizardSource, /scaffold\?\.verifyCommand/)
+assert.doesNotMatch(wizardSource, /function withAiCodingKey/)
+assert.doesNotMatch(wizardSource, /return `\$\{value\}\$\{separator\}aiCodingKey=/)
+assert.match(sdkAccessWizardSource, /Workflow AI Coding 允许发布/)
+assert.match(sdkAccessWizardSource, /\/api\/workflows\/\{workflowId\}\/ai-coding\/publish/)
+assert.match(sdkAccessWizardSource, /首次发布/)
 
 assert.match(wizardSource, /draftSource|DraftSource/)
 assert.match(wizardSource, /AI_CODING_RETURNED/)
@@ -290,18 +333,18 @@ const prompt = buildPageAssistantOnboardingPrompt({
     aiCodingAccessKey: 'rai_test_key',
     appSecretEnv: 'REACHAI_REGISTRY_APP_SECRET',
     sessionId: 'rai_page_123',
-    manifestUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/onboarding-manifest?aiCodingKey=rai_test_key',
-    latestSessionUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/latest?aiCodingKey=rai_test_key',
-    stepReportUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/steps/{stepKey}/report?aiCodingKey=rai_test_key',
-    targetBindUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/target?aiCodingKey=rai_test_key',
-    catalogSyncUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/catalog/sync?aiCodingKey=rai_test_key',
-    checksRunUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/sessions/rai_page_123/checks/run?aiCodingKey=rai_test_key',
-    registerPageUrl: 'http://localhost:18603/api/ai-assist/projects/7/page-assistant/pages/register?aiCodingKey=rai_test_key',
+    manifestUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/onboarding-manifest',
+    latestSessionUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/latest',
+    stepReportUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/rai_page_123/steps/{stepKey}/report',
+    targetBindUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/rai_page_123/target',
+    catalogSyncUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/rai_page_123/catalog/sync',
+    checksRunUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/sessions/rai_page_123/checks/run',
+    registerPageUrl: 'http://localhost:18603/api/ai-coding/projects/7/page-assistant/pages/register',
     skillPackageUrl: 'http://localhost:18603/api/ai-assist/skills/reachai-page-assistant-onboarding/latest.zip',
     scriptDownloadUrl: 'http://localhost:18603/api/ai-assist/skills/reachai-page-assistant-onboarding/scripts/reachai-page-assistant.ps1',
     helperScriptPath: 'scripts/reachai-page-assistant.ps1',
-    scaffoldCommand: '.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "http://localhost:18603/api/ai-assist/projects/7/page-assistant/onboarding-manifest?aiCodingKey=rai_test_key" -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"',
-    verifyCommand: '.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "http://localhost:18603/api/ai-assist/projects/7/page-assistant/onboarding-manifest?aiCodingKey=rai_test_key" -FrontendUrl "http://localhost:9200" -Route "/teams/archive" -PageKey "teamArchive.list"',
+    scaffoldCommand: '.\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl "http://localhost:18603/api/ai-coding/projects/7/page-assistant/onboarding-manifest" -AiCodingKey $env:REACHAI_AI_CODING_KEY -Framework angular -OutputDir ".\\src\\app\\shared\\reachai"',
+    verifyCommand: '.\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl "http://localhost:18603/api/ai-coding/projects/7/page-assistant/onboarding-manifest" -AiCodingKey $env:REACHAI_AI_CODING_KEY -FrontendUrl "http://localhost:9200" -Route "/teams/archive" -PageKey "teamArchive.list"',
     bridgeApiGlobal: 'window.__REACHAI_PAGE_BRIDGE__',
   },
 })
@@ -312,7 +355,39 @@ assert.match(prompt, /不要为了简单查询绕过页面去新增后端 API To
 assert.match(prompt, /必须先询问用户确认具体要改造哪一个业务页面/)
 assert.match(prompt, /不要把候选页面列表回传 ReachAI 平台/)
 assert.match(prompt, /App Key：bzjs3/)
-assert.match(prompt, /AI Coding 接入秘钥：rai_test_key/)
+assert.match(prompt, /AI Coding 接入状态：已启用/)
+assert.match(prompt, /AI Coding 请求头：X-ReachAI-AiCoding-Key: rai_test_key/)
+assert.match(prompt, /外部 AI Coding 鉴权模式/)
+assert.match(prompt, /platform-session/)
+assert.match(prompt, /同一个可访问 origin/)
+assert.match(prompt, /不要把 aiCodingKey 拼进 URL/)
+assert.match(prompt, /-AiCodingKey \$env:REACHAI_AI_CODING_KEY/)
+assert.doesNotMatch(prompt, /\?aiCodingKey=/)
+assert.doesNotMatch(
+  source,
+  /\/api\/ai-assist\/\*\*|page-assistant \/ ai-assist/,
+  'Page Assistant external-tool prompt source must not describe project APIs as /api/ai-assist/**',
+)
+assert.doesNotMatch(
+  prompt,
+  /\/api\/ai-assist\/\*\*|page-assistant \/ ai-assist/,
+  'Page Assistant external-tool prompt must use ai-coding project gateway wording',
+)
+assert.match(
+  source,
+  /\/api\/ai-coding\/projects\/\{projectId\}\/page-assistant\/\*\*/,
+  'Page Assistant external-tool prompt source should name the project-scoped ai-coding gateway path',
+)
+assert.doesNotMatch(
+  pageAssistantSkillSource,
+  /`\/api\/ai-assist\/\*\*` page-assistant|Page Assistant `\/api\/ai-assist\/\*\*`/,
+  'Packaged Page Assistant skill must not describe external project APIs as /api/ai-assist/**',
+)
+assert.match(
+  pageAssistantSkillSource,
+  /\/api\/ai-coding\/projects\/\{projectId\}\/page-assistant\/\*\*/,
+  'Packaged Page Assistant skill should name the project-scoped ai-coding gateway path',
+)
 assert.match(prompt, /App Secret 环境变量：REACHAI_REGISTRY_APP_SECRET/)
 assert.match(prompt, /页面助手接入清单 URL/)
 assert.match(prompt, /步骤进度回传 URL/)
@@ -403,7 +478,7 @@ assert.match(prompt, /最小构建 \/ 类型检查/)
 assert.match(prompt, /page-manifest/)
 assert.match(prompt, /route-detection/)
 assert.match(prompt, /handoff-summary/)
-assert.match(prompt, /aiCodingKey 只能用于 AI 工具/)
+assert.match(prompt, /aiCodingKey 只能作为 X-ReachAI-AiCoding-Key 请求头用于 AI 工具/)
 assert.match(prompt, /浏览器运行时代码不得调用这些接口/)
 assert.doesNotMatch(prompt, /secret-must-not-leak/)
 assert.doesNotMatch(prompt, /App Secret：/)
@@ -412,15 +487,129 @@ const frontendSnippetBlock = sdkAccessWizardSource.match(
   /const frontendSnippet = computed\(\(\) => \{[\s\S]*?return `([\s\S]*?)`\s*\n\}\)/,
 )?.[1] || ''
 assert.ok(frontendSnippetBlock, 'SdkAccessWizard frontendSnippet template not found')
-assert.match(frontendSnippetBlock, /Browser runtime must NOT call \/api\/ai-assist\/\*\*/)
+assert.match(frontendSnippetBlock, /Browser runtime must NOT call \/api\/ai-coding\/projects\/\*\*/)
 assert.match(frontendSnippetBlock, /provisionedAgentKeySlug/)
 assert.match(frontendSnippetBlock, /tokenProvider/)
 assert.doesNotMatch(frontendSnippetBlock, /aiCodingKey=/)
 assert.doesNotMatch(frontendSnippetBlock, /provisionAgentUrl/)
 assert.doesNotMatch(frontendSnippetBlock, /\/agents\/provision/)
 assert.doesNotMatch(frontendSnippetBlock, /fetch\([^)]*ai-assist/)
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /Browser runtime must NOT call \/api\/ai-assist\/\*\*|fetch \/api\/ai-assist\/\*\*（含 agents\/provision/,
+  'SdkAccessWizard browser runtime safety text must not describe external project APIs as /api/ai-assist/**',
+)
+assert.match(
+  sdkAccessWizardSource,
+  /\/api\/ai-coding\/projects\/\*\*/,
+  'SdkAccessWizard browser runtime safety text should name the project-scoped ai-coding gateway path',
+)
+assert.doesNotMatch(
+  onboardingSecuritySource,
+  /Browser runtime must not call `\/api\/ai-assist\/\*\*` provisioning/,
+  'Packaged SDK onboarding security reference must not describe external project APIs as /api/ai-assist/**',
+)
+assert.match(
+  onboardingSecuritySource,
+  /\/api\/ai-coding\/projects\/\{projectId\}\/(?:onboarding-manifest|agents\/provision|access-sessions)/,
+  'Packaged SDK onboarding security reference should name project-scoped ai-coding gateway paths',
+)
 assert.match(sdkAccessWizardSource, /运行时浏览器不得调用 provisioning API/)
-assert.match(sdkAccessWizardSource, /浏览器运行时代码不得 fetch \/api\/ai-assist\/\*\*/)
+assert.match(sdkAccessWizardSource, /浏览器运行时代码不得 fetch \/api\/ai-coding\/projects\/\*\*/)
+assert.match(sdkAccessWizardSource, /@ReachOutput\s*只用于返回 DTO 字段/)
+assert.match(sdkAccessWizardSource, /CODE_READY[\s\S]*RUNTIME_READY[\s\S]*E2E_READY/)
+assert.match(sdkAccessWizardSource, /网关接入必查 5 项/)
+assert.match(sdkAccessWizardSource, /前端 :9200[\s\S]*网关 :8080[\s\S]*ReachAI :18603/)
+assert.match(onboardingSkillSource, /`?@ReachOutput`?\s+is field-only/)
+assert.match(onboardingSkillSource, /CODE_READY[\s\S]*RUNTIME_READY[\s\S]*E2E_READY/)
+assert.match(onboardingJavaSdkAccessSource, /Gateway checklist/)
+assert.match(onboardingJavaSdkAccessSource, /Local dev topology/)
+
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /appendQuery\(platformManifestUrl,\s*'aiCodingKey'/,
+  'SdkAccessWizard onboarding prompt must not put aiCodingKey into the manifest URL',
+)
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /appendQuery\(fallbackProvisionAgentUrl,\s*'aiCodingKey'/,
+  'SdkAccessWizard onboarding prompt must not put aiCodingKey into the provisioning URL',
+)
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /reportUrlPatternWithKey|sessionCheckUrlWithKey/,
+  'SdkAccessWizard onboarding prompt must use header-auth progress/check URLs',
+)
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /latestSessionUrl\s*=[\s\S]*appendQuery\([^)]*access-sessions\/latest[\s\S]*?'aiCodingKey'/,
+  'SdkAccessWizard onboarding prompt must not put aiCodingKey into latest-session URL',
+)
+assert.match(
+  sdkAccessWizardSource,
+  /X-ReachAI-AiCoding-Key/,
+  'SdkAccessWizard onboarding prompt must instruct external tools to send the AI Coding key as a header',
+)
+assert.match(
+  sdkAccessWizardSource,
+  /externalProjectRoot\s*=\s*`\$\{platformUrl\}\/api\/ai-coding\/projects\/\$\{projectId\}`/,
+  'SdkAccessWizard external tool manifest URL should use the AI Coding gateway project alias',
+)
+assert.match(
+  sdkAccessWizardSource,
+  /`\$\{externalProjectRoot\}\/access-sessions\/\$\{sessionId\}\/checks\/run`/,
+  'SdkAccessWizard external tool progress/check URLs should use the AI Coding gateway project alias',
+)
+assert.match(
+  wizardSource,
+  /\/api\/ai-coding\/projects\/\$\{pageAssistantProjectIdForTool\.value\}\/page-assistant/,
+  'PageAssistantWizard external tool URLs should use the AI Coding gateway project alias',
+)
+assert.match(
+  wizardSource,
+  /\/api\/ai-coding\/projects\/\$\{project\.value\.id\}\/page-assistant\/sessions\/\$\{sessionId\}\/workflow-ai-coding-result/,
+  'PageAssistant workflow AI Coding report URL should use the AI Coding gateway project alias',
+)
+assert.doesNotMatch(
+  scanProjectApiSource,
+  /aiCodingKey\?:/,
+  'Front-end API helpers must not expose aiCodingKey query parameters for external AI Coding calls',
+)
+assert.doesNotMatch(
+  scanProjectApiSource,
+  /params:\s*aiCodingKey\s*\?/,
+  'Front-end API helpers must not pass aiCodingKey as request query params',
+)
+assert.doesNotMatch(
+  scanProjectTypesSource,
+  /queryParam:\s*string/,
+  'AI Coding Gateway manifest type must not expose queryParam auth discovery',
+)
+assert.match(
+  scanProjectTypesSource,
+  /externalToolPath\?:\s*string/,
+  'Page Assistant manifest type should expose the external AI Coding tool path',
+)
+assert.match(
+  scanProjectTypesSource,
+  /platformSessionPath\?:\s*string/,
+  'Page Assistant manifest type should expose the platform-session console path',
+)
+assert.doesNotMatch(
+  sdkAccessWizardSource,
+  /stripQueryParam\([^)]*aiCodingKey|function stripQueryParam/,
+  'SdkAccessWizard must not keep legacy aiCodingKey URL stripping helpers',
+)
+assert.doesNotMatch(
+  wizardSource,
+  /stripAiCodingKeyQuery/,
+  'PageAssistantWizard must not keep legacy aiCodingKey URL stripping helpers',
+)
+assert.doesNotMatch(
+  workflowAiCodingPromptSource,
+  /stripAiCodingKeyQuery/,
+  'PageAssistant workflow AI Coding prompt must not keep legacy aiCodingKey URL stripping helpers',
+)
 
 assert.doesNotMatch(wizardSource, /Agent Studio/)
 assert.doesNotMatch(wizardSource, /\/agent\/new\/studio/)
@@ -462,6 +651,41 @@ for (const scriptPath of helperScriptPaths) {
     helperSource,
     /reachai-runtime-probe-[\s\S]*?\.cjs/,
     `${scriptPath} should write runtime probe temp script as .cjs`,
+  )
+  assert.match(
+    helperSource,
+    /\[string\] \$AiCodingKey = \$env:REACHAI_AI_CODING_KEY/,
+    `${scriptPath} should accept AiCodingKey from REACHAI_AI_CODING_KEY`,
+  )
+  assert.match(
+    helperSource,
+    /X-ReachAI-AiCoding-Key/,
+    `${scriptPath} should send the AI Coding key as a header`,
+  )
+  assert.match(
+    helperSource,
+    /failureCode/,
+    `${scriptPath} should return structured runtime failureCode values`,
+  )
+  assert.match(
+    helperSource,
+    /JSON_PARSE_ERROR/,
+    `${scriptPath} should classify non-JSON probe output as JSON_PARSE_ERROR`,
+  )
+  assert.match(
+    helperSource,
+    /LOGIN_REQUIRED/,
+    `${scriptPath} should classify likely login/session blockers as LOGIN_REQUIRED`,
+  )
+  assert.match(
+    helperSource,
+    /FRONTEND_UNREACHABLE/,
+    `${scriptPath} should classify unreachable frontend probes as FRONTEND_UNREACHABLE`,
+  )
+  assert.match(
+    helperSource,
+    /rawOutput/,
+    `${scriptPath} should include bounded rawOutput for probe parse failures`,
   )
   assert.doesNotMatch(
     helperSource,

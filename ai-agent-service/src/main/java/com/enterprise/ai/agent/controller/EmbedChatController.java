@@ -1,5 +1,12 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateIdentity;
+import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateResult;
+import com.enterprise.ai.agent.context.memory.RuntimeMemoryCandidateService;
+import com.enterprise.ai.agent.context.ContextPackageResponse;
+import com.enterprise.ai.agent.context.ContextSearchResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.runtime.AgentRuntimeProfile;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
@@ -57,6 +64,11 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class EmbedChatController {
 
+    private static final String ACTIVE_WORKFLOW_VERSION_REQUIRED = "active workflow version is required";
+    private static final String EMBED_CHAT_SESSION_EXPIRED = "embed chat session is expired";
+    private static final String EMBED_TOKEN_EXPIRED = "embed token is expired";
+    private static final String WORKFLOW_NOT_PUBLISHED_MESSAGE = "工作流尚未发布，请到 Workflow Studio 发布";
+    private static final String EMBED_SECRET_EXPIRED_MESSAGE = "秘钥超时，请刷新页面后重试";
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {
     };
 
@@ -72,6 +84,8 @@ public class EmbedChatController {
     private final EmbedRendererAuthorizationService embedRendererAuthorizationService;
     private final EmbedWorkflowRuntimeService embedWorkflowRuntimeService;
     private final WorkflowRuntimeService workflowRuntimeService;
+    private final RuntimeContextPackageService runtimeContextPackageService;
+    private final RuntimeMemoryCandidateService runtimeMemoryCandidateService;
 
     @PostMapping("/token/exchange")
     public ResponseEntity<ApiResult<EmbedTokenExchangeResponse>> exchangeToken(
@@ -244,9 +258,9 @@ public class EmbedChatController {
                     sessionId,
                     ex.getMessage(),
                     Map.of("sessionId", sessionId, "operation", "SEND_MESSAGE"));
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResult.fail(401, ex.getMessage()));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResult.fail(401, embedChatErrorMessage(ex)));
         } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(ApiResult.fail(400, ex.getMessage()));
+            return ResponseEntity.badRequest().body(ApiResult.fail(400, embedChatErrorMessage(ex)));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResult.fail(403, ex.getMessage()));
         }
@@ -285,7 +299,7 @@ public class EmbedChatController {
                 try {
                     emitter.send(SseEmitter.event()
                             .name("error")
-                            .data(Map.of("message", ex.getMessage() == null ? "stream failed" : ex.getMessage())));
+                            .data(Map.of("message", embedChatErrorMessage(ex))));
                 } catch (IOException ignored) {
                     // client already disconnected
                 }
@@ -378,11 +392,15 @@ public class EmbedChatController {
         metadata.put("origin", session.getOrigin());
         metadata.put("route", session.getRoute());
         metadata.put("principal", claims.toPrincipal());
+        metadata.put("runtimeContextQuery", request.message());
 
         Optional<EmbedWorkflowRuntimeService.RunnableWorkflowContext> workflowContext =
                 embedWorkflowRuntimeService.resolveRunnableWorkflowContext(session, null);
         String intentType;
         AgentResult result;
+        Map<String, Object> candidateMetadata = metadata;
+        RuntimeMemoryCandidateIdentity candidateIdentity = RuntimeMemoryCandidateIdentity.empty();
+        RuntimeContextInjectionResult runtimeContextForResponse;
         if (workflowContext.isPresent()) {
             EmbedWorkflowRuntimeService.RunnableWorkflowContext context = workflowContext.get();
             Map<String, Object> workflowMetadata = new HashMap<>(metadata);
@@ -390,6 +408,15 @@ public class EmbedChatController {
             workflowMetadata.put("bindingType", context.binding().getBindingType());
             workflowMetadata.put("pageKey", session.getPageKey());
             workflowMetadata.put("route", session.getRoute());
+            candidateMetadata = workflowMetadata;
+            candidateIdentity = RuntimeMemoryCandidateIdentity.fromAgentWorkflow(context.agent(), context.workflow());
+            AgentRuntimeProfile profile = AgentRuntimeProfile.fromAgentEntry(context.agent(), objectMapper);
+            workflowMetadata.put("projectId", profile.getProjectId());
+            workflowMetadata.put("modelInstanceId", profile.getModelInstanceId());
+            RuntimeContextInjectionResult runtimeContext = runtimeContextPackageService.injectForEmbedWorkflow(
+                    session, claims, workflowMetadata, context.agent(), context.workflow(), profile);
+            runtimeContextForResponse = runtimeContext;
+            attachRuntimeContextMetadata(workflowMetadata, runtimeContext);
             result = workflowRuntimeService.execute(WorkflowRuntimeRequest.builder()
                     .sessionId(sessionId)
                     .message(request.message())
@@ -399,33 +426,65 @@ public class EmbedChatController {
                     .principal(principalMap(claims))
                     .pageContext(pageContext(session))
                     .metadata(workflowMetadata)
+                    .runtimeContext(runtimeContext)
                     .build());
             intentType = firstText(context.binding().getIntentType(), context.workflow().getWorkflowType());
         } else {
             AgentEntryEntity entry = embedWorkflowRuntimeService.resolveAgentEntry(session.getAgentId())
                     .orElseThrow(() -> new IllegalArgumentException("agent not found: " + session.getAgentId()));
+            candidateIdentity = RuntimeMemoryCandidateIdentity.fromAgent(entry);
             AgentRuntimeProfile profile = AgentRuntimeProfile.fromAgentEntry(entry, objectMapper);
+            metadata.put("projectId", profile.getProjectId());
+            metadata.put("modelInstanceId", profile.getModelInstanceId());
+            RuntimeContextInjectionResult runtimeContext = runtimeContextPackageService.injectForEmbedAgent(
+                    session, claims, metadata, entry, profile);
+            runtimeContextForResponse = runtimeContext;
+            attachRuntimeContextMetadata(metadata, runtimeContext);
             result = agentRouter.executeByProfile(
                     profile,
                     sessionId,
                     claims.getExternalUserId(),
                     request.message(),
                     claims.getRoles(),
-                    metadata);
+                    metadata,
+                    runtimeContext);
             intentType = profile.getIntentType();
+        }
+        Map<String, Object> responseMetadata = result.getMetadata() == null
+                ? new HashMap<>()
+                : new HashMap<>(result.getMetadata());
+        attachRuntimeContextMetadata(responseMetadata, runtimeContextForResponse);
+        if (result.isSuccess()) {
+            attachMemoryCandidateMetadata(responseMetadata,
+                    runtimeMemoryCandidateService.tryCreateFromInteraction(
+                            session, claims, candidateMetadata, request.message(),
+                            result.getAnswer(),
+                            stringValue(responseMetadata.get("traceId")),
+                            candidateIdentity));
         }
         ChatResponse response = ChatResponse.builder()
                 .sessionId(sessionId)
                 .answer(result.getAnswer())
                 .intentType(intentType)
                 .toolCalls(result.getToolResults() == null ? List.of() : result.getToolResults().keySet().stream().toList())
-                .metadata(result.getMetadata())
+                .metadata(responseMetadata)
                 .uiRequest(result.getUiRequest())
                 .build();
         ensurePageActionAllowed(session, response.getUiRequest());
         embedRendererAuthorizationService.ensureAllowed(session, response.getUiRequest());
         embedAuditEventService.recordAssistantResponse(session, response);
         return response;
+    }
+
+    private String embedChatErrorMessage(Exception ex) {
+        String message = ex.getMessage();
+        if (ACTIVE_WORKFLOW_VERSION_REQUIRED.equals(message)) {
+            return WORKFLOW_NOT_PUBLISHED_MESSAGE;
+        }
+        if (EMBED_CHAT_SESSION_EXPIRED.equals(message) || EMBED_TOKEN_EXPIRED.equals(message)) {
+            return EMBED_SECRET_EXPIRED_MESSAGE;
+        }
+        return message == null ? "stream failed" : message;
     }
 
     private Map<String, Object> principalMap(EmbedTokenClaims claims) {
@@ -445,6 +504,88 @@ public class EmbedChatController {
         page.put("route", session.getRoute());
         page.put("origin", session.getOrigin());
         return page;
+    }
+
+    private void attachMemoryCandidateMetadata(Map<String, Object> metadata,
+                                               RuntimeMemoryCandidateResult candidateResult) {
+        if (metadata == null || candidateResult == null) {
+            return;
+        }
+        metadata.put("memoryCandidateCreated", candidateResult.isCreated());
+        if (candidateResult.getCandidateId() != null) {
+            metadata.put("memoryCandidateId", candidateResult.getCandidateId());
+        }
+        if (candidateResult.getCandidateIds() != null && !candidateResult.getCandidateIds().isEmpty()) {
+            metadata.put("memoryCandidateIds", candidateResult.getCandidateIds());
+        }
+        metadata.put("memoryCandidateCount", candidateResult.getCreatedCount());
+        if (StringUtils.hasText(candidateResult.getExtractionMode())) {
+            metadata.put("memoryCandidateExtractionMode", candidateResult.getExtractionMode());
+        }
+        if (StringUtils.hasText(candidateResult.getSkippedReason())) {
+            metadata.put("memoryCandidateSkippedReason", candidateResult.getSkippedReason());
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private void attachRuntimeContextMetadata(Map<String, Object> metadata,
+                                              RuntimeContextInjectionResult runtimeContext) {
+        if (metadata == null || runtimeContext == null) {
+            return;
+        }
+        metadata.put("runtimeContextEnabled", runtimeContext.isEnabled());
+        if (StringUtils.hasText(runtimeContext.getSkippedReason())) {
+            metadata.put("runtimeContextSkippedReason", runtimeContext.getSkippedReason());
+        }
+        if (runtimeContext.isEnabled()) {
+            metadata.put("runtimeContextItemCount", runtimeContext.getItemCount());
+            metadata.put("runtimeContextTruncatedCount", runtimeContext.getTruncatedCount());
+            List<Map<String, Object>> hits = runtimeContextHitSummaries(runtimeContext);
+            if (!hits.isEmpty()) {
+                metadata.put("runtimeContextHits", hits);
+            }
+        }
+    }
+
+    private List<Map<String, Object>> runtimeContextHitSummaries(RuntimeContextInjectionResult runtimeContext) {
+        ContextPackageResponse pkg = runtimeContext.getPackageResponse();
+        if (pkg == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> hits = new java.util.ArrayList<>();
+        appendRuntimeContextHits(hits, "userMemory", pkg.getUserMemory());
+        appendRuntimeContextHits(hits, "pageContext", pkg.getPageContext());
+        appendRuntimeContextHits(hits, "workflowContext", pkg.getWorkflowContext());
+        appendRuntimeContextHits(hits, "apiContext", pkg.getApiContext());
+        appendRuntimeContextHits(hits, "rules", pkg.getRules());
+        return hits.size() > 10 ? hits.subList(0, 10) : hits;
+    }
+
+    private void appendRuntimeContextHits(List<Map<String, Object>> target,
+                                          String section,
+                                          List<ContextSearchResult> hits) {
+        if (hits == null || hits.isEmpty()) {
+            return;
+        }
+        for (ContextSearchResult hit : hits) {
+            if (hit == null || hit.getItem() == null) {
+                continue;
+            }
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("section", section);
+            summary.put("itemId", hit.getItem().getId());
+            summary.put("itemType", hit.getItem().getItemType());
+            summary.put("title", hit.getItem().getTitle());
+            summary.put("rankScore", hit.getRankScore());
+            summary.put("hitReason", hit.getHitReason());
+            if (StringUtils.hasText(hit.getScoreBreakdown())) {
+                summary.put("scoreBreakdown", hit.getScoreBreakdown());
+            }
+            target.add(summary);
+        }
     }
 
     private Map<String, Object> readObjectMap(String json) {

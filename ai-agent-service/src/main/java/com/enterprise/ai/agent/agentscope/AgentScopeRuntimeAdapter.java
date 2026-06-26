@@ -75,7 +75,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimeAdapter {
     public AgentRuntimeResult execute(AgentRuntimeRequest request) {
         AgentRuntimeProfile profile = request.getAgentRuntimeProfile();
         String traceId = request.getTraceId();
-        Msg input = Msg.builder().textContent(request.getMessage()).build();
+        String userMessage = request.getMessage();
+        Msg input = Msg.builder().textContent(request.effectiveUserMessage()).build();
         ToolExecutionContext context = ToolExecutionContext.builder()
                 .traceId(traceId)
                 .sessionId(request.getSessionId())
@@ -86,7 +87,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimeAdapter {
                 .projectCode(profile.getProjectCode())
                 .allowIrreversible(profile.isAllowIrreversible())
                 .roles(request.getRoles())
-                .currentTurnMessage(request.getMessage())
+                .currentTurnMessage(userMessage)
                 .build();
 
         long startTime = System.currentTimeMillis();
@@ -94,10 +95,10 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimeAdapter {
             Msg response;
             if ("pipeline".equals(profile.getType()) && profile.getPipelineAgentIds() != null
                     && !profile.getPipelineAgentIds().isEmpty()) {
-                response = executePipeline(profile, input, request.getMessage(), context);
+                response = executePipeline(profile, input, userMessage, context);
             } else {
                 response = executeSingleAgent(
-                        agentFactory.buildFromProfile(profile, request.getMessage(), context),
+                        agentFactory.buildFromProfile(profile, userMessage, context),
                         input,
                         context);
             }

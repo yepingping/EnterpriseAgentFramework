@@ -1,5 +1,8 @@
 package com.enterprise.ai.agent.agentscope;
 
+import com.enterprise.ai.agent.context.runtime.RuntimeContextIdentity;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
+import com.enterprise.ai.agent.context.runtime.RuntimeContextPackageService;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.model.AgentResult;
 import com.enterprise.ai.agent.runtime.AgentRuntimeAdapter;
@@ -27,6 +30,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -178,6 +183,83 @@ class AgentRouterTest {
     }
 
     @Test
+    void hybridFallbackComposesDeferredRuntimeContextBeforeCentralExecution() {
+        AgentRuntimeSelector selector = mock(AgentRuntimeSelector.class);
+        AgentRuntimeAdapter adapter = mock(AgentRuntimeAdapter.class);
+        EmbeddedRuntimeDispatchService dispatchService = mock(EmbeddedRuntimeDispatchService.class);
+        RuntimeContextPackageService runtimeContextPackageService = mock(RuntimeContextPackageService.class);
+        AgentRouter router = router(selector, dispatchService, mock(GuardDecisionLogService.class), runtimeContextPackageService);
+
+        RuntimeContextIdentity identity = RuntimeContextIdentity.builder()
+                .tenantId("default")
+                .projectCode("demo-project")
+                .globalUserId("user-1")
+                .sessionId("session-1")
+                .query("dark mode")
+                .runtimePlacement("HYBRID")
+                .build();
+        RuntimeContextInjectionResult deferred = RuntimeContextInjectionResult.builder()
+                .enabled(false)
+                .skippedReason("hybrid-placement-deferred")
+                .identity(identity)
+                .build();
+        RuntimeContextInjectionResult injected = RuntimeContextInjectionResult.builder()
+                .enabled(true)
+                .identity(RuntimeContextIdentity.builder()
+                        .tenantId("default")
+                        .projectCode("demo-project")
+                        .globalUserId("user-1")
+                        .sessionId("session-1")
+                        .query("dark mode")
+                        .runtimePlacement("CENTRAL")
+                        .build())
+                .promptSection("[ReachAI Runtime Context]\n- dark mode")
+                .itemCount(1)
+                .build();
+
+        when(dispatchService.dispatch(any(EmbeddedRuntimeDispatchRequest.class)))
+                .thenThrow(new IllegalStateException("instance offline"));
+        when(runtimeContextPackageService.injectForCentralFallback(deferred)).thenReturn(injected);
+        when(selector.select(any(AgentRuntimeRequest.class))).thenReturn(adapter);
+        when(adapter.execute(any(AgentRuntimeRequest.class))).thenAnswer(invocation -> {
+            AgentRuntimeRequest request = invocation.getArgument(0, AgentRuntimeRequest.class);
+            assertSame(injected, request.getRuntimeContext());
+            assertTrue(request.effectiveUserMessage().contains("dark mode"));
+            return AgentRuntimeResult.builder()
+                    .success(true)
+                    .answer("central done")
+                    .runtimeType(AgentRuntimeAdapter.DEFAULT_RUNTIME_TYPE)
+                    .traceId("trace-2")
+                    .metadata(Map.of("central", true))
+                    .build();
+        });
+
+        AgentResult result = router.executeByProfile(AgentRuntimeProfile.builder()
+                        .name("Demo Agent")
+                        .keySlug("demo-agent")
+                        .intentType("GENERAL_CHAT")
+                        .runtimeType(AgentRuntimeAdapter.DEFAULT_RUNTIME_TYPE)
+                        .runtimePlacement("HYBRID")
+                        .runtimeConfig(Map.of(
+                                "embeddedRuntime", Map.of(
+                                        "projectCode", "crm",
+                                        "instanceId", "inst-1"
+                                )
+                        ))
+                        .build(),
+                "session-1",
+                "user-1",
+                "hello",
+                List.of("USER"),
+                Map.of(),
+                deferred);
+
+        assertEquals(true, result.isSuccess());
+        assertEquals(true, result.getMetadata().get("central"));
+        verify(runtimeContextPackageService).injectForCentralFallback(deferred);
+    }
+
+    @Test
     void deniesAgentExecutionWhenUserRoleIsNotAllowed() {
         GuardDecisionLogService guardDecisionLogService = mock(GuardDecisionLogService.class);
         AgentRouter router = router(mock(AgentRuntimeSelector.class), mock(EmbeddedRuntimeDispatchService.class), guardDecisionLogService);
@@ -273,6 +355,13 @@ class AgentRouterTest {
     private AgentRouter router(AgentRuntimeSelector selector,
                                EmbeddedRuntimeDispatchService dispatchService,
                                GuardDecisionLogService guardDecisionLogService) {
+        return router(selector, dispatchService, guardDecisionLogService, mock(RuntimeContextPackageService.class));
+    }
+
+    private AgentRouter router(AgentRuntimeSelector selector,
+                               EmbeddedRuntimeDispatchService dispatchService,
+                               GuardDecisionLogService guardDecisionLogService,
+                               RuntimeContextPackageService runtimeContextPackageService) {
         return new AgentRouter(
                 mock(IntentService.class),
                 mock(AgentEntryService.class),
@@ -283,6 +372,7 @@ class AgentRouterTest {
                 new ObjectMapper(),
                 selector,
                 dispatchService,
-                guardDecisionLogService);
+                guardDecisionLogService,
+                runtimeContextPackageService);
     }
 }

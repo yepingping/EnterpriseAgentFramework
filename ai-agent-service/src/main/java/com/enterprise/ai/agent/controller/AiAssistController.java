@@ -1,11 +1,15 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.aicoding.AiCodingAccessDeniedException;
+import com.enterprise.ai.agent.aicoding.AiCodingAccessGuard;
+import com.enterprise.ai.agent.aicoding.AiCodingUnauthorizedException;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
 import com.enterprise.ai.agent.assist.AiAccessSessionService;
 import com.enterprise.ai.agent.identity.PageActionCatalogContracts;
 import com.enterprise.ai.agent.identity.PageActionCatalogService;
 import com.enterprise.ai.agent.identity.PageCatalogRegisterResult;
+import com.enterprise.ai.agent.platform.auth.AiCodingKeyContext;
 import com.enterprise.ai.agent.registry.RegistryCredentialEntity;
 import com.enterprise.ai.agent.registry.RegistrySecurityService;
 import com.enterprise.ai.agent.registry.SdkAccessCheckService;
@@ -37,7 +41,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -95,6 +98,7 @@ public class AiAssistController {
     );
 
     private final ScanProjectService scanProjectService;
+    private final AiCodingAccessGuard aiCodingAccessGuard;
     private final RegistrySecurityService registrySecurityService;
     private final AgentEntryService agentEntryService;
     private final AgentProvisioningService agentProvisioningService;
@@ -212,11 +216,21 @@ public class AiAssistController {
 
     @GetMapping("/projects/{projectId}/onboarding-manifest")
     public ResponseEntity<?> onboardingManifest(@PathVariable Long projectId,
-                                                @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                 HttpServletRequest request) {
+        String baseUrl = requestBaseUrl(request);
+        return onboardingManifestForProjectApiRoot(
+                projectId,
+                request,
+                baseUrl + "/api/ai-assist/projects/" + projectId);
+    }
+
+    ResponseEntity<?> onboardingManifestForProjectApiRoot(Long projectId,
+                                                          HttpServletRequest request,
+                                                          String projectApiRoot) {
         try {
-            if (StringUtils.hasText(aiCodingKey)
-                    && !scanProjectService.matchesAiCodingAccessKey(projectId, aiCodingKey)) {
+            String contextAiCodingKey = AiCodingKeyContext.get();
+            String requestAiCodingKey = contextAiCodingKey;
+            if (invalidAiCodingKey(projectId, requestAiCodingKey)) {
                 return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
             }
             ScanProjectEntity project = scanProjectService.getById(projectId);
@@ -226,7 +240,8 @@ public class AiAssistController {
                     : Optional.empty();
             String appKey = credential.map(RegistryCredentialEntity::getAppKey).orElse(null);
             EmbedManifest embed = buildEmbedManifest(project, credential);
-            AgentProvisioningManifest agentProvisioning = buildAgentProvisioningManifest(project, baseUrl, aiCodingKey);
+            boolean requestUsedHeaderAiCodingKey = StringUtils.hasText(contextAiCodingKey);
+            AgentProvisioningManifest agentProvisioning = buildAgentProvisioningManifest(project, projectApiRoot);
 
             return ResponseEntity.ok(new OnboardingManifestResponse(
                     "reachai.onboarding.v1",
@@ -243,7 +258,7 @@ public class AiAssistController {
                     ),
                     new AiCodingAccessManifest(
                             Boolean.TRUE.equals(project.getAiCodingAccessEnabled()),
-                            project.getAiCodingAccessKey()
+                            requestUsedHeaderAiCodingKey ? null : project.getAiCodingAccessKey()
                     ),
                     new SdkManifest(
                             "1.0.0-SNAPSHOT",
@@ -264,7 +279,7 @@ public class AiAssistController {
                     ),
                     new PlatformEndpoints(
                             baseUrl + "/api/ai-assist/skills/" + SKILL_NAME + "/latest.zip",
-                            baseUrl + "/api/ai-assist/projects/" + projectId + "/onboarding-manifest",
+                            projectApiRoot + "/onboarding-manifest",
                             baseUrl + "/api/scan-projects/" + projectId + "/sdk-access-check",
                             baseUrl + "/api/scan-projects/" + projectId + "/tools/reconcile"
                     ),
@@ -283,9 +298,8 @@ public class AiAssistController {
 
     @PostMapping("/projects/{projectId}/agents/provision")
     public ResponseEntity<?> provisionProjectAgent(@PathVariable Long projectId,
-                                                   @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                    @RequestBody(required = false) AgentProvisionRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -310,15 +324,34 @@ public class AiAssistController {
                                                    @RequestParam(value = "routePattern", required = false) String routePattern,
                                                    @RequestParam(value = "actionKeys", required = false) List<String> actionKeys,
                                                    @RequestParam(value = "toolName", required = false) String toolName,
-                                                   @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                    HttpServletRequest request) {
+        String baseUrl = requestBaseUrl(request);
+        return pageAssistantManifestForProjectApiRoot(
+                projectId,
+                pageKey,
+                routePattern,
+                actionKeys,
+                toolName,
+                request,
+                baseUrl + "/api/ai-assist/projects/" + projectId);
+    }
+
+    ResponseEntity<?> pageAssistantManifestForProjectApiRoot(Long projectId,
+                                                             String pageKey,
+                                                             String routePattern,
+                                                             List<String> actionKeys,
+                                                             String toolName,
+                                                             HttpServletRequest request,
+                                                             String projectApiRoot) {
         try {
-            if (StringUtils.hasText(aiCodingKey)
-                    && !scanProjectService.matchesAiCodingAccessKey(projectId, aiCodingKey)) {
+            String contextAiCodingKey = AiCodingKeyContext.get();
+            String requestAiCodingKey = contextAiCodingKey;
+            if (invalidAiCodingKey(projectId, requestAiCodingKey)) {
                 return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
             }
             ScanProjectEntity project = scanProjectService.getById(projectId);
             String baseUrl = requestBaseUrl(request);
+            String pageAssistantRoot = projectApiRoot + "/page-assistant";
             Optional<RegistryCredentialEntity> credential = StringUtils.hasText(project.getProjectCode())
                     ? registrySecurityService.findPrimaryActiveCredential(project.getProjectCode())
                     : Optional.empty();
@@ -326,35 +359,23 @@ public class AiAssistController {
             AiAccessSessionService.AccessSessionView session = accessSessionService.getOrCreatePageAssistantLatest(
                     projectId,
                     new AiAccessSessionService.PageAssistantSessionRequest(toolName, pageKey, routePattern, actionKeys));
-            String effectiveAiCodingKey = resolveEffectiveAiCodingKey(project, aiCodingKey);
-            String manifestUrl = baseUrl + "/api/ai-assist/projects/" + projectId + "/page-assistant/onboarding-manifest";
-            String latestSessionUrl = baseUrl + "/api/ai-assist/projects/" + projectId + "/page-assistant/sessions/latest";
-            String stepReportUrl = baseUrl + "/api/ai-assist/projects/" + projectId
-                    + "/page-assistant/sessions/" + session.sessionId() + "/steps/{stepKey}/report";
-            String targetBindUrl = baseUrl + "/api/ai-assist/projects/" + projectId
-                    + "/page-assistant/sessions/" + session.sessionId() + "/target";
-            String catalogSyncUrl = baseUrl + "/api/ai-assist/projects/" + projectId
-                    + "/page-assistant/sessions/" + session.sessionId() + "/catalog/sync";
-            String checksRunUrl = baseUrl + "/api/ai-assist/projects/" + projectId
-                    + "/page-assistant/sessions/" + session.sessionId() + "/checks/run";
-            String registerPageUrl = baseUrl + "/api/ai-assist/projects/" + projectId
-                    + "/page-assistant/pages/register";
+            String effectiveAiCodingKey = resolveEffectiveAiCodingKey(project, requestAiCodingKey);
+            boolean requestUsedHeaderAiCodingKey = StringUtils.hasText(contextAiCodingKey);
+            String manifestUrl = pageAssistantRoot + "/onboarding-manifest";
+            String latestSessionUrl = pageAssistantRoot + "/sessions/latest";
+            String stepReportUrl = pageAssistantRoot + "/sessions/" + session.sessionId() + "/steps/{stepKey}/report";
+            String targetBindUrl = pageAssistantRoot + "/sessions/" + session.sessionId() + "/target";
+            String catalogSyncUrl = pageAssistantRoot + "/sessions/" + session.sessionId() + "/catalog/sync";
+            String checksRunUrl = pageAssistantRoot + "/sessions/" + session.sessionId() + "/checks/run";
+            String registerPageUrl = pageAssistantRoot + "/pages/register";
             String skillPackageUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME + "/latest.zip";
             String scriptDownloadUrl = baseUrl + "/api/ai-assist/skills/" + PAGE_ASSISTANT_SKILL_NAME
                     + "/scripts/reachai-page-assistant.ps1";
-            if (StringUtils.hasText(effectiveAiCodingKey)) {
-                manifestUrl = appendQuery(manifestUrl, "aiCodingKey", effectiveAiCodingKey);
-                latestSessionUrl = appendQuery(latestSessionUrl, "aiCodingKey", effectiveAiCodingKey);
-                stepReportUrl = appendQuery(stepReportUrl, "aiCodingKey", effectiveAiCodingKey);
-                targetBindUrl = appendQuery(targetBindUrl, "aiCodingKey", effectiveAiCodingKey);
-                catalogSyncUrl = appendQuery(catalogSyncUrl, "aiCodingKey", effectiveAiCodingKey);
-                checksRunUrl = appendQuery(checksRunUrl, "aiCodingKey", effectiveAiCodingKey);
-                registerPageUrl = appendQuery(registerPageUrl, "aiCodingKey", effectiveAiCodingKey);
-            }
             String resolvedPageKey = session.targetPageKey();
             String resolvedRoute = session.targetRoute();
-            String scaffoldCommand = buildPageAssistantScaffoldCommand(manifestUrl);
-            String verifyCommand = buildPageAssistantVerifyCommand(manifestUrl, resolvedPageKey, resolvedRoute);
+            boolean useHeaderCommandAuth = StringUtils.hasText(effectiveAiCodingKey);
+            String scaffoldCommand = buildPageAssistantScaffoldCommand(manifestUrl, useHeaderCommandAuth);
+            String verifyCommand = buildPageAssistantVerifyCommand(manifestUrl, resolvedPageKey, resolvedRoute, useHeaderCommandAuth);
             return ResponseEntity.ok(new PageAssistantManifestResponse(
                     "reachai.page-assistant-onboarding.v2",
                     new ProjectManifest(
@@ -370,8 +391,9 @@ public class AiAssistController {
                     ),
                     new AiCodingAccessManifest(
                             Boolean.TRUE.equals(project.getAiCodingAccessEnabled()),
-                            project.getAiCodingAccessKey()
+                            requestUsedHeaderAiCodingKey ? null : project.getAiCodingAccessKey()
                     ),
+                    buildPageAssistantAuthManifest(projectApiRoot, baseUrl, projectId, requestUsedHeaderAiCodingKey),
                     new PageAssistantTargetManifest(
                             session.targetPageKey(),
                             session.targetRoute(),
@@ -415,6 +437,28 @@ public class AiAssistController {
         }
     }
 
+    private static PageAssistantAuthManifest buildPageAssistantAuthManifest(String projectApiRoot,
+                                                                           String baseUrl,
+                                                                           Long projectId,
+                                                                           boolean requestUsedHeaderAiCodingKey) {
+        boolean aiCodingGatewayRoot = projectApiRoot != null && projectApiRoot.contains("/api/ai-coding/projects/");
+        String mode = aiCodingGatewayRoot || requestUsedHeaderAiCodingKey ? "ai-coding-key" : "platform-session";
+        String externalRoot = baseUrl + "/api/ai-coding/projects/" + projectId + "/page-assistant";
+        String consoleRoot = baseUrl + "/api/ai-assist/projects/" + projectId + "/page-assistant";
+        return new PageAssistantAuthManifest(
+                mode,
+                "X-ReachAI-AiCoding-Key",
+                "REACHAI_AI_CODING_KEY",
+                externalRoot + "/**",
+                consoleRoot + "/**",
+                List.of(
+                        "External AI coding tools must call /api/ai-coding/projects/{projectId}/page-assistant/** with X-ReachAI-AiCoding-Key.",
+                        "Platform console pages may call /api/ai-assist/projects/{projectId}/page-assistant/** with platform session login.",
+                        "Do not mix origins or reuse platform-session endpoints in helper commands copied to Cursor/Codex."
+                )
+        );
+    }
+
     @PatchMapping("/projects/{projectId}/ai-coding-access")
     public ResponseEntity<?> updateAiCodingAccess(@PathVariable Long projectId,
                                                   @RequestBody(required = false) AiCodingAccessUpdateRequest request) {
@@ -454,9 +498,8 @@ public class AiAssistController {
 
     @GetMapping("/projects/{projectId}/page-assistant/sessions/latest")
     public ResponseEntity<?> latestPageAssistantSession(@PathVariable Long projectId,
-                                                        @RequestParam(value = "pageKey", required = false) String pageKey,
-                                                        @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+                                                        @RequestParam(value = "pageKey", required = false) String pageKey) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -468,9 +511,8 @@ public class AiAssistController {
 
     @GetMapping("/projects/{projectId}/page-assistant/sessions")
     public ResponseEntity<?> listPageAssistantSessions(@PathVariable Long projectId,
-                                                       @RequestParam(value = "pageKey", required = false) String pageKey,
-                                                       @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+                                                       @RequestParam(value = "pageKey", required = false) String pageKey) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -481,9 +523,8 @@ public class AiAssistController {
     }
 
     @GetMapping("/projects/{projectId}/access-sessions/latest")
-    public ResponseEntity<?> latestAccessSession(@PathVariable Long projectId,
-                                                 @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+    public ResponseEntity<?> latestAccessSession(@PathVariable Long projectId) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -497,10 +538,9 @@ public class AiAssistController {
     public ResponseEntity<?> reportAccessSessionStep(@PathVariable Long projectId,
                                                      @PathVariable String sessionId,
                                                      @PathVariable String stepKey,
-                                                     @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                      @RequestBody(required = false)
                                                      AiAccessSessionService.StepReportRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -514,10 +554,9 @@ public class AiAssistController {
     public ResponseEntity<?> reportPageAssistantSessionStep(@PathVariable Long projectId,
                                                             @PathVariable String sessionId,
                                                             @PathVariable String stepKey,
-                                                            @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                             @RequestBody(required = false)
                                                             AiAccessSessionService.StepReportRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -530,10 +569,9 @@ public class AiAssistController {
     @PostMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/workflow-ai-coding-result")
     public ResponseEntity<?> reportPageAssistantWorkflowAiCodingResult(@PathVariable Long projectId,
                                                                        @PathVariable String sessionId,
-                                                                       @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                                        @RequestBody(required = false)
                                                                        AiAccessSessionService.WorkflowAiCodingResultRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -546,9 +584,8 @@ public class AiAssistController {
     @DeleteMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/workflow-ai-coding-result")
     public ResponseEntity<?> resetPageAssistantWorkflowAiCodingResult(@PathVariable Long projectId,
                                                                       @PathVariable String sessionId,
-                                                                      @RequestParam(value = "deleteWorkflow", defaultValue = "true") boolean deleteWorkflow,
-                                                                      @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+                                                                      @RequestParam(value = "deleteWorkflow", defaultValue = "true") boolean deleteWorkflow) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -561,10 +598,9 @@ public class AiAssistController {
     @PutMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/target")
     public ResponseEntity<?> bindPageAssistantSessionTarget(@PathVariable Long projectId,
                                                             @PathVariable String sessionId,
-                                                            @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                             @RequestBody(required = false)
                                                             AiAccessSessionService.PageAssistantTargetRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -577,10 +613,9 @@ public class AiAssistController {
     @PostMapping("/projects/{projectId}/page-assistant/sessions/{sessionId}/catalog/sync")
     public ResponseEntity<?> syncPageAssistantCatalog(@PathVariable Long projectId,
                                                       @PathVariable String sessionId,
-                                                      @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                       @RequestBody(required = false)
                                                       PageActionCatalogContracts.PageCatalogRegisterRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -627,10 +662,9 @@ public class AiAssistController {
 
     @PostMapping(value = "/projects/{projectId}/page-assistant/pages/register", produces = "application/json;charset=UTF-8")
     public ResponseEntity<?> registerPageAssistantPage(@PathVariable Long projectId,
-                                                       @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                        @RequestBody(required = false)
                                                        AiAccessSessionService.PageAssistantPageRegisterRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -801,17 +835,28 @@ public class AiAssistController {
                 new PageActionSafetyManifest(true, true));
     }
 
-    private static String buildPageAssistantScaffoldCommand(String manifestUrl) {
+    private static String buildPageAssistantScaffoldCommand(String manifestUrl, boolean useHeaderAuth) {
         return ".\\scripts\\reachai-page-assistant.ps1 scaffold -ManifestUrl \""
-                + manifestUrl + "\" -Framework angular -OutputDir \".\\src\\app\\shared\\reachai\"";
+                + manifestUrl + "\""
+                + pageAssistantAiCodingKeyArgument(useHeaderAuth)
+                + " -Framework angular -OutputDir \".\\src\\app\\shared\\reachai\"";
     }
 
-    private static String buildPageAssistantVerifyCommand(String manifestUrl, String pageKey, String routePattern) {
+    private static String buildPageAssistantVerifyCommand(String manifestUrl,
+                                                          String pageKey,
+                                                          String routePattern,
+                                                          boolean useHeaderAuth) {
         String resolvedPageKey = StringUtils.hasText(pageKey) ? pageKey.trim() : "<pageKey>";
         String resolvedRoute = StringUtils.hasText(routePattern) ? routePattern.trim() : "<目标路由>";
         return ".\\scripts\\reachai-page-assistant.ps1 verify -ManifestUrl \""
-                + manifestUrl + "\" -FrontendUrl \"<业务前端地址>\" -Route \""
+                + manifestUrl + "\""
+                + pageAssistantAiCodingKeyArgument(useHeaderAuth)
+                + " -FrontendUrl \"<业务前端地址>\" -Route \""
                 + resolvedRoute + "\" -PageKey \"" + resolvedPageKey + "\"";
+    }
+
+    private static String pageAssistantAiCodingKeyArgument(boolean useHeaderAuth) {
+        return useHeaderAuth ? " -AiCodingKey $env:REACHAI_AI_CODING_KEY" : "";
     }
 
     private static String resolveEffectiveAiCodingKey(ScanProjectEntity project, String requestAiCodingKey) {
@@ -831,6 +876,9 @@ public class AiAssistController {
                                                     @PathVariable String sessionId,
                                                     @RequestBody(required = false)
                                                     SdkAccessCheckService.SdkAccessCheckRequest request) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
+            return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
+        }
         try {
             return ResponseEntity.ok(accessSessionService.runChecks(projectId, sessionId, request));
         } catch (IllegalArgumentException ex) {
@@ -841,10 +889,9 @@ public class AiAssistController {
     @PostMapping(value = "/projects/{projectId}/page-assistant/sessions/{sessionId}/checks/run", produces = "application/json;charset=UTF-8")
     public ResponseEntity<?> runPageAssistantSessionChecks(@PathVariable Long projectId,
                                                            @PathVariable String sessionId,
-                                                           @RequestParam(value = "aiCodingKey", required = false) String aiCodingKey,
                                                            @RequestBody(required = false)
                                                            AiAccessSessionService.PageAssistantCheckRequest request) {
-        if (invalidAiCodingKey(projectId, aiCodingKey)) {
+        if (invalidAiCodingKey(projectId, effectiveAiCodingKey())) {
             return ResponseEntity.status(403).body(new ApiErrorResponse("invalid AI Coding access key"));
         }
         try {
@@ -878,14 +925,10 @@ public class AiAssistController {
     }
 
     private AgentProvisioningManifest buildAgentProvisioningManifest(ScanProjectEntity project,
-                                                                     String baseUrl,
-                                                                     String aiCodingKey) {
+                                                                      String projectApiRoot) {
         String fallbackProjectCode = projectCodeOrFallback(project);
         String defaultKeySlug = agentProvisioningService.pageCopilotKeySlug(fallbackProjectCode);
-        String provisionUrl = baseUrl + "/api/ai-assist/projects/" + project.getId() + "/agents/provision";
-        if (StringUtils.hasText(aiCodingKey)) {
-            provisionUrl = appendQuery(provisionUrl, "aiCodingKey", aiCodingKey);
-        }
+        String provisionUrl = projectApiRoot + "/agents/provision";
         return new AgentProvisioningManifest(
                 "agent-provisioning.v1",
                 AgentProvisioningService.PAGE_COPILOT_KIND,
@@ -929,7 +972,7 @@ public class AiAssistController {
                         "Store every executable graph as an ai_workflow draft or version.",
                         "Create ai_agent_workflow_binding rows for DEFAULT, PAGE, ACTION, ROUTE, or INTENT routing.",
                         "Do not treat LangGraph runtime configuration as the Agent identity.",
-                        "Use Workflow AI Coding REST APIs or the workflow-ai-coding skill for draft edits, validation, debug runs, and release readiness checks."
+                        "Use Workflow AI Coding REST APIs or the workflow-ai-coding skill for draft edits, validation, debug runs, release readiness checks, and first publish."
                 )
         );
     }
@@ -943,12 +986,13 @@ public class AiAssistController {
                 baseUrl + "/api/workflows/{workflowId}/ai-coding/validate",
                 baseUrl + "/api/workflows/{workflowId}/ai-coding/run",
                 baseUrl + "/api/workflows/{workflowId}/ai-coding/versions",
+                baseUrl + "/api/workflows/{workflowId}/ai-coding/publish",
                 baseUrl + "/api/workflows/{workflowId}/ai-coding/runs",
                 List.of(
                         "Download and install the workflow-ai-coding skill before editing graphs from AI tools.",
-                        "All Workflow AI Coding endpoints require project aiCodingKey (query aiCodingKey or header X-ReachAI-AiCoding-Key); manage the key in project detail.",
+                        "All Workflow AI Coding endpoints require project aiCodingKey via header X-ReachAI-AiCoding-Key; manage the key in project detail.",
                         "Read /context before patch; use workflow.updatedAt as baseRevision when saving.",
-                        "AI tools must not publish; stop at /versions readiness and hand off to a human operator."
+                        "After the first valid workflow draft is saved, call /publish once to create the initial ACTIVE workflow version."
                 )
         );
     }
@@ -1006,9 +1050,20 @@ public class AiAssistController {
         return null;
     }
 
+    private String effectiveAiCodingKey() {
+        return AiCodingKeyContext.get();
+    }
+
     private boolean invalidAiCodingKey(Long projectId, String aiCodingKey) {
-        return StringUtils.hasText(aiCodingKey)
-                && !scanProjectService.matchesAiCodingAccessKey(projectId, aiCodingKey);
+        if (!StringUtils.hasText(aiCodingKey)) {
+            return false;
+        }
+        try {
+            aiCodingAccessGuard.requireProjectAccess(projectId, aiCodingKey);
+            return false;
+        } catch (AiCodingUnauthorizedException | AiCodingAccessDeniedException | IllegalArgumentException ex) {
+            return true;
+        }
     }
 
     private List<AgentEntryEntity> listProjectEmbedAgents(ScanProjectEntity project) {
@@ -1078,7 +1133,7 @@ public class AiAssistController {
         return out.toByteArray();
     }
 
-    private static String requestBaseUrl(HttpServletRequest request) {
+    static String requestBaseUrl(HttpServletRequest request) {
         String scheme = headerOrDefault(request, "X-Forwarded-Proto", request.getScheme());
         String host = headerOrDefault(request, "X-Forwarded-Host", request.getServerName());
         String port = request.getServerPort() <= 0 ? "" : ":" + request.getServerPort();
@@ -1093,14 +1148,6 @@ public class AiAssistController {
     private static String headerOrDefault(HttpServletRequest request, String name, String fallback) {
         String value = request.getHeader(name);
         return StringUtils.hasText(value) ? value.split(",")[0].trim() : fallback;
-    }
-
-    private static String appendQuery(String url, String key, String value) {
-        String separator = url.contains("?") ? "&" : "?";
-        return url + separator
-                + URLEncoder.encode(key, StandardCharsets.UTF_8)
-                + "="
-                + URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private static String emptyToNull(String value) {
@@ -1136,6 +1183,7 @@ public class AiAssistController {
             String schema,
             ProjectManifest project,
             AiCodingAccessManifest aiCodingAccess,
+            PageAssistantAuthManifest auth,
             PageAssistantTargetManifest target,
             AiAccessSessionService.AccessSessionView session,
             PageAssistantEndpoints endpoints,
@@ -1162,6 +1210,16 @@ public class AiAssistController {
     record AiCodingAccessManifest(
             boolean enabled,
             String accessKey
+    ) {
+    }
+
+    record PageAssistantAuthManifest(
+            String mode,
+            String headerName,
+            String keyEnv,
+            String externalToolPath,
+            String platformSessionPath,
+            List<String> guidance
     ) {
     }
 
@@ -1414,6 +1472,7 @@ public class AiAssistController {
             String validateUrlTemplate,
             String runUrlTemplate,
             String versionsUrlTemplate,
+            String publishUrlTemplate,
             String runsUrlTemplate,
             List<String> requiredSteps
     ) {

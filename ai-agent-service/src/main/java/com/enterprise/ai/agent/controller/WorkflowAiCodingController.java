@@ -3,6 +3,8 @@ package com.enterprise.ai.agent.controller;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingContextResponse;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPatchRequest;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPatchResponse;
+import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPublishRequest;
+import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingPublishResponse;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingRunRequest;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingRunResponse;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingRunDetailResponse;
@@ -64,6 +66,13 @@ public class WorkflowAiCodingController {
     @GetMapping("/versions")
     public ResponseEntity<WorkflowAiCodingVersionsResponse> versions(@PathVariable String workflowId) {
         return ResponseEntity.ok(aiCodingService.getVersions(workflowId));
+    }
+
+    @PostMapping("/publish")
+    public ResponseEntity<WorkflowAiCodingPublishResponse> publish(@PathVariable String workflowId,
+                                                                   @RequestBody(required = false)
+                                                                   WorkflowAiCodingPublishRequest request) {
+        return ResponseEntity.ok(aiCodingService.publish(workflowId, request));
     }
 
     @GetMapping("/runs")

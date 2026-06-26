@@ -1,5 +1,7 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.aicoding.AiCodingAccessDeniedException;
+import com.enterprise.ai.agent.aicoding.AiCodingUnauthorizedException;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAccessDeniedException;
 import com.enterprise.ai.agent.workflow.aicoding.WorkflowAiCodingUnauthorizedException;
 import org.springframework.http.ResponseEntity;
@@ -8,17 +10,22 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = {WorkflowAiCodingController.class, WorkflowAiCodingCatalogController.class})
+@RestControllerAdvice(assignableTypes = {
+        WorkflowAiCodingController.class,
+        WorkflowAiCodingCatalogController.class,
+        AiCodingGatewayController.class,
+        AiCodingContextCandidateController.class
+})
 public class WorkflowAiCodingControllerAdvice {
 
-    @ExceptionHandler(WorkflowAiCodingUnauthorizedException.class)
-    public ResponseEntity<Map<String, String>> unauthorized(WorkflowAiCodingUnauthorizedException ex) {
+    @ExceptionHandler({WorkflowAiCodingUnauthorizedException.class, AiCodingUnauthorizedException.class})
+    public ResponseEntity<Map<String, String>> unauthorized(RuntimeException ex) {
         return ResponseEntity.status(401).body(Map.of(
                 "message", ex.getMessage() == null ? "aiCodingKey is required" : ex.getMessage()));
     }
 
-    @ExceptionHandler(WorkflowAccessDeniedException.class)
-    public ResponseEntity<Map<String, String>> forbidden(WorkflowAccessDeniedException ex) {
+    @ExceptionHandler({WorkflowAccessDeniedException.class, AiCodingAccessDeniedException.class})
+    public ResponseEntity<Map<String, String>> forbidden(RuntimeException ex) {
         return ResponseEntity.status(403).body(Map.of(
                 "message", ex.getMessage() == null ? "invalid AI Coding access key" : ex.getMessage()));
     }

@@ -1,10 +1,12 @@
 package com.enterprise.ai.agent.workflow.aicoding.pageassistant;
 
+import com.enterprise.ai.agent.aicoding.AiCodingAccessGuard;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.identity.PageActionRegistryEntity;
 import com.enterprise.ai.agent.identity.PageActionRegistryMapper;
 import com.enterprise.ai.agent.platform.auth.AiCodingKeyContext;
 import com.enterprise.ai.agent.platform.auth.PlatformAuthContext;
+import com.enterprise.ai.agent.scan.ScanProjectEntity;
 import com.enterprise.ai.agent.scan.ScanProjectService;
 import com.enterprise.ai.agent.workflow.AgentWorkflowBindingService;
 import com.enterprise.ai.agent.workflow.WorkflowDefinitionEntity;
@@ -313,10 +315,16 @@ class WorkflowPageAssistantAiCodingServiceTest {
                 : scanProjectService;
         if (scanProjectService == null) {
             when(resolvedScanProjectService.matchesAiCodingAccessKey(7L, TEST_AI_CODING_KEY)).thenReturn(true);
+            ScanProjectEntity project = new ScanProjectEntity();
+            project.setId(7L);
+            project.setProjectCode("orders");
+            when(resolvedScanProjectService.getById(7L)).thenReturn(project);
         }
         return new WorkflowPageAssistantAiCodingService(
                 workflowService,
-                new WorkflowAiCodingAuthService(resolvedScanProjectService),
+                new WorkflowAiCodingAuthService(
+                        resolvedScanProjectService,
+                        new AiCodingAccessGuard(resolvedScanProjectService)),
                 new WorkflowRuntimeGraphAdapter(objectMapper),
                 actionMapper,
                 mock(AgentWorkflowBindingService.class),

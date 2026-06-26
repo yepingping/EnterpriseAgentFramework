@@ -159,10 +159,20 @@ export interface SdkAccessCheckItem {
   evidence?: string | null
 }
 
+export type SdkAccessReadinessKey = 'CODE_READY' | 'RUNTIME_READY' | 'E2E_READY'
+
+export interface SdkAccessReadiness {
+  key: SdkAccessReadinessKey | string
+  label: string
+  status: SdkAccessCheckStatus
+  message: string
+}
+
 export interface SdkAccessCheckResponse {
   projectId: number
   projectCode: string
   overallStatus: SdkAccessCheckStatus
+  readiness: SdkAccessReadiness[]
   checks: SdkAccessCheckItem[]
 }
 
@@ -374,6 +384,14 @@ export interface PageAssistantOnboardingManifest {
   schema: string
   project: AiOnboardingManifest['project']
   aiCodingAccess: AiOnboardingManifest['aiCodingAccess']
+  auth?: {
+    mode: 'ai-coding-key' | 'platform-session' | string
+    headerName?: string | null
+    keyEnv?: string | null
+    externalToolPath?: string | null
+    platformSessionPath?: string | null
+    guidance?: string[]
+  }
   target: {
     pageKey?: string | null
     routePattern?: string | null
@@ -517,12 +535,90 @@ export interface AiOnboardingManifest {
       globalAgentBindingsUrl?: string | null
       resolvePreviewUrl?: string | null
     }
+    workflowAiCoding?: {
+      skillPackageUrl?: string | null
+      createUrl?: string | null
+      contextUrlTemplate?: string | null
+      patchUrlTemplate?: string | null
+      validateUrlTemplate?: string | null
+      runUrlTemplate?: string | null
+      versionsUrlTemplate?: string | null
+      publishUrlTemplate?: string | null
+      runsUrlTemplate?: string | null
+      requiredSteps?: string[]
+    }
     requiredSteps?: string[]
   }
   security: {
     appSecretEnv: string
     message: string
   }
+}
+
+export interface AiCodingGatewayManifest {
+  schema: 'reachai.ai-coding.gateway.v1' | string
+  project: {
+    id: number
+    projectCode?: string | null
+    name?: string | null
+    projectKind?: string | null
+    environment?: string | null
+  }
+  auth: {
+    headerName: string
+    auditActor: string
+    guidance: string[]
+  }
+  endpoints: {
+    manifestUrl: string
+    contextCandidatesUrl: string
+    contextCandidatesBatchUrl: string
+    contextCandidateStatusUrlTemplate: string
+    sdkAccessManifestUrl: string
+    sdkAccessSessionUrl: string
+    sdkAccessLatestSessionUrl: string
+    pageAssistantManifestUrl: string
+    pageAssistantSessionUrl: string
+    workflowCreateUrl: string
+    workflowContextUrlTemplate: string
+    workflowPatchUrlTemplate: string
+    workflowValidateUrlTemplate: string
+    workflowRunUrlTemplate: string
+    workflowVersionsUrlTemplate: string
+    workflowPublishUrlTemplate: string
+    workflowRunsUrlTemplate: string
+    contextCandidateReviewUrl: string
+    contextCandidateAuditUrlTemplate: string
+  }
+  contextCandidateSubmission: {
+    schema: 'reachai.context-candidate-submission.v1' | string
+    endpoint: string
+    batchEndpoint: string
+    reviewMode: 'PENDING_HUMAN_REVIEW' | string
+    memoryLane: 'PROJECT_DEV' | string
+    tenantId: string
+    defaultSourceType: string
+    defaultCandidateType: string
+    requiredFields: string[]
+    candidateTypes: string[]
+    sourceTypes: string[]
+    traceMetadata: {
+      metadataKey: string
+      generatedSubmissionIdPrefix: string
+      defaultOrigin: string
+      traceIdPolicy: string
+      sessionIdPolicy: string
+    }
+    serverControlledFields: string[]
+    guidance: string[]
+  }
+  capabilities: Array<{
+    key: 'SDK_ACCESS' | 'PAGE_ASSISTANT' | 'WORKFLOW_AI_CODING' | 'CONTEXT_CANDIDATES' | string
+    title: string
+    targetType: 'PROJECT' | 'PAGE' | 'WORKFLOW' | string
+    entryUrl: string
+    guidance: string[]
+  }>
 }
 
 export interface AiCodingAccessUpdateRequest {

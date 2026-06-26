@@ -26,7 +26,7 @@ class WorkflowRuntimeServiceTest {
     void executeUsesActiveWorkflowVersionAndPassesPageMetadata() throws Exception {
         AgentRouter agentRouter = mock(AgentRouter.class);
         WorkflowRuntimeService service = new WorkflowRuntimeService(agentRouter, new WorkflowRuntimeGraphAdapter(new ObjectMapper()));
-        when(agentRouter.executeByGraphSpec(any(), any(), eq("session-1"), eq("user-1"), eq("hello"), eq(List.of("BUYER")), any()))
+        when(agentRouter.executeByGraphSpec(any(), any(), eq("session-1"), eq("user-1"), eq("hello"), eq(List.of("BUYER")), any(), any()))
                 .thenReturn(AgentResult.builder()
                         .success(true)
                         .answer("ok")
@@ -56,7 +56,8 @@ class WorkflowRuntimeServiceTest {
                 eq("user-1"),
                 eq("hello"),
                 eq(List.of("BUYER")),
-                metadataCaptor.capture());
+                metadataCaptor.capture(),
+                any());
         assertEquals("active", graphCaptor.getValue().getCode());
         assertEquals("WORKFLOW_VERSION", contextCaptor.getValue().getSourceType());
         assertEquals("wf-1", contextCaptor.getValue().getSourceId());
@@ -91,7 +92,7 @@ class WorkflowRuntimeServiceTest {
     void executeCanUseDraftGraphWhenAllowedForDebug() throws Exception {
         AgentRouter agentRouter = mock(AgentRouter.class);
         WorkflowRuntimeService service = new WorkflowRuntimeService(agentRouter, new WorkflowRuntimeGraphAdapter(new ObjectMapper()));
-        when(agentRouter.executeByGraphSpec(any(), any(), any(), any(), any(), any(), any()))
+        when(agentRouter.executeByGraphSpec(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(AgentResult.builder().success(true).answer("debug").build());
 
         service.execute(WorkflowRuntimeRequest.builder()
@@ -104,7 +105,7 @@ class WorkflowRuntimeServiceTest {
 
         ArgumentCaptor<GraphSpec> graphCaptor = ArgumentCaptor.forClass(GraphSpec.class);
         ArgumentCaptor<GraphRuntimeContext> contextCaptor = ArgumentCaptor.forClass(GraphRuntimeContext.class);
-        verify(agentRouter).executeByGraphSpec(graphCaptor.capture(), contextCaptor.capture(), any(), any(), any(), any(), any());
+        verify(agentRouter).executeByGraphSpec(graphCaptor.capture(), contextCaptor.capture(), any(), any(), any(), any(), any(), any());
         assertEquals("draft", graphCaptor.getValue().getCode());
         assertEquals("WORKFLOW_DRAFT", contextCaptor.getValue().getSourceType());
     }
@@ -139,6 +140,28 @@ class WorkflowRuntimeServiceTest {
                 Map.of("bindingId", 7L));
 
         assertEquals("node-llm-1", runtimeGraph.runtimeContext().getModelInstanceId());
+    }
+
+    @Test
+    void userIdPrefersGlobalUserIdOverExternalUserId() throws Exception {
+        AgentRouter agentRouter = mock(AgentRouter.class);
+        WorkflowRuntimeService service = new WorkflowRuntimeService(agentRouter, new WorkflowRuntimeGraphAdapter(new ObjectMapper()));
+        when(agentRouter.executeByGraphSpec(any(), any(), eq("session-1"), eq("global-user"), eq("hello"), any(), any(), any()))
+                .thenReturn(AgentResult.builder().success(true).answer("ok").build());
+
+        service.execute(WorkflowRuntimeRequest.builder()
+                .sessionId("session-1")
+                .message("hello")
+                .agent(agent())
+                .workflow(workflow("{\"code\":\"active\",\"nodes\":[{\"id\":\"answer\",\"type\":\"ANSWER\"}],\"entry\":\"answer\"}"))
+                .activeVersion(activeVersion("v1", "{\"code\":\"active\",\"nodes\":[{\"id\":\"answer\",\"type\":\"ANSWER\"}],\"entry\":\"answer\"}"))
+                .principal(Map.of(
+                        "globalUserId", "global-user",
+                        "externalUserId", "external-user",
+                        "userId", "platform-user"))
+                .build());
+
+        verify(agentRouter).executeByGraphSpec(any(), any(), eq("session-1"), eq("global-user"), eq("hello"), any(), any(), any());
     }
 
     private AgentEntryEntity agent() {

@@ -403,6 +403,7 @@ class AiAccessSessionServiceTest {
                         1L,
                         "demo-service",
                         SdkAccessCheckService.CheckStatus.WARN,
+                        List.of(),
                         List.of(
                                 new SdkAccessCheckService.SdkAccessCheckItem(
                                         "project-kind", "Project", SdkAccessCheckService.CheckStatus.PASS, "ok", "REGISTERED"),
@@ -425,6 +426,48 @@ class AiAccessSessionServiceTest {
         assertEquals("WARN", response.session().status());
         verify(stepMapper, org.mockito.Mockito.atLeast(3)).updateById(any(AiAccessStepEntity.class));
         verify(sessionMapper).updateById(any(AiAccessSessionEntity.class));
+    }
+
+    @Test
+    void runChecksPreservesExternalStepReportAndAppendsPlatformEvidence() {
+        AiAccessSessionEntity session = session("session-1");
+        AiAccessStepEntity gateway = step("session-1", "gateway-route", "PASS");
+        gateway.setReportedBy("Cursor");
+        gateway.setMessage("Gateway security chain compiled.");
+        gateway.setEvidenceJson("{\"command\":\"mvn -pl qmssmp-gateway test\",\"exitCode\":0}");
+        when(sessionMapper.selectList(any())).thenReturn(List.of(session));
+        when(stepMapper.selectList(any())).thenReturn(List.of(gateway));
+        when(sdkAccessCheckService.check(1L, new SdkAccessCheckService.SdkAccessCheckRequest(
+                null,
+                Map.of(),
+                null,
+                null)))
+                .thenReturn(new SdkAccessCheckService.SdkAccessCheckResponse(
+                        1L,
+                        "demo-service",
+                        SdkAccessCheckService.CheckStatus.WARN,
+                        List.of(),
+                        List.of(new SdkAccessCheckService.SdkAccessCheckItem(
+                                "gateway-route",
+                                "Gateway",
+                                SdkAccessCheckService.CheckStatus.WARN,
+                                "gatewayBaseUrl missing",
+                                "manual-confirm-required"))));
+
+        AiAccessSessionService.AccessCheckRunResponse response = service.runChecks(
+                1L,
+                "session-1",
+                new SdkAccessCheckService.SdkAccessCheckRequest(null, Map.of(), null, null));
+
+        AiAccessSessionService.AccessStepView gatewayStep = response.session().steps().stream()
+                .filter(step -> "gateway-route".equals(step.stepKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("PASS", gatewayStep.status());
+        assertEquals("Cursor", gatewayStep.reportedBy());
+        assertEquals("Gateway security chain compiled.", gatewayStep.message());
+        assertEquals("mvn -pl qmssmp-gateway test", gatewayStep.evidence().get("command"));
+        assertTrue(gatewayStep.evidence().containsKey("platformCheck"));
     }
 
     @Test

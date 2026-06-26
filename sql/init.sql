@@ -1926,6 +1926,201 @@ CREATE TABLE IF NOT EXISTS `eaf_ai_access_step` (
     KEY `idx_ai_access_step_project` (`project_id`, `status`, `updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI快速接入步骤进度';
 
+-- ============================================================================
+-- Context Governance Kernel v1（企业 Agent 上下文治理底座）
+-- 说明：Project Dev Memory 与 Runtime User Memory 通过 memory_lane 逻辑隔离。
+-- 本阶段未启用 FULLTEXT（MySQL 5.7/8 中文分词与 ngram 配置差异较大，先用 LIKE 检索）。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `context_namespace` (
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT,
+    `namespace_key`   VARCHAR(128) NOT NULL,
+    `namespace_type`  VARCHAR(32)  NOT NULL COMMENT 'PERSONAL/PROJECT/MODULE/FEATURE/PAGE/API/WORKFLOW/AGENT/USER/TENANT/SESSION/GLOBAL',
+    `tenant_id`       VARCHAR(96)  DEFAULT NULL,
+    `project_id`      BIGINT       DEFAULT NULL,
+    `project_code`    VARCHAR(96)  DEFAULT NULL,
+    `owner_type`      VARCHAR(32)  DEFAULT NULL,
+    `owner_id`        VARCHAR(128) DEFAULT NULL,
+    `display_name`    VARCHAR(128) DEFAULT NULL,
+    `description`     VARCHAR(512) DEFAULT NULL,
+    `status`          VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `created_by`      VARCHAR(128) DEFAULT NULL,
+    `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at`      DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_context_namespace_key` (`namespace_key`),
+    KEY `idx_context_namespace_scope` (`tenant_id`, `project_code`, `namespace_type`, `status`),
+    KEY `idx_context_namespace_owner` (`owner_type`, `owner_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上下文隔离命名空间';
+
+CREATE TABLE IF NOT EXISTS `context_item` (
+    `id`               BIGINT        NOT NULL AUTO_INCREMENT,
+    `item_key`         VARCHAR(128)  NOT NULL,
+    `namespace_id`     BIGINT        NOT NULL,
+    `item_type`        VARCHAR(32)   NOT NULL COMMENT 'FACT/PREFERENCE/RULE/DECISION/PITFALL/PAGE_CONTEXT/API_CONTRACT/WORKFLOW_CONTEXT/SESSION_SUMMARY/TRACE_LEARNING/NOTE',
+    `memory_lane`      VARCHAR(32)   NOT NULL DEFAULT 'PROJECT_DEV' COMMENT 'PROJECT_DEV or RUNTIME_USER',
+    `title`            VARCHAR(256)  DEFAULT NULL,
+    `content`          MEDIUMTEXT    NOT NULL,
+    `summary`          TEXT          DEFAULT NULL,
+    `metadata_json`    MEDIUMTEXT    DEFAULT NULL,
+    `source_type`      VARCHAR(48)   NOT NULL COMMENT 'USER_CONFIRMED/USER_MESSAGE/AGENT_OUTPUT/CODE/SQL/DOC/API/TRACE/PAGE/WORKFLOW/SYSTEM/MANUAL',
+    `source_ref`       VARCHAR(512)  DEFAULT NULL,
+    `confidence`       DECIMAL(5,4)  NOT NULL DEFAULT 0.7000,
+    `trust_level`      VARCHAR(24)   NOT NULL DEFAULT 'MEDIUM' COMMENT 'LOW/MEDIUM/HIGH/VERIFIED',
+    `visibility`       VARCHAR(32)   NOT NULL DEFAULT 'PRIVATE' COMMENT 'PRIVATE/PROJECT/TENANT/GLOBAL',
+    `status`           VARCHAR(24)   NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/STALE/REVOKED/DELETED',
+    `effective_from`   DATETIME      DEFAULT NULL,
+    `expires_at`       DATETIME      DEFAULT NULL,
+    `last_verified_at` DATETIME      DEFAULT NULL,
+    `stale_after`      DATETIME      DEFAULT NULL,
+    `created_by`       VARCHAR(128)  DEFAULT NULL,
+    `updated_by`       VARCHAR(128)  DEFAULT NULL,
+    `created_at`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at`       DATETIME      DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_context_item_key` (`item_key`),
+    KEY `idx_context_item_namespace` (`namespace_id`, `status`, `item_type`),
+    KEY `idx_context_item_lane` (`memory_lane`, `status`, `updated_at`),
+    KEY `idx_context_item_expiry` (`status`, `expires_at`),
+    KEY `idx_context_item_trust` (`trust_level`, `confidence`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上下文资产主表';
+
+CREATE TABLE IF NOT EXISTS `context_binding` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+    `item_id`      BIGINT       NOT NULL,
+    `bind_type`    VARCHAR(32)  NOT NULL COMMENT 'TENANT/PROJECT/USER/AGENT/WORKFLOW/PAGE/API/SESSION/MODULE/FEATURE',
+    `bind_id`      VARCHAR(128) NOT NULL,
+    `bind_key`     VARCHAR(256) DEFAULT NULL,
+    `tenant_id`    VARCHAR(96)  DEFAULT NULL,
+    `project_id`   BIGINT       DEFAULT NULL,
+    `project_code` VARCHAR(96)  DEFAULT NULL,
+    `status`       VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `deleted_at`   DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_context_binding_target` (`bind_type`, `bind_id`, `status`),
+    KEY `idx_context_binding_item` (`item_id`, `status`),
+    KEY `idx_context_binding_project` (`project_code`, `bind_type`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上下文资产绑定关系';
+
+CREATE TABLE IF NOT EXISTS `context_evidence` (
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT,
+    `item_id`         BIGINT       NOT NULL,
+    `evidence_type`   VARCHAR(48)  NOT NULL COMMENT 'USER_CONFIRMATION/SOURCE_FILE/SQL_SCHEMA/API_RESPONSE/TRACE_SPAN/TOOL_CALL/DOCUMENT/MANUAL_NOTE',
+    `evidence_ref`    VARCHAR(512) DEFAULT NULL,
+    `evidence_excerpt` TEXT        DEFAULT NULL,
+    `trace_id`        VARCHAR(128) DEFAULT NULL,
+    `confidence`      DECIMAL(5,4) DEFAULT NULL,
+    `metadata_json`   MEDIUMTEXT   DEFAULT NULL,
+    `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_context_evidence_item` (`item_id`),
+    KEY `idx_context_evidence_trace` (`trace_id`),
+    KEY `idx_context_evidence_type` (`evidence_type`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上下文资产来源证据';
+
+CREATE TABLE IF NOT EXISTS `context_audit_event` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `event_type`    VARCHAR(48)  NOT NULL COMMENT 'CREATE/UPDATE/READ/SEARCH/INJECT/DELETE/REVOKE/EXPIRE/VERIFY/MARK_STALE',
+    `item_id`       BIGINT       DEFAULT NULL,
+    `namespace_id`  BIGINT       DEFAULT NULL,
+    `actor_type`    VARCHAR(32)  DEFAULT NULL,
+    `actor_id`      VARCHAR(128) DEFAULT NULL,
+    `tenant_id`     VARCHAR(96)  DEFAULT NULL,
+    `project_id`    BIGINT       DEFAULT NULL,
+    `project_code`  VARCHAR(96)  DEFAULT NULL,
+    `agent_id`      VARCHAR(128) DEFAULT NULL,
+    `workflow_id`   VARCHAR(128) DEFAULT NULL,
+    `session_id`    VARCHAR(128) DEFAULT NULL,
+    `trace_id`      VARCHAR(128) DEFAULT NULL,
+    `decision`      VARCHAR(32)  DEFAULT NULL COMMENT 'ALLOW/DENY/SKIP',
+    `reason`        VARCHAR(512) DEFAULT NULL,
+    `metadata_json` MEDIUMTEXT   DEFAULT NULL,
+    `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_context_audit_item` (`item_id`, `created_at`),
+    KEY `idx_context_audit_actor` (`actor_type`, `actor_id`, `created_at`),
+    KEY `idx_context_audit_trace` (`trace_id`),
+    KEY `idx_context_audit_project` (`project_code`, `created_at`),
+    KEY `idx_context_audit_project_id` (`project_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上下文治理审计事件';
+
+CREATE TABLE IF NOT EXISTS `context_memory_candidate` (
+    `id`                BIGINT        NOT NULL AUTO_INCREMENT,
+    `candidate_key`     VARCHAR(128)  NOT NULL,
+    `tenant_id`         VARCHAR(96)   NOT NULL,
+    `project_id`        BIGINT        DEFAULT NULL,
+    `project_code`      VARCHAR(96)   DEFAULT NULL,
+    `namespace_id`      BIGINT        DEFAULT NULL,
+    `namespace_key`     VARCHAR(128)  DEFAULT NULL,
+    `memory_lane`       VARCHAR(32)   NOT NULL DEFAULT 'RUNTIME_USER',
+    `candidate_type`    VARCHAR(32)   NOT NULL COMMENT 'PREFERENCE/FACT/RULE/PAGE_CONTEXT/WORKFLOW_CONTEXT/API_CONTEXT/NOTE',
+    `title`             VARCHAR(256)  DEFAULT NULL,
+    `content`           MEDIUMTEXT    NOT NULL,
+    `summary`           TEXT          DEFAULT NULL,
+    `reason`            VARCHAR(512)  DEFAULT NULL,
+    `source_type`       VARCHAR(48)   NOT NULL COMMENT 'USER_MESSAGE/USER_CONFIRMED/AGENT_OUTPUT/TRACE/PAGE/WORKFLOW/MANUAL/SYSTEM',
+    `source_ref`        VARCHAR(512)  DEFAULT NULL,
+    `trace_id`          VARCHAR(128)  DEFAULT NULL,
+    `session_id`        VARCHAR(128)  DEFAULT NULL,
+    `user_id`           VARCHAR(128)  DEFAULT NULL,
+    `external_user_id`  VARCHAR(128)  DEFAULT NULL,
+    `global_user_id`    VARCHAR(128)  DEFAULT NULL,
+    `agent_id`          VARCHAR(128)  DEFAULT NULL,
+    `agent_key`         VARCHAR(128)  DEFAULT NULL,
+    `workflow_id`       VARCHAR(128)  DEFAULT NULL,
+    `workflow_key`      VARCHAR(128)  DEFAULT NULL,
+    `page_instance_id`  VARCHAR(128)  DEFAULT NULL,
+    `origin`            VARCHAR(512)  DEFAULT NULL,
+    `confidence`        DECIMAL(5,4)  NOT NULL DEFAULT 0.7000,
+    `trust_level`       VARCHAR(24)   NOT NULL DEFAULT 'LOW',
+    `visibility`        VARCHAR(32)   NOT NULL DEFAULT 'PRIVATE',
+    `status`            VARCHAR(24)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPROVED/REJECTED/EXPIRED/DELETED',
+    `proposed_by`       VARCHAR(128)  DEFAULT NULL,
+    `reviewed_by`       VARCHAR(128)  DEFAULT NULL,
+    `reviewed_at`       DATETIME      DEFAULT NULL,
+    `review_reason`     VARCHAR(512)  DEFAULT NULL,
+    `approved_item_id`  BIGINT        DEFAULT NULL COMMENT '批准后写入 context_item.id',
+    `metadata_json`     MEDIUMTEXT    DEFAULT NULL,
+    `expires_at`        DATETIME      DEFAULT NULL,
+    `created_at`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at`        DATETIME      DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_context_memory_candidate_key` (`candidate_key`),
+    KEY `idx_context_memory_candidate_scope` (`tenant_id`, `project_code`, `memory_lane`, `status`),
+    KEY `idx_context_memory_candidate_user` (`tenant_id`, `user_id`, `status`, `created_at`),
+    KEY `idx_context_memory_candidate_session` (`session_id`, `status`, `created_at`),
+    KEY `idx_context_memory_candidate_trace` (`trace_id`),
+    KEY `idx_context_memory_candidate_agent` (`agent_id`, `status`, `created_at`),
+    KEY `idx_context_memory_candidate_review` (`status`, `expires_at`, `created_at`),
+    KEY `idx_context_memory_candidate_namespace` (`namespace_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Runtime User Memory 写回候选（确认前缓冲）';
+
+CREATE TABLE IF NOT EXISTS `context_runtime_user_mapping` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+    `tenant_id`        VARCHAR(96)  NOT NULL DEFAULT 'default',
+    `platform_user_id` BIGINT       NOT NULL COMMENT '平台管理端用户 ID',
+    `runtime_user_id`  VARCHAR(128) NOT NULL COMMENT 'Context runtime user ownerId（global/external/user 归一值）',
+    `global_user_id`   VARCHAR(128) DEFAULT NULL,
+    `external_user_id` VARCHAR(128) DEFAULT NULL,
+    `project_id`       BIGINT       DEFAULT NULL,
+    `project_code`     VARCHAR(96)  DEFAULT NULL,
+    `status`           VARCHAR(24)  NOT NULL DEFAULT 'ACTIVE',
+    `created_by`       VARCHAR(128) DEFAULT NULL,
+    `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at`       DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_context_runtime_user_mapping_actor` (`tenant_id`, `platform_user_id`, `runtime_user_id`, `status`),
+    KEY `idx_context_runtime_user_mapping_project` (`tenant_id`, `project_code`, `project_id`, `status`),
+    KEY `idx_context_runtime_user_mapping_runtime` (`tenant_id`, `runtime_user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='平台用户代审 Runtime User 记忆的身份映射';
+
+CALL add_idx_if_absent('context_audit_event', 'idx_context_audit_project_id', '`project_id`, `created_at`');
+
 CREATE TABLE IF NOT EXISTS `platform_user` (
     `id`               BIGINT       NOT NULL AUTO_INCREMENT,
     `username`         VARCHAR(96)  NOT NULL,
@@ -2032,12 +2227,15 @@ VALUES
 ('*', 'All platform permissions', 'PLATFORM', '*'),
 ('platform:read', 'Read platform assets', 'PLATFORM', 'READ'),
 ('platform:write', 'Write platform assets', 'PLATFORM', 'WRITE'),
-('platform:admin', 'Administer platform users and roles', 'PLATFORM', 'ADMIN');
+('platform:admin', 'Administer platform users and roles', 'PLATFORM', 'ADMIN'),
+('context:runtime-user:review', 'Review runtime user context candidates', 'CONTEXT_RUNTIME_USER', 'REVIEW'),
+('context:runtime-user:mapping:manage', 'Manage runtime user review mappings', 'CONTEXT_RUNTIME_USER', 'MANAGE_MAPPING');
 
 INSERT IGNORE INTO `platform_role_permission` (`role_id`, `permission_id`)
 SELECT r.id, p.id FROM `platform_role` r JOIN `platform_permission` p
 WHERE r.role_code = 'PLATFORM_ADMIN'
-  AND p.permission_code IN ('*', 'platform:read', 'platform:write', 'platform:admin');
+  AND p.permission_code IN ('*', 'platform:read', 'platform:write', 'platform:admin',
+                            'context:runtime-user:review', 'context:runtime-user:mapping:manage');
 
 INSERT IGNORE INTO `platform_role_permission` (`role_id`, `permission_id`)
 SELECT r.id, p.id FROM `platform_role` r JOIN `platform_permission` p

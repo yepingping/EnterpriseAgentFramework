@@ -2,7 +2,7 @@
 
 ## Publish Boundary
 
-Workflow AI Coding intentionally does **not** expose publish.
+Workflow AI Coding exposes publish only through the project-key protected AI Coding endpoint.
 
 Allowed:
 
@@ -11,13 +11,14 @@ Allowed:
 - validate draft
 - debug run
 - inspect versions and release readiness
+- publish a validated draft through `POST /api/workflows/{workflowId}/ai-coding/publish`
 
 Not allowed for AI tools:
 
 - `POST /api/workflows/{workflowId}/versions/publish`
 - any rollback or production rollout action
 
-When `/versions` reports `releaseValidation.valid=true`, tell the human operator to publish manually in admin UI.
+When `/versions` reports `releaseValidation.valid=true`, call the AI Coding publish endpoint once to create the active workflow version. If validation fails or the requested version already exists, stop and report the exact reason.
 
 ## Optimistic Locking
 
@@ -72,6 +73,7 @@ Patch saves and workflow creates are audited via guard decision logs with action
 
 - `CREATE`
 - `PATCH_SAVE`
+- `PUBLISH`
 
 Include a short `reason` when making material changes.
 

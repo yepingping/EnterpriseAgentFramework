@@ -42,6 +42,7 @@ mysql -uroot -p < sql/init.sql
 - SlotExtractor、DomainClassifier、MCP、A2A、注册中心、市场资产、工作流凭证。
 - 模型实例中心 `ai_model_instance` 及常用模型实例种子。
 - Embed 会话、页面注册、页面动作目录。
+- **Context Governance Kernel**：`context_namespace`、`context_item`、`context_binding`、`context_evidence`、`context_audit_event`、`context_memory_candidate`。
 
 ## 部署规则
 
@@ -54,6 +55,10 @@ mysql -uroot -p < sql/init.sql
 - 页面动作目录出现同一 `page_key` 重复页面时，执行 `sql/upgrade-20260602-page-registry-origin-dedupe.sql`。
 - AI 快速接入工作台步骤进度和 AI/CLI 回传需执行 `sql/upgrade-20260612-ai-access-session.sql`。
 - 项目全局 AI 入口按当前页面自动加载能力需执行 `sql/upgrade-20260613-global-entry-page-key.sql`。
+- **Context Governance Kernel v1** 需执行 `sql/upgrade-20260622-context-kernel.sql`（新环境直接用 `init.sql` 已含表）。
+- **Context Memory Candidate（Phase-3）** 需执行 `sql/upgrade-20260622-context-memory-candidate.sql`（新环境直接用 `init.sql` 已含表）。
+- **Context Audit projectId 索引补强** 需执行 `sql/upgrade-20260624-context-audit-project-id-index.sql`（新环境直接用 `init.sql` 已含索引）。
+- **Context Runtime User 代审身份映射** 需执行 `sql/upgrade-20260624-context-runtime-user-mapping.sql`（新环境直接用 `init.sql` 已含表与权限种子）。
 - 不再执行 `ai-agent-service/sql`、`ai-model-service/sql`、`ai-skills-service/sql` 下的历史补丁；这些目录已清理。
 - 后续 schema 变更必须同时维护根 `sql/init.sql` 和一份新的 `sql/upgrade-YYYYMMDD-short-name.sql`。
 - 项目默认不为旧数据做复杂兼容迁移；如果升级脚本会清理、重建、重命名或丢弃历史字段 / 数据，必须在 SQL 注释和变更说明中明确写出。

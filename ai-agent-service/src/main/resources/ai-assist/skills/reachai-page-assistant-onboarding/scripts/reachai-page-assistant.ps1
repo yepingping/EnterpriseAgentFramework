@@ -2,6 +2,7 @@ param(
   [Parameter(Position = 0)]
   [string] $Command = "help",
   [string] $ManifestUrl = "",
+  [string] $AiCodingKey = $env:REACHAI_AI_CODING_KEY,
   [string] $Framework = "angular",
   [string] $OutputDir = ".\src\app\shared\reachai",
   [string] $WorkspaceRoot = ".",
@@ -24,9 +25,9 @@ function Write-HelpText {
 ReachAI page assistant helper.
 
 Usage:
-  .\scripts\reachai-page-assistant.ps1 scaffold -ManifestUrl <url> -Framework angular -OutputDir .\src\app\shared\reachai
-  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -WorkspaceRoot . -FrontendUrl http://localhost:9200 -Route /team-build/depart-management -PageKey teamArchive.list
-  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -FrontendUrl http://localhost:9200 -Route /teams/archive -PageKey teamArchive.list -StorageStatePath .\playwright\.auth\user.json -ReportToPlatform
+  .\scripts\reachai-page-assistant.ps1 scaffold -ManifestUrl <url> -AiCodingKey $env:REACHAI_AI_CODING_KEY -Framework angular -OutputDir .\src\app\shared\reachai
+  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -AiCodingKey $env:REACHAI_AI_CODING_KEY -WorkspaceRoot . -FrontendUrl http://localhost:9200 -Route /team-build/depart-management -PageKey teamArchive.list
+  .\scripts\reachai-page-assistant.ps1 verify -ManifestUrl <url> -AiCodingKey $env:REACHAI_AI_CODING_KEY -FrontendUrl http://localhost:9200 -Route /teams/archive -PageKey teamArchive.list -StorageStatePath .\playwright\.auth\user.json -ReportToPlatform
 
 Runtime probe notes:
   - With -FrontendUrl, the script tries a real browser bridge invoke via Playwright (requires Node.js + playwright package).
@@ -38,8 +39,34 @@ Runtime probe notes:
 Other notes:
   - Use local PowerShell/curl for localhost ReachAI APIs. Remote WebFetch often cannot reach localhost.
   - The script never reads or prints app secrets, business tokens, or full table payloads.
+  - Manifest URLs must not include aiCodingKey; pass -AiCodingKey or set REACHAI_AI_CODING_KEY so the script sends X-ReachAI-AiCoding-Key.
   - verify reports to ReachAI only when -ReportToPlatform is set.
 "@
+}
+
+function Get-AiCodingHeaders {
+  $headers = @{}
+  if ($AiCodingKey -and $AiCodingKey.Trim()) {
+    $headers["X-ReachAI-AiCoding-Key"] = $AiCodingKey.Trim()
+  }
+  return $headers
+}
+
+function Invoke-ReachAiJsonGet([string] $url) {
+  $headers = Get-AiCodingHeaders
+  if ($headers.Count -gt 0) {
+    return Invoke-RestMethod -Method Get -Uri $url -Headers $headers
+  }
+  return Invoke-RestMethod -Method Get -Uri $url
+}
+
+function Invoke-ReachAiJsonPost([string] $url, $body) {
+  $json = $body | ConvertTo-Json -Depth 50 -Compress
+  $headers = Get-AiCodingHeaders
+  if ($headers.Count -gt 0) {
+    return Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType "application/json; charset=utf-8" -Body $json
+  }
+  return Invoke-RestMethod -Method Post -Uri $url -ContentType "application/json; charset=utf-8" -Body $json
 }
 
 function Read-Manifest([string] $url) {
@@ -47,7 +74,7 @@ function Read-Manifest([string] $url) {
   if (Test-Path $url) {
     return Get-Content -Raw -Encoding UTF8 -Path $url | ConvertFrom-Json
   }
-  Invoke-RestMethod -Method Get -Uri $url
+  Invoke-ReachAiJsonGet $url
 }
 
 function ConvertTo-Hashtable($value) {
@@ -62,6 +89,73 @@ function ConvertTo-Hashtable($value) {
 
 function Test-CommandExists([string] $name) {
   return [bool](Get-Command $name -ErrorAction SilentlyContinue)
+}
+
+function Invoke-FrontendStaticProbe {
+  param(
+    [string] $TargetUrl,
+    [string] $BridgeGlobal,
+    [int] $TimeoutSec
+  )
+
+  $bridgeKey = $BridgeGlobal
+  if ($bridgeKey.StartsWith("window.")) {
+    $bridgeKey = $bridgeKey.Substring(7)
+  }
+  $checkedUrls = @()
+  $statusCode = $null
+  $found = $false
+  $message = ""
+  $failureCode = ""
+
+  try {
+    $response = Invoke-WebRequest -Method Get -Uri $TargetUrl -UseBasicParsing -TimeoutSec ([Math]::Max(1, $TimeoutSec))
+    $statusCode = [int]$response.StatusCode
+    $content = [string]$response.Content
+    $checkedUrls += $TargetUrl
+    $found = $content.Contains($bridgeKey) -or $content.Contains("__REACHAI_PAGE_BRIDGE__")
+
+    if (-not $found) {
+      $scriptMatches = [regex]::Matches($content, '<script[^>]+src=["'']([^"'']+\.js[^"'']*)["'']', 'IgnoreCase')
+      $baseUri = [System.Uri]::new($TargetUrl)
+      foreach ($match in @($scriptMatches | Select-Object -First 12)) {
+        $scriptUrl = ([System.Uri]::new($baseUri, $match.Groups[1].Value)).AbsoluteUri
+        $checkedUrls += $scriptUrl
+        try {
+          $scriptResponse = Invoke-WebRequest -Method Get -Uri $scriptUrl -UseBasicParsing -TimeoutSec ([Math]::Max(1, $TimeoutSec))
+          $scriptContent = [string]$scriptResponse.Content
+          if ($scriptContent.Contains($bridgeKey) -or $scriptContent.Contains("__REACHAI_PAGE_BRIDGE__")) {
+            $found = $true
+            break
+          }
+        } catch {
+          # Keep probing other assets; this is only a WARN-grade fallback.
+        }
+      }
+    }
+
+    $message = if ($found) {
+      "Fallback static frontend probe found the ReachAI bridge marker in HTML/JS. Runtime invoke still requires Playwright and login state."
+    } else {
+      "Fallback static frontend probe reached the route but did not find the ReachAI bridge marker in HTML/JS."
+    }
+  } catch {
+    $message = "Fallback static frontend probe failed: " + $_.Exception.Message
+    $failureCode = "FRONTEND_UNREACHABLE"
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+      $statusCode = [int]$_.Exception.Response.StatusCode
+    }
+  }
+
+  return [pscustomobject]@{
+    status = "WARN"
+    message = $message
+    bridgeMarkerFound = [bool]$found
+    checkedUrls = @($checkedUrls)
+    httpStatus = $statusCode
+    probeEngine = "webrequest-static"
+    failureCode = $failureCode
+  }
 }
 
 function Get-TemplateContent([string] $name) {
@@ -382,7 +476,10 @@ function New-ActionDefinition([string] $actionKey) {
 function Get-RuntimeProbeNodeScript {
   @'
 const fs = require('fs');
-const args = JSON.parse(process.argv[2] || '{}');
+const argPath = process.argv[2] || '';
+const args = argPath && fs.existsSync(argPath)
+  ? JSON.parse(fs.readFileSync(argPath, 'utf8'))
+  : JSON.parse(argPath || '{}');
 
 function redactResult(actionKey, raw) {
   const data = raw && raw.data && typeof raw.data === 'object' ? raw.data : {};
@@ -405,6 +502,7 @@ function redactResult(actionKey, raw) {
     process.stdout.write(JSON.stringify({
       ok: false,
       code: 'PLAYWRIGHT_MISSING',
+      failureCode: 'PLAYWRIGHT_MISSING',
       message: 'Node.js playwright package is not installed. Run npm install -D playwright, or provide StorageState/login manually and retry.',
       bridgeExists: false,
       listedActions: [],
@@ -423,6 +521,8 @@ function redactResult(actionKey, raw) {
   const page = await context.newPage();
   const result = {
     ok: false,
+    code: null,
+    failureCode: null,
     bridgeExists: false,
     listedActions: [],
     invokedActions: [],
@@ -527,18 +627,29 @@ function redactResult(actionKey, raw) {
       result.ok = true;
       result.message = 'Runtime bridge invoke succeeded for readonly actions.';
     } else if (!result.bridgeExists) {
+      result.code = looksLikeLogin ? 'LOGIN_REQUIRED' : 'BRIDGE_NOT_FOUND';
+      result.failureCode = result.code;
       result.message = looksLikeLogin
         ? 'Page loaded but login/session is likely required before the bridge is available. Provide StorageState/Cookie or login manually, then retry.'
         : 'Page loaded but window bridge was not found. Ensure the target route is open and handlers are registered.';
     } else if (result.listedActions.length === 0) {
+      result.code = 'ACTIONS_NOT_REGISTERED';
+      result.failureCode = 'ACTIONS_NOT_REGISTERED';
       result.message = 'Bridge exists but no actions are registered for the target pageKey.';
     } else {
+      result.code = looksLikeLogin ? 'LOGIN_REQUIRED' : 'INVOKE_FAILED';
+      result.failureCode = result.code;
       result.message = looksLikeLogin
         ? 'Bridge detected but invoke failed, likely due to missing login/session. Provide StorageState/Cookie or login manually.'
         : 'Bridge detected but readonly invoke did not return SUCCESS.';
     }
   } catch (error) {
-    result.message = 'Runtime browser probe failed: ' + (error && error.message ? error.message : String(error));
+    const errorMessage = error && error.message ? error.message : String(error);
+    result.code = /ERR_CONNECTION|ECONNREFUSED|ENOTFOUND|net::ERR|timeout|timed out/i.test(errorMessage)
+      ? 'FRONTEND_UNREACHABLE'
+      : (/login|auth|401|403/i.test(errorMessage) ? 'LOGIN_REQUIRED' : 'PROBE_FAILED');
+    result.failureCode = result.code;
+    result.message = 'Runtime browser probe failed: ' + errorMessage;
     result.loginLikelyRequired = /login|auth|401|403/i.test(result.message);
   } finally {
     await browser.close();
@@ -549,6 +660,7 @@ function redactResult(actionKey, raw) {
   process.stdout.write(JSON.stringify({
     ok: false,
     code: 'PROBE_FAILED',
+    failureCode: 'PROBE_FAILED',
     message: error && error.message ? error.message : String(error),
     bridgeExists: false,
     listedActions: [],
@@ -571,14 +683,17 @@ function Invoke-RuntimeBridgeProbe {
   )
 
   if (-not (Test-CommandExists "node")) {
+    $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
     return [pscustomobject]@{
       status = "WARN"
-      message = "Node.js is not available; runtime bridge invoke skipped. Install Node.js + playwright for real runtime PASS."
+      message = "Node.js is not available; runtime bridge invoke skipped. Install Node.js + playwright for real runtime PASS. " + $fallback.message
       bridgeExists = $false
       listedActions = @()
       invokedActions = @()
       redactedResults = @()
-      probeEngine = "none"
+      probeEngine = $fallback.probeEngine
+      failureCode = "NODE_MISSING"
+      fallbackProbe = $fallback
     }
   }
 
@@ -598,42 +713,72 @@ function Invoke-RuntimeBridgeProbe {
   } | ConvertTo-Json -Compress
 
   $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("reachai-runtime-probe-" + [guid]::NewGuid().ToString("N") + ".cjs")
+  $tempArgs = Join-Path ([System.IO.Path]::GetTempPath()) ("reachai-runtime-probe-args-" + [guid]::NewGuid().ToString("N") + ".json")
   try {
     Set-Content -Path $tempScript -Value (Get-RuntimeProbeNodeScript) -Encoding UTF8
-    $output = & node $tempScript $probeArgs 2>&1 | Out-String
+    Set-Content -Path $tempArgs -Value $probeArgs -Encoding UTF8
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = "Continue"
+      $output = (& node $tempScript $tempArgs 2>&1 | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
     $parsed = $null
     try { $parsed = $output.Trim() | ConvertFrom-Json } catch { $parsed = $null }
     if ($null -eq $parsed) {
+      $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
+      $rawOutput = if ($output) { $output.Trim() } else { "" }
+      if ($rawOutput.Length -gt 1000) { $rawOutput = $rawOutput.Substring(0, 1000) }
       return [pscustomobject]@{
         status = "WARN"
-        message = "Runtime probe did not return JSON. Ensure playwright is installed and the dev server is reachable."
+        message = "Runtime probe returned non-JSON output. failureCode=JSON_PARSE_ERROR. " + $fallback.message
         bridgeExists = $false
         listedActions = @()
         invokedActions = @()
         redactedResults = @()
-        probeEngine = "node"
-        rawOutput = ($output | Select-Object -First 500)
+        probeEngine = $fallback.probeEngine
+        failureCode = "JSON_PARSE_ERROR"
+        fallbackProbe = $fallback
+        rawOutput = $rawOutput
       }
     }
 
     $successCount = @($parsed.redactedResults | Where-Object { $_.status -eq "SUCCESS" }).Count
     $status = "WARN"
     $message = [string]$parsed.message
-    if ($parsed.code -eq "PLAYWRIGHT_MISSING") {
-      $status = "WARN"
-      $message = [string]$parsed.message
+    $parsedFailureCode = if ($parsed.failureCode) { [string]$parsed.failureCode } elseif ($parsed.code) { [string]$parsed.code } else { "" }
+    if ($parsedFailureCode -eq "PLAYWRIGHT_MISSING" -or $parsedFailureCode -eq "PROBE_FAILED" -or $parsedFailureCode -eq "FRONTEND_UNREACHABLE") {
+      $fallback = Invoke-FrontendStaticProbe -TargetUrl $TargetUrl -BridgeGlobal $BridgeGlobal -TimeoutSec $TimeoutSec
+      $playwrightStatus = if ($parsedFailureCode) { $parsedFailureCode } else { "PROBE_FAILED" }
+      return [pscustomobject]@{
+        status = "WARN"
+        message = ([string]$parsed.message) + " " + $fallback.message
+        bridgeExists = $false
+        listedActions = @()
+        invokedActions = @()
+        redactedResults = @()
+        probeEngine = $fallback.probeEngine
+        loginLikelyRequired = $false
+        failureCode = $playwrightStatus
+        playwrightStatus = $playwrightStatus
+        fallbackProbe = $fallback
+      }
     } elseif ($successCount -gt 0) {
       $status = "PASS"
       $message = "Runtime bridge invoke succeeded for readonly actions (getPageState/readTable)."
     } elseif ($parsed.loginLikelyRequired) {
       $status = "WARN"
       $message = if ($message) { $message } else { "Login/session likely required. Provide StorageState/Cookie or login manually before runtime PASS." }
+      $parsedFailureCode = "LOGIN_REQUIRED"
     } elseif ($parsed.bridgeExists -and @($parsed.listedActions).Count -gt 0) {
       $status = "WARN"
       $message = if ($message) { $message } else { "Bridge exists but readonly invoke did not succeed." }
+      if (-not $parsedFailureCode) { $parsedFailureCode = "INVOKE_FAILED" }
     } elseif (-not $parsed.bridgeExists) {
       $status = "WARN"
       $message = if ($message) { $message } else { "Bridge was not found in the loaded page." }
+      if (-not $parsedFailureCode) { $parsedFailureCode = "BRIDGE_NOT_FOUND" }
     }
 
     return [pscustomobject]@{
@@ -645,10 +790,12 @@ function Invoke-RuntimeBridgeProbe {
       redactedResults = @($parsed.redactedResults)
       probeEngine = "playwright"
       loginLikelyRequired = [bool]$parsed.loginLikelyRequired
+      failureCode = $parsedFailureCode
       finalUrl = [string]$parsed.finalUrl
     }
   } finally {
     if (Test-Path $tempScript) { Remove-Item -Force $tempScript -ErrorAction SilentlyContinue }
+    if (Test-Path $tempArgs) { Remove-Item -Force $tempArgs -ErrorAction SilentlyContinue }
   }
 }
 
@@ -704,7 +851,12 @@ function Build-BrowserRuntimeVerification {
     invokedActions = @($probe.invokedActions)
     redactedResults = @($probe.redactedResults)
     probeEngine = $probe.probeEngine
+    failureCode = $probe.failureCode
     loginLikelyRequired = [bool]$probe.loginLikelyRequired
+    bridgeMarkerFound = [bool]$probe.fallbackProbe.bridgeMarkerFound
+    fallbackCheckedUrls = @($probe.fallbackProbe.checkedUrls)
+    fallbackHttpStatus = $probe.fallbackProbe.httpStatus
+    playwrightStatus = $probe.playwrightStatus
     targetUrl = $targetUrl
   }
 }
@@ -782,7 +934,7 @@ function Invoke-Verify {
       verification = $verification
       handoffSummary = "reachai-page-assistant verify reported static and runtime evidence"
     }
-    $report = Invoke-RestMethod -Method Post -Uri $endpoints.registerPageUrl -ContentType "application/json; charset=utf-8" -Body ($body | ConvertTo-Json -Depth 50 -Compress)
+    $report = Invoke-ReachAiJsonPost $endpoints.registerPageUrl $body
     $result.reportedToPlatform = $true
     $result.platformResponse = $report
 
@@ -795,7 +947,7 @@ function Invoke-Verify {
         runtimeVerification = $browserRuntime
       }
       try {
-        $checkReport = Invoke-RestMethod -Method Post -Uri $endpoints.checksRunUrl -ContentType "application/json; charset=utf-8" -Body ($checkBody | ConvertTo-Json -Depth 50 -Compress)
+        $checkReport = Invoke-ReachAiJsonPost $endpoints.checksRunUrl $checkBody
         $result.platformCheckResponse = $checkReport
       } catch {
         $result.platformCheckError = $_.Exception.Message

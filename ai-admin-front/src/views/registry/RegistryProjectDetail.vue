@@ -464,6 +464,28 @@ const reachAiPlatformUrl = computed(
   () => import.meta.env.VITE_AI_AGENT_SERVICE_URL?.trim() || window.location.origin,
 )
 
+const gatewayManifestUrl = computed(() =>
+  project.value?.id ? `${reachAiPlatformUrl.value}/api/ai-coding/projects/${project.value.id}/manifest` : '',
+)
+
+const contextCandidatesUrl = computed(() =>
+  project.value?.id ? `${reachAiPlatformUrl.value}/api/ai-coding/projects/${project.value.id}/context-candidates` : '',
+)
+
+const contextCandidatesBatchUrl = computed(() =>
+  contextCandidatesUrl.value ? `${contextCandidatesUrl.value}/batch` : '',
+)
+
+const contextCandidateStatusUrlTemplate = computed(() =>
+  contextCandidatesUrl.value ? `${contextCandidatesUrl.value}?traceId={submissionId}&status=PENDING` : '',
+)
+
+const contextCandidateAuditUrlTemplate = computed(() =>
+  project.value?.id
+    ? `${reachAiPlatformUrl.value}/context/governance?tab=audit&projectId=${project.value.id}&traceId={submissionId}`
+    : '',
+)
+
 const aiCodingKeyDisplay = computed(() => {
   if (!aiCodingAccessEnabled.value) return '未启用'
   const key = aiCodingAccessKey.value.trim()
@@ -502,6 +524,36 @@ const aiCodingInfoRows = computed(() => {
       label: 'AI Coding 接入秘钥',
       displayValue: aiCodingKeyDisplay.value,
       copyValue: aiCodingAccessEnabled.value && aiCodingAccessKey.value.trim() ? aiCodingAccessKey.value.trim() : '',
+    },
+    {
+      label: 'AI Coding Gateway Manifest',
+      displayValue: gatewayManifestUrl.value || '-',
+      copyValue: gatewayManifestUrl.value,
+    },
+    {
+      label: '上下文候选提交 URL',
+      displayValue: contextCandidatesUrl.value || '-',
+      copyValue: contextCandidatesUrl.value,
+    },
+    {
+      label: '上下文候选批量提交 URL',
+      displayValue: contextCandidatesBatchUrl.value || '-',
+      copyValue: contextCandidatesBatchUrl.value,
+    },
+    {
+      label: '上下文候选状态查询 URL 模板',
+      displayValue: contextCandidateStatusUrlTemplate.value || '-',
+      copyValue: contextCandidateStatusUrlTemplate.value,
+    },
+    {
+      label: '上下文候选审计 URL 模板',
+      displayValue: contextCandidateAuditUrlTemplate.value || '-',
+      copyValue: contextCandidateAuditUrlTemplate.value,
+    },
+    {
+      label: 'AI Coding Header',
+      displayValue: 'X-ReachAI-AiCoding-Key',
+      copyValue: 'X-ReachAI-AiCoding-Key',
     },
   ]
 })
@@ -653,6 +705,14 @@ const workbenchGroups = computed(() => [
         disabled: !project.value?.id,
         action: goPageAssistantWizard,
       },
+      {
+        title: '代码扫描补充上下文',
+        desc: '供 Cursor、Codex、Claude Code 扫描代码后提交项目/页面/API/Workflow 上下文候选。',
+        icon: Collection,
+        tone: 'green',
+        disabled: !project.value?.id,
+        action: goContextCandidateReview,
+      },
     ],
   },
   {
@@ -673,6 +733,14 @@ const workbenchGroups = computed(() => [
         tone: 'orange',
         disabled: !project.value,
         action: goPageActionGovernance,
+      },
+      {
+        title: '上下文治理',
+        desc: '维护项目背景、页面/API/Workflow 契约、规则、证据和组包预览。',
+        icon: Collection,
+        tone: 'green',
+        disabled: !project.value?.id,
+        action: goContextGovernance,
       },
       {
         title: '工具管理',
@@ -1047,6 +1115,33 @@ function goPageActionGovernance() {
   router.push({
     name: 'EmbedOpsMonitor',
     params: { projectCode: project.value?.projectCode || projectCode.value },
+  })
+}
+
+function goContextGovernance() {
+  if (project.value?.id) {
+    projectStore.setCurrentProject(project.value.id)
+  }
+  router.push({
+    name: 'ContextGovernance',
+    query: {
+      projectId: project.value?.id,
+      projectCode: project.value?.projectCode || projectCode.value,
+    },
+  })
+}
+
+function goContextCandidateReview() {
+  if (project.value?.id) {
+    projectStore.setCurrentProject(project.value.id)
+  }
+  router.push({
+    name: 'ContextGovernance',
+    query: {
+      tab: 'candidates',
+      projectId: project.value?.id,
+      projectCode: project.value?.projectCode || projectCode.value,
+    },
   })
 }
 

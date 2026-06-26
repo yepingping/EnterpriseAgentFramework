@@ -32,7 +32,8 @@ public class SdkAccessCheckService {
                     CheckStatus.FAIL,
                     "当前项目不是 SDK 接入项目，请使用扫描项目工作台。",
                     project.getProjectKind()));
-            return new SdkAccessCheckResponse(project.getId(), project.getProjectCode(), CheckStatus.FAIL, checks);
+            return new SdkAccessCheckResponse(project.getId(), project.getProjectCode(), CheckStatus.FAIL,
+                    buildReadiness(checks), checks);
         }
 
         checks.add(new SdkAccessCheckItem(
@@ -90,7 +91,8 @@ public class SdkAccessCheckService {
 
         checks.add(runApiInvocationCheck(project.getId(), request));
 
-        return new SdkAccessCheckResponse(project.getId(), project.getProjectCode(), overallStatus(checks), checks);
+        return new SdkAccessCheckResponse(project.getId(), project.getProjectCode(), overallStatus(checks),
+                buildReadiness(checks), checks);
     }
 
     private SdkAccessCheckItem runApiInvocationCheck(Long projectId, SdkAccessCheckRequest request) {
@@ -143,6 +145,69 @@ public class SdkAccessCheckService {
         return CheckStatus.PASS;
     }
 
+    private static List<SdkAccessReadiness> buildReadiness(List<SdkAccessCheckItem> checks) {
+        CheckStatus codeReady = worstStatus(
+                statusOf(checks, "project-kind"),
+                statusOf(checks, "registry-credential"),
+                statusOf(checks, "gateway-route"),
+                statusOf(checks, "embed-token"));
+        CheckStatus runtimeReady = worstStatus(
+                statusOf(checks, "online-instance"),
+                statusOf(checks, "api-assets"));
+        CheckStatus e2eReady = statusOf(checks, "api-invocation");
+        return List.of(
+                new SdkAccessReadiness(
+                        "CODE_READY",
+                        "代码与配置就绪",
+                        codeReady,
+                        switch (codeReady) {
+                            case PASS -> "manifest、凭证、网关入口和 token broker 路径已具备。";
+                            case WARN -> "代码或配置基本存在，但仍有人工确认项。";
+                            case FAIL -> "项目类型或基础凭证不满足 SDK 接入要求。";
+                        }),
+                new SdkAccessReadiness(
+                        "RUNTIME_READY",
+                        "运行实例与 API 资产就绪",
+                        runtimeReady,
+                        switch (runtimeReady) {
+                            case PASS -> "检测到在线 SDK 实例和可调用 API 资产。";
+                            case WARN -> "代码可能已接好，但业务服务尚未上线心跳或 API 尚未同步。";
+                            case FAIL -> "运行态检查失败。";
+                        }),
+                new SdkAccessReadiness(
+                        "E2E_READY",
+                        "端到端调用就绪",
+                        e2eReady,
+                        switch (e2eReady) {
+                            case PASS -> "已完成一次真实 API 调用自检。";
+                            case WARN -> "尚未选择 API 资产或缺少真实调用参数。";
+                            case FAIL -> "真实 API 调用失败。";
+                        })
+        );
+    }
+
+    private static CheckStatus statusOf(List<SdkAccessCheckItem> checks, String key) {
+        return checks.stream()
+                .filter(item -> key.equals(item.key()))
+                .findFirst()
+                .map(SdkAccessCheckItem::status)
+                .orElse(CheckStatus.WARN);
+    }
+
+    private static CheckStatus worstStatus(CheckStatus... statuses) {
+        for (CheckStatus status : statuses) {
+            if (status == CheckStatus.FAIL) {
+                return CheckStatus.FAIL;
+            }
+        }
+        for (CheckStatus status : statuses) {
+            if (status == CheckStatus.WARN) {
+                return CheckStatus.WARN;
+            }
+        }
+        return CheckStatus.PASS;
+    }
+
     private static boolean isSdkBacked(ScanProjectEntity project) {
         String kind = project.getProjectKind();
         return "REGISTERED".equalsIgnoreCase(kind) || "HYBRID".equalsIgnoreCase(kind);
@@ -170,7 +235,16 @@ public class SdkAccessCheckService {
             Long projectId,
             String projectCode,
             CheckStatus overallStatus,
+            List<SdkAccessReadiness> readiness,
             List<SdkAccessCheckItem> checks
+    ) {
+    }
+
+    public record SdkAccessReadiness(
+            String key,
+            String label,
+            CheckStatus status,
+            String message
     ) {
     }
 

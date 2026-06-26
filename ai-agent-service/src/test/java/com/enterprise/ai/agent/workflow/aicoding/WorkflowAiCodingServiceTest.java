@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.workflow.aicoding;
 
+import com.enterprise.ai.agent.aicoding.AiCodingAccessGuard;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import com.enterprise.ai.agent.client.ModelServiceClient;
 import com.enterprise.ai.agent.governance.GuardDecisionLogService;
@@ -518,7 +519,7 @@ class WorkflowAiCodingServiceTest {
                 runtimeAdapter,
                 mock(AgentWorkflowBindingService.class),
                 mock(PageActionRegistryMapper.class),
-                new WorkflowAiCodingAuthService(scanProjectService),
+                new WorkflowAiCodingAuthService(scanProjectService, new AiCodingAccessGuard(scanProjectService)),
                 mock(RunOpsService.class),
                 mock(ModelServiceClient.class),
                 mock(ToolDefinitionService.class),
@@ -597,7 +598,7 @@ class WorkflowAiCodingServiceTest {
                 mock(LangGraph4jRuntimeAdapter.class),
                 bindingService,
                 pageActionRegistryMapper,
-                new WorkflowAiCodingAuthService(scanProjectService),
+                new WorkflowAiCodingAuthService(scanProjectService, new AiCodingAccessGuard(scanProjectService)),
                 mock(RunOpsService.class),
                 mock(ModelServiceClient.class),
                 mock(ToolDefinitionService.class),
@@ -726,7 +727,7 @@ class WorkflowAiCodingServiceTest {
                 mock(LangGraph4jRuntimeAdapter.class),
                 bindingService,
                 mock(PageActionRegistryMapper.class),
-                new WorkflowAiCodingAuthService(scanProjectService),
+                new WorkflowAiCodingAuthService(scanProjectService, new AiCodingAccessGuard(scanProjectService)),
                 mock(RunOpsService.class),
                 mock(ModelServiceClient.class),
                 mock(ToolDefinitionService.class),
@@ -759,7 +760,7 @@ class WorkflowAiCodingServiceTest {
     }
 
     @Test
-    void getVersionsIncludesManualPublishWarning() throws Exception {
+    void getVersionsIncludesAiCodingPublishWarning() throws Exception {
         WorkflowDefinitionService workflowService = mock(WorkflowDefinitionService.class);
         WorkflowReleaseValidationService validationService = mock(WorkflowReleaseValidationService.class);
         WorkflowVersionService versionService = mock(WorkflowVersionService.class);
@@ -774,7 +775,64 @@ class WorkflowAiCodingServiceTest {
         WorkflowAiCodingVersionsResponse response = service.getVersions("wf-1");
 
         assertEquals("wf-1", response.getWorkflowId());
-        assertTrue(response.getWarnings().stream().anyMatch(w -> w.contains("manual")));
+        assertTrue(response.getWarnings().stream().anyMatch(w -> w.contains("/ai-coding/publish")));
+    }
+
+    @Test
+    void publishCreatesActiveWorkflowVersionThroughVersionService() throws Exception {
+        WorkflowDefinitionService workflowService = mock(WorkflowDefinitionService.class);
+        WorkflowReleaseValidationService validationService = mock(WorkflowReleaseValidationService.class);
+        WorkflowVersionService versionService = mock(WorkflowVersionService.class);
+        GuardDecisionLogService guardDecisionLogService = mock(GuardDecisionLogService.class);
+        WorkflowAiCodingService service = newService(
+                workflowService,
+                validationService,
+                mock(AgentWorkflowBindingService.class),
+                null,
+                versionService,
+                mock(RunOpsService.class),
+                mock(ModelServiceClient.class),
+                mock(ToolDefinitionService.class),
+                null,
+                guardDecisionLogService);
+
+        WorkflowDefinitionEntity workflow = sampleWorkflow();
+        when(workflowService.findById("wf-1")).thenReturn(Optional.of(workflow));
+        WorkflowVersionEntity active = new WorkflowVersionEntity();
+        active.setId(99L);
+        active.setWorkflowId("wf-1");
+        active.setVersion("v1.0.0");
+        active.setStatus("ACTIVE");
+        active.setRolloutPercent(100);
+        active.setPublishedBy("codex");
+        active.setPublishedAt(LocalDateTime.parse("2026-06-25T14:00:00"));
+        when(versionService.publish(eq("wf-1"), any(WorkflowVersionService.WorkflowPublishRequest.class)))
+                .thenReturn(active);
+
+        WorkflowAiCodingPublishResponse response = service.publish("wf-1", WorkflowAiCodingPublishRequest.builder()
+                .version("v1.0.0")
+                .note("first AI Coding publish")
+                .publishedBy("codex")
+                .build());
+
+        assertEquals("wf-1", response.getWorkflowId());
+        assertEquals(99L, response.getVersionId());
+        assertEquals("v1.0.0", response.getVersion());
+        assertEquals("ACTIVE", response.getStatus());
+        ArgumentCaptor<WorkflowVersionService.WorkflowPublishRequest> request =
+                ArgumentCaptor.forClass(WorkflowVersionService.WorkflowPublishRequest.class);
+        verify(versionService).publish(eq("wf-1"), request.capture());
+        assertEquals("v1.0.0", request.getValue().version());
+        assertEquals(100, request.getValue().rolloutPercent());
+        assertEquals("codex", request.getValue().publishedBy());
+        verify(guardDecisionLogService).record(
+                eq(null),
+                eq("WORKFLOW_AI_CODING"),
+                eq("WORKFLOW"),
+                eq("wf-1"),
+                eq("PUBLISH"),
+                eq("first AI Coding publish"),
+                any());
     }
 
     @Test
@@ -863,6 +921,21 @@ class WorkflowAiCodingServiceTest {
                                                ModelServiceClient modelServiceClient,
                                                ToolDefinitionService toolDefinitionService,
                                                ScanProjectService scanProjectService) {
+        return newService(workflowService, validationService, bindingService, runtimeAdapter,
+                versionService, runOpsService, modelServiceClient, toolDefinitionService,
+                scanProjectService, mock(GuardDecisionLogService.class));
+    }
+
+    private WorkflowAiCodingService newService(WorkflowDefinitionService workflowService,
+                                               WorkflowReleaseValidationService validationService,
+                                               AgentWorkflowBindingService bindingService,
+                                               LangGraph4jRuntimeAdapter runtimeAdapter,
+                                               WorkflowVersionService versionService,
+                                               RunOpsService runOpsService,
+                                               ModelServiceClient modelServiceClient,
+                                               ToolDefinitionService toolDefinitionService,
+                                               ScanProjectService scanProjectService,
+                                               GuardDecisionLogService guardDecisionLogService) {
         AiCodingKeyContext.set(TEST_AI_CODING_KEY);
         ScanProjectService resolvedScanProjectService = scanProjectService == null
                 ? mock(ScanProjectService.class)
@@ -883,11 +956,13 @@ class WorkflowAiCodingServiceTest {
                 runtimeAdapter == null ? mock(LangGraph4jRuntimeAdapter.class) : runtimeAdapter,
                 bindingService,
                 mock(PageActionRegistryMapper.class),
-                new WorkflowAiCodingAuthService(resolvedScanProjectService),
+                new WorkflowAiCodingAuthService(
+                        resolvedScanProjectService,
+                        new AiCodingAccessGuard(resolvedScanProjectService)),
                 runOpsService == null ? mock(RunOpsService.class) : runOpsService,
                 modelServiceClient == null ? mock(ModelServiceClient.class) : modelServiceClient,
                 toolDefinitionService == null ? mock(ToolDefinitionService.class) : toolDefinitionService,
-                mock(GuardDecisionLogService.class),
+                guardDecisionLogService == null ? mock(GuardDecisionLogService.class) : guardDecisionLogService,
                 objectMapper);
     }
 

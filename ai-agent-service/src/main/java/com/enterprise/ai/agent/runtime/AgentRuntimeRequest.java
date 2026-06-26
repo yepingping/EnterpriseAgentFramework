@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.runtime;
 
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
 import com.enterprise.ai.agent.graph.GraphSpec;
 import lombok.Builder;
 import lombok.Data;
@@ -35,4 +36,13 @@ public class AgentRuntimeRequest {
     private Map<String, Object> runtimeOptions;
 
     private Map<String, Object> metadata;
+
+    private RuntimeContextInjectionResult runtimeContext;
+
+    public String effectiveUserMessage() {
+        if (runtimeContext == null || !org.springframework.util.StringUtils.hasText(runtimeContext.getPromptSection())) {
+            return message;
+        }
+        return runtimeContext.getPromptSection() + "\n\n[User Message]\n" + message;
+    }
 }

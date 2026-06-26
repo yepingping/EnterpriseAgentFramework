@@ -1,5 +1,9 @@
 package com.enterprise.ai.agent.controller;
 
+import com.enterprise.ai.agent.aicoding.AiCodingAccessGuard;
+import com.enterprise.ai.agent.aicoding.AiCodingAccessDeniedException;
+import com.enterprise.ai.agent.aicoding.AiCodingUnauthorizedException;
+import com.enterprise.ai.agent.platform.auth.AiCodingKeyContext;
 import com.enterprise.ai.agent.workflow.AgentEntryEntity;
 import com.enterprise.ai.agent.workflow.AgentEntryService;
 import com.enterprise.ai.agent.assist.AiAccessSessionService;
@@ -22,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +34,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.zip.ZipInputStream;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -37,8 +43,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,19 +60,39 @@ class AiAssistControllerTest {
     private final AiAccessSessionService accessSessionService = mock(AiAccessSessionService.class);
     private final PageActionCatalogService pageActionCatalogService = mock(PageActionCatalogService.class);
     private final PageAssistantWorkflowBindingService pageAssistantWorkflowBindingService = mock(PageAssistantWorkflowBindingService.class);
+    private final AiCodingAccessGuard aiCodingAccessGuard = mock(AiCodingAccessGuard.class);
     private final AiAssistController controller = new AiAssistController(
             scanProjectService,
+            aiCodingAccessGuard,
             registrySecurityService,
             agentEntryService,
             agentProvisioningService,
             accessSessionService,
             pageActionCatalogService,
             pageAssistantWorkflowBindingService);
+    private final AiCodingProjectAssistController aiCodingProjectAssistController =
+            new AiCodingProjectAssistController(controller, aiCodingAccessGuard);
 
     @BeforeEach
     void setUpAgentProvisioningDefaults() {
         when(agentProvisioningService.pageCopilotKeySlug(anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0, String.class) + "-page-copilot");
+    }
+
+    @Test
+    void aiAssistControllerOnlyOwnsConsoleAiAssistRoot() {
+        RequestMapping mapping = AiAssistController.class.getAnnotation(RequestMapping.class);
+
+        assertEquals(List.of("/api/ai-assist"), List.of(mapping.value()));
+    }
+
+    @Test
+    void aiCodingProjectAssistControllerOwnsProjectScopedExternalRoot() throws Exception {
+        Class<?> controllerType = Class.forName(
+                "com.enterprise.ai.agent.controller.AiCodingProjectAssistController");
+        RequestMapping mapping = controllerType.getAnnotation(RequestMapping.class);
+
+        assertEquals(List.of("/api/ai-coding/projects/{projectId}"), List.of(mapping.value()));
     }
 
     @Test
@@ -77,7 +105,7 @@ class AiAssistControllerTest {
         when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
                 .thenReturn(Optional.of(credential));
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, null, request());
+        ResponseEntity<?> response = controller.onboardingManifest(1L, request());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> projectBody = objectMapper.convertValue(body.get("project"), new TypeReference<>() {
@@ -106,7 +134,7 @@ class AiAssistControllerTest {
                 "demo-service",
                 true)));
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, null, request());
+        ResponseEntity<?> response = controller.onboardingManifest(1L, request());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> embedBody = objectMapper.convertValue(body.get("embed"), new TypeReference<>() {
@@ -129,7 +157,9 @@ class AiAssistControllerTest {
         when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
                 .thenReturn(Optional.empty());
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, "rac_valid", request());
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> controller.onboardingManifest(1L, request()));
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> provisioningBody = objectMapper.convertValue(body.get("agentProvisioning"), new TypeReference<>() {
@@ -141,7 +171,8 @@ class AiAssistControllerTest {
         assertEquals("PAGE_COPILOT", provisioningBody.get("defaultAgentKind"));
         assertEquals("demo-service-page-copilot", provisioningBody.get("defaultKeySlug"));
         assertTrue(provisioningBody.get("provisionAgentUrl").toString()
-                .contains("/api/ai-assist/projects/1/agents/provision?aiCodingKey=rac_valid"));
+                .endsWith("/api/ai-assist/projects/1/agents/provision"));
+        assertFalse(provisioningBody.get("provisionAgentUrl").toString().contains("aiCodingKey="));
         assertEquals("demo-service-page-copilot", agentWorkflowBody.get("globalAgentKeySlug"));
         assertEquals("PAGE_COPILOT", agentWorkflowBody.get("globalAgentKind"));
         Map<String, Object> workflowAiCodingBody = objectMapper.convertValue(
@@ -151,6 +182,54 @@ class AiAssistControllerTest {
                 .endsWith("/api/ai-assist/skills/workflow-ai-coding/latest.zip"));
         assertTrue(workflowAiCodingBody.get("createUrl").toString()
                 .endsWith("/api/workflows/ai-coding/workflows"));
+        assertTrue(workflowAiCodingBody.get("publishUrlTemplate").toString()
+                .endsWith("/api/workflows/{workflowId}/ai-coding/publish"));
+    }
+
+    @Test
+    void onboardingManifestUsesAiCodingAliasUrlsWhenRequestedThroughGatewayPrefix() {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_valid");
+        when(aiCodingAccessGuard.requireProjectAccess(1L)).thenReturn(project);
+        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
+                .thenReturn(Optional.empty());
+
+        MockHttpServletRequest request = request();
+        request.setRequestURI("/api/ai-coding/projects/1/onboarding-manifest");
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> aiCodingProjectAssistController.onboardingManifest(1L, request));
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> endpointsBody = objectMapper.convertValue(body.get("endpoints"), new TypeReference<>() {
+        });
+        Map<String, Object> provisioningBody = objectMapper.convertValue(body.get("agentProvisioning"), new TypeReference<>() {
+        });
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(endpointsBody.get("manifestUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/onboarding-manifest"));
+        assertTrue(provisioningBody.get("provisionAgentUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/agents/provision"));
+    }
+
+    @Test
+    void onboardingManifestGatewayAliasRejectsMissingAiCodingHeader() {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_valid");
+        when(aiCodingAccessGuard.requireProjectAccess(1L))
+                .thenThrow(new AiCodingUnauthorizedException("aiCodingKey is required"));
+
+        MockHttpServletRequest request = request();
+        request.setRequestURI("/api/ai-coding/projects/1/onboarding-manifest");
+        ResponseEntity<?> response = aiCodingProjectAssistController.onboardingManifest(1L, request);
+
+        assertEquals(403, response.getStatusCode().value());
+        verify(aiCodingAccessGuard, never()).requireProjectAccess(1L, "rac_valid");
     }
 
     @Test
@@ -182,10 +261,11 @@ class AiAssistControllerTest {
                         true,
                         true));
 
-        ResponseEntity<?> response = controller.provisionProjectAgent(
-                1L,
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                new AiAssistController.AgentProvisionRequest("PAGE_COPILOT", true, "Cursor"));
+                () -> controller.provisionProjectAgent(
+                        1L,
+                        new AiAssistController.AgentProvisionRequest("PAGE_COPILOT", true, "Cursor")));
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> agentBody = objectMapper.convertValue(body.get("agent"), new TypeReference<>() {
@@ -221,7 +301,7 @@ class AiAssistControllerTest {
                 "demo-service",
                 true)));
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, null, request());
+        ResponseEntity<?> response = controller.onboardingManifest(1L, request());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> embedBody = objectMapper.convertValue(body.get("embed"), new TypeReference<>() {
@@ -233,9 +313,11 @@ class AiAssistControllerTest {
 
     @Test
     void onboardingManifestRejectsInvalidAiCodingAccessKey() {
-        when(scanProjectService.matchesAiCodingAccessKey(1L, "wrong-key")).thenReturn(false);
+        rejectAiCodingKey("wrong-key");
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, "wrong-key", request());
+        ResponseEntity<?> response = withAiCodingKey(
+                "wrong-key",
+                () -> controller.onboardingManifest(1L, request()));
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -245,13 +327,68 @@ class AiAssistControllerTest {
         ScanProjectEntity project = project();
         project.setAiCodingAccessEnabled(true);
         project.setAiCodingAccessKey("rac_valid");
-        when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(scanProjectService.getById(1L)).thenReturn(project);
         when(registrySecurityService.findPrimaryActiveCredential("demo-service")).thenReturn(Optional.empty());
 
-        ResponseEntity<?> response = controller.onboardingManifest(1L, "rac_valid", request());
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> controller.onboardingManifest(1L, request()));
 
         assertEquals(200, response.getStatusCode().value());
+        verify(aiCodingAccessGuard).requireProjectAccess(1L, "rac_valid");
+    }
+
+    @Test
+    void onboardingManifestDoesNotTreatQueryAiCodingKeyAsExternalToolAuth() throws Exception {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_valid");
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service")).thenReturn(Optional.empty());
+
+        MockHttpServletRequest request = request();
+        request.setParameter("aiCodingKey", "rac_valid");
+        ResponseEntity<?> response = controller.onboardingManifest(1L, request);
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> provisioningBody = objectMapper.convertValue(body.get("agentProvisioning"), new TypeReference<>() {
+        });
+        Map<String, Object> aiCodingAccessBody = objectMapper.convertValue(body.get("aiCodingAccess"), new TypeReference<>() {
+        });
+
+        assertEquals(200, response.getStatusCode().value());
+        verify(aiCodingAccessGuard, never()).requireProjectAccess(1L, "rac_valid");
+        assertFalse(provisioningBody.get("provisionAgentUrl").toString().contains("aiCodingKey="));
+        assertEquals("rac_valid", aiCodingAccessBody.get("accessKey"));
+    }
+
+    @Test
+    void onboardingManifestAcceptsRequestContextAiCodingAccessKeyWithoutEchoingSecret() throws Exception {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_header");
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service")).thenReturn(Optional.empty());
+        AiCodingKeyContext.set("rac_header");
+
+        try {
+            ResponseEntity<?> response = controller.onboardingManifest(1L, request());
+            Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+            });
+            Map<String, Object> provisioningBody = objectMapper.convertValue(body.get("agentProvisioning"), new TypeReference<>() {
+            });
+            Map<String, Object> aiCodingAccessBody = objectMapper.convertValue(body.get("aiCodingAccess"), new TypeReference<>() {
+            });
+            String serialized = objectMapper.writeValueAsString(body);
+
+            assertEquals(200, response.getStatusCode().value());
+            verify(aiCodingAccessGuard).requireProjectAccess(1L, "rac_header");
+            assertFalse(serialized.contains("rac_header"));
+            assertFalse(provisioningBody.get("provisionAgentUrl").toString().contains("aiCodingKey="));
+            assertNull(aiCodingAccessBody.get("accessKey"));
+        } finally {
+            AiCodingKeyContext.clear();
+        }
     }
 
     @Test
@@ -279,7 +416,6 @@ class AiAssistControllerTest {
                 "/teams/archive",
                 List.of("getPageState", "search"),
                 "Cursor",
-                null,
                 request());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
@@ -318,14 +454,15 @@ class AiAssistControllerTest {
                         null)))
                 .thenReturn(session);
 
-        ResponseEntity<?> response = controller.pageAssistantManifest(
-                1L,
-                null,
-                null,
-                null,
-                "Cursor",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                request());
+                () -> controller.pageAssistantManifest(
+                        1L,
+                        null,
+                        null,
+                        null,
+                        "Cursor",
+                        request()));
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
         Map<String, Object> endpointsBody = objectMapper.convertValue(body.get("endpoints"), new TypeReference<>() {
@@ -355,10 +492,124 @@ class AiAssistControllerTest {
         assertTrue(endpointsBody.get("skillPackageUrl").toString().contains("/latest.zip"));
         assertTrue(endpointsBody.get("scriptDownloadUrl").toString().contains("/scripts/reachai-page-assistant.ps1"));
         assertTrue(endpointsBody.get("registerPageUrl").toString()
-                .contains("/page-assistant/pages/register?aiCodingKey=rac_valid"));
+                .endsWith("/page-assistant/pages/register"));
+        assertFalse(endpointsBody.get("registerPageUrl").toString().contains("aiCodingKey="));
+        assertTrue(scaffoldBody.get("scaffoldCommand").toString()
+                .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
+        assertTrue(scaffoldBody.get("verifyCommand").toString()
+                .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
         assertTrue(endpointsBody.containsKey("targetBindUrl"));
         assertTrue(endpointsBody.containsKey("catalogSyncUrl"));
         assertTrue(endpointsBody.containsKey("checksRunUrl"));
+    }
+
+    @Test
+    void pageAssistantManifestUsesAiCodingAliasUrlsWhenRequestedThroughGatewayPrefix() {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_valid");
+        AiAccessSessionService.AccessSessionView session = pageAssistantSession();
+        when(aiCodingAccessGuard.requireProjectAccess(1L)).thenReturn(project);
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
+                .thenReturn(Optional.empty());
+        when(accessSessionService.getOrCreatePageAssistantLatest(
+                1L,
+                new AiAccessSessionService.PageAssistantSessionRequest(
+                        "Cursor",
+                        null,
+                        null,
+                        null)))
+                .thenReturn(session);
+
+        MockHttpServletRequest request = request();
+        request.setRequestURI("/api/ai-coding/projects/1/page-assistant/onboarding-manifest");
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> aiCodingProjectAssistController.pageAssistantManifest(
+                        1L,
+                        null,
+                        null,
+                        null,
+                        "Cursor",
+                        request));
+        Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+        });
+        Map<String, Object> endpointsBody = objectMapper.convertValue(body.get("endpoints"), new TypeReference<>() {
+        });
+        Map<String, Object> authBody = objectMapper.convertValue(body.get("auth"), new TypeReference<>() {
+        });
+        Map<String, Object> scaffoldBody = objectMapper.convertValue(body.get("scaffold"), new TypeReference<>() {
+        });
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("ai-coding-key", authBody.get("mode"));
+        assertEquals("X-ReachAI-AiCoding-Key", authBody.get("headerName"));
+        assertTrue(authBody.get("guidance").toString().contains("/api/ai-coding/projects/{projectId}/page-assistant/**"));
+        assertTrue(endpointsBody.get("manifestUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/page-assistant/onboarding-manifest"));
+        assertTrue(endpointsBody.get("latestSessionUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/page-assistant/sessions/latest"));
+        assertTrue(endpointsBody.get("stepReportUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/page-assistant/sessions/rai_page/steps/{stepKey}/report"));
+        assertTrue(endpointsBody.get("registerPageUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/page-assistant/pages/register"));
+        assertTrue(endpointsBody.get("checksRunUrl").toString()
+                .endsWith("/api/ai-coding/projects/1/page-assistant/sessions/rai_page/checks/run"));
+        assertTrue(scaffoldBody.get("scaffoldCommand").toString()
+                .contains("/api/ai-coding/projects/1/page-assistant/onboarding-manifest"));
+        assertTrue(scaffoldBody.get("verifyCommand").toString()
+                .contains("/api/ai-coding/projects/1/page-assistant/onboarding-manifest"));
+        assertFalse(scaffoldBody.get("scaffoldCommand").toString().contains("/api/ai-assist/projects/1/page-assistant"));
+        assertFalse(scaffoldBody.get("verifyCommand").toString().contains("/api/ai-assist/projects/1/page-assistant"));
+    }
+
+    @Test
+    void pageAssistantManifestAcceptsRequestContextAiCodingAccessKey() throws Exception {
+        ScanProjectEntity project = project();
+        project.setAiCodingAccessEnabled(true);
+        project.setAiCodingAccessKey("rac_header");
+        AiAccessSessionService.AccessSessionView session = pageAssistantSession();
+        when(scanProjectService.getById(1L)).thenReturn(project);
+        when(registrySecurityService.findPrimaryActiveCredential("demo-service"))
+                .thenReturn(Optional.empty());
+        when(accessSessionService.getOrCreatePageAssistantLatest(
+                1L,
+                new AiAccessSessionService.PageAssistantSessionRequest(
+                        "Cursor",
+                        null,
+                        null,
+                        null)))
+                .thenReturn(session);
+        AiCodingKeyContext.set("rac_header");
+
+        try {
+            ResponseEntity<?> response = controller.pageAssistantManifest(
+                    1L,
+                    null,
+                    null,
+                    null,
+                    "Cursor",
+                    request());
+            Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
+            });
+            Map<String, Object> endpointsBody = objectMapper.convertValue(body.get("endpoints"), new TypeReference<>() {
+            });
+            Map<String, Object> scaffoldBody = objectMapper.convertValue(body.get("scaffold"), new TypeReference<>() {
+            });
+            String serialized = objectMapper.writeValueAsString(body);
+
+            assertEquals(200, response.getStatusCode().value());
+            verify(aiCodingAccessGuard).requireProjectAccess(1L, "rac_header");
+            assertFalse(serialized.contains("rac_header"));
+            assertFalse(endpointsBody.get("registerPageUrl").toString().contains("aiCodingKey="));
+            assertTrue(scaffoldBody.get("scaffoldCommand").toString()
+                    .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
+            assertTrue(scaffoldBody.get("verifyCommand").toString()
+                    .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
+        } finally {
+            AiCodingKeyContext.clear();
+        }
     }
 
     @Test
@@ -385,7 +636,6 @@ class AiAssistControllerTest {
                 null,
                 null,
                 "Cursor",
-                null,
                 request());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
         });
@@ -394,9 +644,11 @@ class AiAssistControllerTest {
         Map<String, Object> scaffoldBody = objectMapper.convertValue(body.get("scaffold"), new TypeReference<>() {
         });
 
-        assertTrue(endpointsBody.get("registerPageUrl").toString().contains("aiCodingKey=rac_demo"));
-        assertTrue(scaffoldBody.get("scaffoldCommand").toString().contains("aiCodingKey=rac_demo"));
-        assertTrue(scaffoldBody.get("verifyCommand").toString().contains("aiCodingKey=rac_demo"));
+        assertFalse(endpointsBody.get("registerPageUrl").toString().contains("aiCodingKey="));
+        assertTrue(scaffoldBody.get("scaffoldCommand").toString()
+                .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
+        assertTrue(scaffoldBody.get("verifyCommand").toString()
+                .contains("-AiCodingKey $env:REACHAI_AI_CODING_KEY"));
     }
 
     @Test
@@ -424,19 +676,20 @@ class AiAssistControllerTest {
 
     @Test
     void accessSessionReportRejectsInvalidAiCodingAccessKey() {
-        when(scanProjectService.matchesAiCodingAccessKey(1L, "wrong-key")).thenReturn(false);
+        rejectAiCodingKey("wrong-key");
 
-        ResponseEntity<?> response = controller.reportAccessSessionStep(
-                1L,
-                "rai_demo",
-                "gateway-whitelist",
+        ResponseEntity<?> response = withAiCodingKey(
                 "wrong-key",
-                new AiAccessSessionService.StepReportRequest(
-                        "PASS",
-                        "done",
-                        List.of("gateway/SecurityConfiguration.java"),
-                        Map.of("command", "mvn test"),
-                        "cursor"));
+                () -> controller.reportAccessSessionStep(
+                        1L,
+                        "rai_demo",
+                        "gateway-whitelist",
+                        new AiAccessSessionService.StepReportRequest(
+                                "PASS",
+                                "done",
+                                List.of("gateway/SecurityConfiguration.java"),
+                                Map.of("command", "mvn test"),
+                                "cursor")));
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -457,17 +710,18 @@ class AiAssistControllerTest {
                         "cursor")))
                 .thenReturn(view);
 
-        ResponseEntity<?> response = controller.reportAccessSessionStep(
-                1L,
-                "rai_demo",
-                "gateway-whitelist",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                new AiAccessSessionService.StepReportRequest(
-                        "PASS",
-                        "done",
-                        List.of("gateway/SecurityConfiguration.java"),
-                        Map.of("command", "mvn test"),
-                        "cursor"));
+                () -> controller.reportAccessSessionStep(
+                        1L,
+                        "rai_demo",
+                        "gateway-whitelist",
+                        new AiAccessSessionService.StepReportRequest(
+                                "PASS",
+                                "done",
+                                List.of("gateway/SecurityConfiguration.java"),
+                                Map.of("command", "mvn test"),
+                                "cursor")));
 
         assertEquals(200, response.getStatusCode().value());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
@@ -482,6 +736,7 @@ class AiAssistControllerTest {
                         1L,
                         "demo-service",
                         SdkAccessCheckService.CheckStatus.PASS,
+                        List.of(),
                         List.of()),
                 accessSession());
         SdkAccessCheckService.SdkAccessCheckRequest request = new SdkAccessCheckService.SdkAccessCheckRequest(
@@ -501,6 +756,25 @@ class AiAssistControllerTest {
     }
 
     @Test
+    void accessSessionChecksRejectsInvalidRequestContextAiCodingAccessKey() {
+        rejectAiCodingKey("wrong-key");
+        AiCodingKeyContext.set("wrong-key");
+        SdkAccessCheckService.SdkAccessCheckRequest request = new SdkAccessCheckService.SdkAccessCheckRequest(
+                10L,
+                Map.of(),
+                "http://localhost:8080",
+                "/api/reachai/embed-token");
+
+        try {
+            ResponseEntity<?> response = controller.runAccessSessionChecks(1L, "rai_demo", request);
+
+            assertEquals(403, response.getStatusCode().value());
+        } finally {
+            AiCodingKeyContext.clear();
+        }
+    }
+
+    @Test
     void pageAssistantStepReportAcceptsValidAiCodingAccessKey() {
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(accessSessionService.reportStep(
@@ -515,39 +789,41 @@ class AiAssistControllerTest {
                         "cursor")))
                 .thenReturn(pageAssistantSession());
 
-        ResponseEntity<?> response = controller.reportPageAssistantSessionStep(
-                1L,
-                "rai_page",
-                "frontend-handler",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                new AiAccessSessionService.StepReportRequest(
-                        "PASS",
-                        "handlers registered",
-                        List.of("src/pages/team-archive/index.vue"),
-                        Map.of("actions", List.of("getPageState", "search")),
-                        "cursor"));
+                () -> controller.reportPageAssistantSessionStep(
+                        1L,
+                        "rai_page",
+                        "frontend-handler",
+                        new AiAccessSessionService.StepReportRequest(
+                                "PASS",
+                                "handlers registered",
+                                List.of("src/pages/team-archive/index.vue"),
+                                Map.of("actions", List.of("getPageState", "search")),
+                                "cursor")));
 
         assertEquals(200, response.getStatusCode().value());
     }
 
     @Test
     void pageAssistantWorkflowAiCodingResultRejectsInvalidAiCodingAccessKey() {
-        when(scanProjectService.matchesAiCodingAccessKey(1L, "wrong-key")).thenReturn(false);
+        rejectAiCodingKey("wrong-key");
 
-        ResponseEntity<?> response = controller.reportPageAssistantWorkflowAiCodingResult(
-                1L,
-                "rai_page",
+        ResponseEntity<?> response = withAiCodingKey(
                 "wrong-key",
-                new AiAccessSessionService.WorkflowAiCodingResultRequest(
-                        "wf-123",
-                        "demo-page-assistant",
-                        "Demo Page Assistant",
-                        "PASS",
-                        "done",
-                        Map.of("overallStatus", "PASS"),
-                        Map.of("overallStatus", "PASS"),
-                        Map.of(),
-                        "/workflows/wf-123/studio"));
+                () -> controller.reportPageAssistantWorkflowAiCodingResult(
+                        1L,
+                        "rai_page",
+                        new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                                "wf-123",
+                                "demo-page-assistant",
+                                "Demo Page Assistant",
+                                "PASS",
+                                "done",
+                                Map.of("overallStatus", "PASS"),
+                                Map.of("overallStatus", "PASS"),
+                                Map.of(),
+                                "/workflows/wf-123/studio")));
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -570,20 +846,21 @@ class AiAssistControllerTest {
                         "/workflows/wf-123/studio")))
                 .thenReturn(pageAssistantSession());
 
-        ResponseEntity<?> response = controller.reportPageAssistantWorkflowAiCodingResult(
-                1L,
-                "rai_page",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                new AiAccessSessionService.WorkflowAiCodingResultRequest(
-                        "wf-123",
-                        "demo-page-assistant",
-                        "Demo Page Assistant",
-                        "PASS",
-                        "done",
-                        Map.of("overallStatus", "PASS"),
-                        Map.of("overallStatus", "PASS"),
-                        Map.of(),
-                        "/workflows/wf-123/studio"));
+                () -> controller.reportPageAssistantWorkflowAiCodingResult(
+                        1L,
+                        "rai_page",
+                        new AiAccessSessionService.WorkflowAiCodingResultRequest(
+                                "wf-123",
+                                "demo-page-assistant",
+                                "Demo Page Assistant",
+                                "PASS",
+                                "done",
+                                Map.of("overallStatus", "PASS"),
+                                Map.of("overallStatus", "PASS"),
+                                Map.of(),
+                                "/workflows/wf-123/studio")));
 
         assertEquals(200, response.getStatusCode().value());
         verify(accessSessionService).reportWorkflowAiCodingResult(
@@ -623,11 +900,12 @@ class AiAssistControllerTest {
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(accessSessionService.runPageAssistantChecks(1L, "rai_page", request)).thenReturn(runResponse);
 
-        ResponseEntity<?> response = controller.runPageAssistantSessionChecks(
-                1L,
-                "rai_page",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                request);
+                () -> controller.runPageAssistantSessionChecks(
+                        1L,
+                        "rai_page",
+                        request));
 
         assertEquals(200, response.getStatusCode().value());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
@@ -668,7 +946,9 @@ class AiAssistControllerTest {
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(accessSessionService.listPageAssistantSessions(1L, null)).thenReturn(List.of(summary));
 
-        ResponseEntity<?> response = controller.listPageAssistantSessions(1L, null, "rac_valid");
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> controller.listPageAssistantSessions(1L, null));
 
         assertEquals(200, response.getStatusCode().value());
         @SuppressWarnings("unchecked")
@@ -688,11 +968,12 @@ class AiAssistControllerTest {
         when(scanProjectService.matchesAiCodingAccessKey(1L, "rac_valid")).thenReturn(true);
         when(accessSessionService.bindPageAssistantTarget(1L, "rai_page", request)).thenReturn(pageAssistantSession());
 
-        ResponseEntity<?> response = controller.bindPageAssistantSessionTarget(
-                1L,
-                "rai_page",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                request);
+                () -> controller.bindPageAssistantSessionTarget(
+                        1L,
+                        "rai_page",
+                        request));
 
         assertEquals(200, response.getStatusCode().value());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
@@ -741,11 +1022,12 @@ class AiAssistControllerTest {
                         "demo-service-teamarchive_list-page-assistant",
                         42L));
 
-        ResponseEntity<?> response = controller.syncPageAssistantCatalog(
-                1L,
-                "rai_page",
+        ResponseEntity<?> response = withAiCodingKey(
                 "rac_valid",
-                request);
+                () -> controller.syncPageAssistantCatalog(
+                        1L,
+                        "rai_page",
+                        request));
 
         assertEquals(200, response.getStatusCode().value());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
@@ -840,7 +1122,9 @@ class AiAssistControllerTest {
                         "demo-service-teamarchive_list-page-assistant",
                         42L));
 
-        ResponseEntity<?> response = controller.registerPageAssistantPage(1L, "rac_valid", request);
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> controller.registerPageAssistantPage(1L, request));
 
         assertEquals(200, response.getStatusCode().value());
         Map<String, Object> body = objectMapper.convertValue(response.getBody(), new TypeReference<>() {
@@ -858,25 +1142,26 @@ class AiAssistControllerTest {
 
     @Test
     void pageAssistantRegisterPageRejectsInvalidAiCodingAccessKey() {
-        when(scanProjectService.matchesAiCodingAccessKey(1L, "wrong-key")).thenReturn(false);
+        rejectAiCodingKey("wrong-key");
 
-        ResponseEntity<?> response = controller.registerPageAssistantPage(
-                1L,
+        ResponseEntity<?> response = withAiCodingKey(
                 "wrong-key",
-                new AiAccessSessionService.PageAssistantPageRegisterRequest(
-                        null,
-                        "Cursor",
-                        "teamArchive.list",
-                        "班组档案",
-                        "/team-build/depart-management",
-                        "angular",
-                        "12",
-                        "__REACHAI_PAGE_BRIDGE__",
-                        true,
-                        List.of(),
-                        List.of(),
-                        Map.of(),
-                        "done"));
+                () -> controller.registerPageAssistantPage(
+                        1L,
+                        new AiAccessSessionService.PageAssistantPageRegisterRequest(
+                                null,
+                                "Cursor",
+                                "teamArchive.list",
+                                "班组档案",
+                                "/team-build/depart-management",
+                                "angular",
+                                "12",
+                                "__REACHAI_PAGE_BRIDGE__",
+                                true,
+                                List.of(),
+                                List.of(),
+                                Map.of(),
+                                "done")));
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -889,6 +1174,7 @@ class AiAssistControllerTest {
         assertTrue(response.getBody().length > 0);
         boolean hasSkill = false;
         boolean hasGatewayAndFrontendReference = false;
+        boolean hasPlatformApiHeaderAuthReference = false;
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(response.getBody()))) {
             for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
                 if ("reachai-onboarding/SKILL.md".equals(entry.getName())) {
@@ -920,10 +1206,24 @@ class AiAssistControllerTest {
                             && content.contains("/npm/**")
                             && content.contains("access-sessions");
                 }
+                if ("reachai-onboarding/references/platform-apis.md".equals(entry.getName())) {
+                    String content = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+                    hasPlatformApiHeaderAuthReference = content.contains("X-ReachAI-AiCoding-Key: {key}")
+                            && content.contains("GET /api/ai-coding/projects/{projectId}/onboarding-manifest")
+                            && content.contains("POST /api/ai-coding/projects/{projectId}/agents/provision")
+                            && content.contains("GET /api/ai-coding/projects/{projectId}/access-sessions/latest")
+                            && content.contains("POST /api/ai-coding/projects/{projectId}/access-sessions/{sessionId}/steps/{stepKey}/report")
+                            && content.contains("Do not put `aiCodingKey` in access-session URLs");
+                    assertFalse(content.contains("onboarding-manifest?aiCodingKey"));
+                    assertFalse(content.contains("agents/provision?aiCodingKey"));
+                    assertFalse(content.contains("access-sessions/latest?aiCodingKey"));
+                    assertFalse(content.contains("steps/{stepKey}/report?aiCodingKey"));
+                }
             }
         }
         assertTrue(hasSkill);
         assertTrue(hasGatewayAndFrontendReference);
+        assertTrue(hasPlatformApiHeaderAuthReference);
     }
 
     @Test
@@ -967,13 +1267,14 @@ class AiAssistControllerTest {
                     hasSkill = true;
                     String content = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
                     assertTrue(content.contains("Workflow AI Coding"));
-                    assertTrue(content.contains("manual publish"));
+                    assertTrue(content.contains("/api/workflows/{workflowId}/ai-coding/publish"));
                 }
                 if ("workflow-ai-coding/references/workflow-apis.md".equals(entry.getName())) {
                     hasWorkflowApis = true;
                     String content = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
                     assertTrue(content.contains("/api/workflows/ai-coding/workflows"));
                     assertTrue(content.contains("/ai-coding/versions"));
+                    assertTrue(content.contains("/ai-coding/publish"));
                 }
             }
         }
@@ -990,6 +1291,8 @@ class AiAssistControllerTest {
         String content = new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(content.contains("function Invoke-Verify"));
         assertTrue(content.contains("browserRuntime"));
+        assertTrue(content.contains("[string] $AiCodingKey = $env:REACHAI_AI_CODING_KEY"));
+        assertTrue(content.contains("$headers[\"X-ReachAI-AiCoding-Key\"] = $AiCodingKey.Trim()"));
     }
 
     @Test
@@ -1071,7 +1374,9 @@ class AiAssistControllerTest {
         assertEquals("src/app/list.component.ts", request.files().get(0).path());
         assertEquals("unknown", request.files().get(0).role());
 
-        ResponseEntity<?> response = controller.registerPageAssistantPage(1L, "rac_valid", request);
+        ResponseEntity<?> response = withAiCodingKey(
+                "rac_valid",
+                () -> controller.registerPageAssistantPage(1L, request));
 
         assertEquals(200, response.getStatusCode().value());
         verify(accessSessionService).applyPageAssistantPageRegistration(
@@ -1100,6 +1405,15 @@ class AiAssistControllerTest {
         request.setServerName("localhost");
         request.setServerPort(18603);
         return request;
+    }
+
+    private ResponseEntity<?> withAiCodingKey(String key, Supplier<ResponseEntity<?>> action) {
+        AiCodingKeyContext.set(key);
+        try {
+            return action.get();
+        } finally {
+            AiCodingKeyContext.clear();
+        }
     }
 
     private ScanProjectEntity project() {
@@ -1147,6 +1461,11 @@ class AiAssistControllerTest {
                         null,
                         null,
                         null)));
+    }
+
+    private void rejectAiCodingKey(String key) {
+        when(aiCodingAccessGuard.requireProjectAccess(1L, key))
+                .thenThrow(new AiCodingAccessDeniedException("invalid AI Coding access key for project"));
     }
 
     private AiAccessSessionService.AccessSessionView pageAssistantSession() {

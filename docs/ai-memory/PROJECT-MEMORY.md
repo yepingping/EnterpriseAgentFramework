@@ -13,7 +13,7 @@
 ## Main Flow
 
 1. 业务系统引入 `reachai-spring-boot2-starter` 和 `reachai-capability-sdk`。
-2. 业务方法或 Controller 使用 `@ReachCapability`、`@ReachParam`、`@ReachOutput` 补充 AI 可理解的语义。
+2. 业务方法或 Controller 使用 `@ReachCapability` 声明能力，参数或请求 DTO 字段使用 `@ReachParam` 补充语义，返回 DTO 字段使用 `@ReachOutput` 声明可引用输出。
 3. Starter 在启动时同步项目、实例、能力快照和 SDK 图。
 4. 平台形成字段级 diff、评审 apply/ignore，并沉淀正式能力资产。
 5. Workflow Studio 基于能力资产编排 Workflow `GraphSpec`（`ai_workflow`）。
@@ -125,3 +125,27 @@ AI 局部编辑工作流：
 管理端已经有暗色/亮色主题基础，后续主题改动应复用 CSS 变量和现有主题文件。不要在页面里散落硬编码暗色、浅色或 Element Plus 覆盖。
 
 项目范围选择器、注册中心、扫描项目、Workflow Studio 侧边栏折叠等行为和 `MainLayout.vue`、`ProjectSelector.vue`、路由名称、项目 store 相关。改导航和布局前先查这些共享位置。
+
+## Context Governance Kernel v1（Phase-1 已完成）
+
+**ReachAI Context Governance Kernel v1** 第一阶段已收口（2026-06-23）。企业 Agent 上下文治理底座，与 `ConversationMemoryService` **独立**、不绑定单一 Runtime 框架。
+
+- 权威文档：`docs/Context-Governance-Kernel.md`
+- AI 精简基线：`docs/ai-memory/CONTEXT-GOVERNANCE-BASELINE.md`
+- 代码：`ai-agent-service/.../context/`（含 `runtime/`、`memory/`）
+- 管理页：`ai-admin-front/src/views/context/ContextGovernance.vue`（`/context/governance`，仅 `PROJECT_DEV`）
+- SQL：6 张 context 表（见 `sql/init.sql`）
+
+**当前可用能力：** 结构化存储与 CRUD；lane 隔离；access policy；检索+HYBRID token/CJK fallback+组包+`scoreBreakdown`；Runtime CENTRAL query-aware 只读注入；`runtimeContextHits` 命中解释 metadata；Candidate 确认写回与相关 ACTIVE 记忆审核 quality signal；embed 自确认 API；PROJECT_DEV 治理页；AI Coding Gateway discovery + 单条/批量 Context Candidate 提交 + `contextCandidateStatusUrlTemplate` 回查模板 + `contextCandidateAuditUrlTemplate` 审计深链模板；SDK onboarding manifest no-echo，SDK quick-access prompt / reachai-onboarding skill、Page Assistant 与 Workflow AI Coding 外部工具体验 header-only，不在 manifest/prompt URL 中回显或拼接 raw key；候选按 `submissionId/traceId` 跳转审计；lifecycle dryRun/run；ops summary；audit+evidence。
+
+**禁止误解的边界：**
+
+- 不是 ConversationMemory 的替代或迁移完成品。
+- `PROJECT_DEV` 不进 Runtime prompt；`RUNTIME_USER` 管理端仅开放映射内 candidate 代审，不开放已采纳 PRIVATE item 管理。
+- PENDING candidate 不进 prompt；Phase-2.1/2.2/2.3/2.4/2.5/2.6 已有 LLM 自动抽取 MVP、候选质量门、显式 HYBRID token/CJK fallback、Runtime 当前消息 query-aware 组包、管理端预览模式切换、response 命中解释 metadata 和 candidate 审核 quality signal；只生成 `RUNTIME_USER` PENDING candidate，并抑制有效 PENDING 精确重复与已确认 ACTIVE 精确重复；相关 ACTIVE 记忆只写 compact metadata 提示，不自动合并；仍无向量/FULLTEXT。
+- Platform 不能无映射替 embed 用户审核私有记忆；代审必须同时满足 RBAC 与 ACTIVE `context_runtime_user_mapping`。
+- ops summary 默认 PROJECT_DEV；RUNTIME_USER 须 `includeRuntimeUser=true` 且 aggregate-only。
+- `ContextProjectIdentity` 统一 projectCode/projectId；仅 code vs 仅 id 不匹配。
+- HYBRID 注入 deferred；跨用户代审只允许走 RBAC + ACTIVE runtime 用户映射。
+
+历史分阶段边界（Phase-2～7.1）详见 `CONTEXT-GOVERNANCE-BASELINE.md` 与 `docs/Context-Governance-Kernel.md` 实施阶段索引。

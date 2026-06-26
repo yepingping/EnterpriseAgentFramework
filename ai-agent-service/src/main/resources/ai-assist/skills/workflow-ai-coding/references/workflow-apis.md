@@ -12,8 +12,8 @@ Collection create path:
 
 All Workflow AI Coding endpoints require the project **AI Coding 接入秘钥** (`aiCodingKey`).
 
-- Query param: `?aiCodingKey=rac_...`
-- Header: `X-ReachAI-AiCoding-Key: rac_...`
+- Required header: `X-ReachAI-AiCoding-Key: rac_...`
+- Do not put the key in generated URLs, scripts, logs, or browser runtime code.
 
 Obtain/rotate the key in ReachAI admin: **项目详情 → AI Coding 接入秘钥**.
 
@@ -43,7 +43,7 @@ If requests are sent from Windows, the POST body must be UTF-8 bytes. Terminal d
 4. Prefer `curl.exe --data-binary @file` with an explicit charset:
 
    ```powershell
-   curl.exe -X POST $url -H "Content-Type: application/json; charset=utf-8" --data-binary "@request.json"
+   curl.exe -X POST $url -H "X-ReachAI-AiCoding-Key: $AI_CODING_KEY" -H "Content-Type: application/json; charset=utf-8" --data-binary "@request.json"
    ```
 
 5. If using `Invoke-RestMethod`, convert JSON to UTF-8 bytes:
@@ -66,6 +66,7 @@ Do not inline JSON containing Chinese text directly in the command line.
 | `POST` | `/api/workflows/{workflowId}/ai-coding/patch` | Preview or save graph patch |
 | `POST` | `/api/workflows/{workflowId}/ai-coding/run` | Debug run draft workflow |
 | `GET` | `/api/workflows/{workflowId}/ai-coding/versions` | Version history + release readiness |
+| `POST` | `/api/workflows/{workflowId}/ai-coding/publish` | Publish validated draft as active workflow version |
 | `GET` | `/api/workflows/{workflowId}/ai-coding/runs` | Recent debug runs |
 | `GET` | `/api/workflows/{workflowId}/ai-coding/runs/{traceId}` | Trace detail |
 | `GET` | `/api/workflows/{workflowId}/ai-coding/page-assistant/catalog` | PAGE_ASSISTANT catalog |
@@ -133,12 +134,27 @@ Runtime safety keys:
 
 ## Publish Boundary
 
-Workflow AI Coding does **not** expose publish.
+Workflow AI Coding exposes a project-key protected publish endpoint:
 
-Use:
+`POST /api/workflows/{workflowId}/ai-coding/publish`
 
-- `GET .../versions` for release validation and readiness
-- manual publish in admin UI when human operator approves
+Request body:
+
+```json
+{
+  "version": "v1.0.0",
+  "rolloutPercent": 100,
+  "note": "initial AI Coding publish",
+  "publishedBy": "Codex"
+}
+```
+
+Rules:
+
+- Call `GET .../versions` first and publish only when `releaseValidation.valid=true`.
+- Publish still runs server-side release validation and fails if the draft is not releasable.
+- Use `POST .../publish`, not legacy admin publish endpoints.
+- If `v1.0.0` already exists, read version history and choose the next semantic version.
 
 ## Error Semantics
 

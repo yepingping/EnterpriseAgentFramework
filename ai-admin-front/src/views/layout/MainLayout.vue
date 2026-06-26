@@ -264,6 +264,11 @@
                 <span class="menu-cn">运行中心</span>
               </span>
             </el-menu-item>
+            <el-menu-item index="/context/governance">
+              <span class="menu-label leaf">
+                <span class="menu-cn">上下文治理</span>
+              </span>
+            </el-menu-item>
             <el-menu-item index="/domain/board">
               <span class="menu-label leaf">
                 <span class="menu-cn">归属画布</span>
@@ -408,6 +413,7 @@ const defaultOpenMenuGroups = computed(() => {
   if (
     path.startsWith('/domain')
     || path.startsWith('/runops')
+    || path.startsWith('/context')
   ) {
     open.push('/domain-group')
   }
@@ -452,6 +458,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/registry/projects')) return '/registry/projects'
   if (path.startsWith('/scan-project')) return '/registry/api-assets'
   if (path.startsWith('/runops')) return '/runops'
+  if (path.startsWith('/context/governance')) return '/context/governance'
   if (path.startsWith('/domain/board')) return '/domain/board'
   if (path.startsWith('/domain/classifier-test')) return '/domain/classifier-test'
   if (path.startsWith('/domain')) return '/domain'

@@ -138,6 +138,17 @@ Helper verify emits `verification.browserRuntime`:
 }
 ```
 
+When runtime verification cannot PASS, helper verify also emits a structured `failureCode` so agents do not have to infer the blocker from raw stderr:
+
+| `failureCode` | Meaning |
+| --- | --- |
+| `PLAYWRIGHT_MISSING` | Node is available but the `playwright` package is not installed. |
+| `JSON_PARSE_ERROR` | The Node probe printed non-JSON output; inspect bounded `rawOutput`. |
+| `LOGIN_REQUIRED` | The target page likely needs browser login, cookie, or `-StorageStatePath`. |
+| `FRONTEND_UNREACHABLE` | The dev server or route could not be reached. |
+| `BRIDGE_NOT_FOUND` | The page loaded, but the ReachAI bridge global was not present. |
+| `ACTIONS_NOT_REGISTERED` | The bridge exists, but no actions are registered for the target `pageKey`. |
+
 Probe rules:
 
 - Default readonly invoke: `getPageState`, `readTable`
@@ -148,6 +159,10 @@ Probe rules:
 Platform merge:
 
 - AI/Cursor step evidence is preserved; platform checks append `platformCheck` instead of overwriting `reportedBy/message/evidence`
+
+## Embed Session Refresh
+
+`POST /api/embed/chat/sessions` snapshots the browser-provided `bridgeActions` for the new embed session. If a business frontend registers or renames Page Actions after a session already exists, chat runtime can still say the action is not registered in the current session. Refresh the page or recreate the chat session before testing the new action catalog. Catalog registration in ReachAI and bridge registration in the browser both have to line up for runtime PASS.
 
 ## Recommended Actions
 

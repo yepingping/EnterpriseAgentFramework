@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 public final class WorkflowAiCodingPaths {
 
     private static final Pattern REQUEST_PATH = Pattern.compile(
-            "^/api/workflows/(?:[^/]+/ai-coding(?:/.*)?|ai-coding/workflows)$");
+            "^/api/workflows/(?:ai-coding/workflows|[^/]+/ai-coding/(?:context|patch|validate|run|versions|publish|runs(?:/[^/]+)?|page-assistant/(?:catalog|validate|smoke-test)))$");
 
     private WorkflowAiCodingPaths() {
     }

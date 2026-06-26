@@ -1,5 +1,6 @@
 package com.enterprise.ai.agent.workflow;
 
+import com.enterprise.ai.agent.context.runtime.RuntimeContextInjectionResult;
 import lombok.Builder;
 import lombok.Data;
 
@@ -26,6 +27,8 @@ public class WorkflowRuntimeRequest {
     private Map<String, Object> pageContext;
 
     private Map<String, Object> metadata;
+
+    private RuntimeContextInjectionResult runtimeContext;
 
     private boolean allowDraftFallback;
 }
